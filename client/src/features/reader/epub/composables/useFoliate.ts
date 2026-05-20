@@ -40,6 +40,7 @@ export function useFoliate(
   onRelocate?: (detail: RelocateDetail) => void,
   onApplyStyles?: (renderer: FoliateRenderer) => void,
   onMiddleTap?: () => void,
+  onChapterLoad?: (doc: Document, viewEl: HTMLElement) => void,
 ) {
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -113,7 +114,10 @@ export function useFoliate(
           if (onApplyStyles) onApplyStyles(view.renderer)
         }, 0)
         annotations.reAddAll(view)
-        if (detail?.doc) input.attachIframeClicks(detail.doc)
+        if (detail?.doc) {
+          input.attachIframeClicks(detail.doc)
+          onChapterLoad?.(detail.doc as Document, view as HTMLElement)
+        }
       })
 
       view.addEventListener('draw-annotation', (e: Event) => {

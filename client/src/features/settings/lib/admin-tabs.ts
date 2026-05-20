@@ -1,4 +1,5 @@
 export const ADMIN_TABS = ['users', 'magic-links', 'oidc'] as const
+export const ADMIN_TABS = ['users', 'magic-links', 'oidc', 'tts'] as const
 
 export type AdminTab = (typeof ADMIN_TABS)[number]
 
@@ -26,6 +27,12 @@ export const ADMIN_TAB_INFO: Record<AdminTab, AdminTabInfo> = {
     navLabel: 'OIDC / SSO',
     titleLabel: 'OIDC / SSO',
     subtitle: 'Manage OpenID Connect providers for single sign-on.',
+    permission: 'manage_app_settings',
+  },
+  tts: {
+    navLabel: 'Text-to-Speech',
+    titleLabel: 'Text-to-Speech',
+    subtitle: 'Configure TTS providers and manage voice availability.',
     permission: 'manage_app_settings',
   },
 }

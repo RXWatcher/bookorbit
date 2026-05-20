@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class SaveReadingSessionDto {
   @IsString()
@@ -28,4 +28,9 @@ export class SaveReadingSessionDto {
   @Min(0)
   @Max(100)
   endProgress?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['read', 'tts'])
+  sessionType?: 'read' | 'tts';
 }

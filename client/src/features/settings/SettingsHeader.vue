@@ -29,6 +29,7 @@ const sections = computed<Section[]>(() => {
 
   result.push({ label: 'Display', routeName: 'settings-appearance' })
   result.push({ label: 'Reader', routeName: 'settings-reader-general' })
+  result.push({ label: 'Text-to-Speech', routeName: 'settings-tts' })
 
   if (su || perms.includes('manage_metadata_config')) {
     result.push({ label: 'Metadata', routeName: 'settings-admin-metadata' })

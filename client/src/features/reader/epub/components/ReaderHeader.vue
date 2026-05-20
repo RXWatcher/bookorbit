@@ -9,6 +9,7 @@ import {
   CircleHelp,
   Clock3,
   FileText,
+  Headphones,
   Maximize,
   Minimize,
   Search,
@@ -23,6 +24,7 @@ const props = defineProps<{
   settingsOpen: boolean
   footerMode: 0 | 1 | 2
   peekMode?: boolean
+  isTtsActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +37,7 @@ const emit = defineEmits<{
   toggleHelp: []
   cycleFooterMode: []
   startReading: []
+  startTts: []
 }>()
 
 const isFullscreen = ref(false)
@@ -116,6 +119,15 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
           Start reading
         </button>
       </div>
+
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button class="viewer-btn" :class="props.isTtsActive ? '!text-primary' : ''" aria-label="Listen with TTS" @click="emit('startTts')">
+            <Headphones :size="18" :class="{ 'animate-pulse': props.isTtsActive }" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{{ props.isTtsActive ? 'TTS playing' : 'Listen' }}</TooltipContent>
+      </Tooltip>
 
       <Tooltip>
         <TooltipTrigger as-child>

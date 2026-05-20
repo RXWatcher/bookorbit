@@ -5,6 +5,7 @@ import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import AppSidebar from '@/components/AppSidebar.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import BookMetadataFetchWidget from '@/features/book-metadata-fetch/components/BookMetadataFetchWidget.vue'
+import TtsMiniPlayer from '@/features/tts/components/TtsMiniPlayer.vue'
 import { useThemeStore, BACKGROUND_OPTIONS } from '@/stores/theme'
 
 const route = useRoute()
@@ -48,6 +49,7 @@ const viewKey = computed(() => {
       </div>
     </SidebarInset>
     <BookMetadataFetchWidget />
+    <TtsMiniPlayer />
   </SidebarProvider>
 </template>
 

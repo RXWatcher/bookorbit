@@ -55,6 +55,7 @@ export class ReadingSessionService {
         dto.progressDelta ?? null,
         dto.endProgress ?? null,
         source,
+        dto.sessionType ?? 'read',
       );
 
       this.logger.log(

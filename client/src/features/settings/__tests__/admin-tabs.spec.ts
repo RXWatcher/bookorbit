@@ -3,12 +3,12 @@ import { ADMIN_TABS, ADMIN_TAB_INFO, normalizeAdminTab } from '../lib/admin-tabs
 
 describe('admin-tabs', () => {
   describe('ADMIN_TABS', () => {
-    it('contains exactly users, magic-links, and oidc', () => {
-      expect(ADMIN_TABS).toEqual(['users', 'magic-links', 'oidc'])
+    it('contains users, magic-links, oidc, and tts', () => {
+      expect(ADMIN_TABS).toEqual(['users', 'magic-links', 'oidc', 'tts'])
     })
 
-    it('has length 3', () => {
-      expect(ADMIN_TABS.length).toBe(3)
+    it('has length 4', () => {
+      expect(ADMIN_TABS.length).toBe(4)
     })
   })
 
@@ -58,6 +58,12 @@ describe('admin-tabs', () => {
       expect(ADMIN_TAB_INFO.oidc.navLabel).toBe('OIDC / SSO')
       expect(ADMIN_TAB_INFO.oidc.titleLabel).toBe('OIDC / SSO')
     })
+
+    it('tts entry has correct labels', () => {
+      expect(ADMIN_TAB_INFO.tts.navLabel).toBe('Text-to-Speech')
+      expect(ADMIN_TAB_INFO.tts.titleLabel).toBe('Text-to-Speech')
+      expect(ADMIN_TAB_INFO.tts.permission).toBe('manage_app_settings')
+    })
   })
 
   describe('normalizeAdminTab', () => {
@@ -91,6 +97,10 @@ describe('admin-tabs', () => {
 
     it('returns magic-links when given "magic-links"', () => {
       expect(normalizeAdminTab('magic-links')).toBe('magic-links')
+    })
+
+    it('returns tts when given "tts"', () => {
+      expect(normalizeAdminTab('tts')).toBe('tts')
     })
 
     it('is case-sensitive (Users is not valid)', () => {

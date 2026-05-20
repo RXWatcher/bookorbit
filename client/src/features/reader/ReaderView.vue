@@ -16,6 +16,10 @@ import { useToc } from './epub/composables/useToc'
 import { useSearch, type FoliateView } from './epub/composables/useSearch'
 import { useReaderSelection } from './epub/composables/useReaderSelection'
 import { useReaderKeyboardShortcuts } from './epub/composables/useReaderKeyboardShortcuts'
+import { useFoliateTts } from '@/features/tts/composables/useFoliateTts'
+import { useTtsPlayer } from '@/features/tts/composables/useTtsPlayer'
+import { useTtsPreferences } from '@/features/tts/composables/useTtsPreferences'
+import { getVoices } from '@/features/tts/api/tts.api'
 import ReaderHeader from './epub/components/ReaderHeader.vue'
 import ReaderFooter from './epub/components/ReaderFooter.vue'
 import ReaderSidebar from './epub/components/ReaderSidebar.vue'
@@ -32,8 +36,9 @@ import CbzReaderView from './cbz/CbzReaderView.vue'
 import AudiobookReaderView from './audiobook/AudiobookReaderView.vue'
 import type { ReaderState } from './epub/composables/useReaderState'
 import type { FoliateLocationContext, FoliateRenderer } from './epub/composables/useFoliate'
-import type { EpubReaderSettings } from '@bookorbit/types'
+import type { BookDetail, EpubReaderSettings } from '@bookorbit/types'
 import { getFormatGroup } from '@bookorbit/types'
+import { api } from '@/lib/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -201,6 +206,50 @@ function handleTranslate() {
   showTranslation.value = true
 }
 
+const bookMeta = ref<BookDetail | null>(null)
+
+const { setFoliateSource, clearFoliateSource, getServerTextBlocks } = useFoliateTts()
+const { startPlayback, isActive, currentBook } = useTtsPlayer()
+const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
+
+const isTtsActive = computed(() => isActive.value && currentBook.value?.bookFileId === fileId)
+
+function onChapterLoadHandler(doc: Document, viewEl: HTMLElement) {
+  setFoliateSource(doc, viewEl, () => {})
+}
+
+async function handleStartTts() {
+  if (!bookMeta.value) {
+    toast.error('Book metadata not loaded yet')
+    return
+  }
+  try {
+    const effectivePrefs = await loadBookPreferences(bookId)
+    const providerId = effectivePrefs.providerId ?? defaultProviderId.value ?? 'edge'
+    let voiceId = effectivePrefs.voiceId ?? defaultVoiceId.value ?? ''
+    if (!voiceId.trim()) {
+      const voices = await getVoices(providerId)
+      voiceId = voices[0]?.id ?? ''
+    }
+    if (!voiceId.trim()) {
+      toast.error('No TTS voices are available for the selected provider')
+      return
+    }
+    const speed = effectivePrefs.speed ?? defaultSpeed.value ?? 1.0
+    const book = {
+      bookId,
+      bookFileId: fileId,
+      title: bookMeta.value.title ?? chapterTitle.value ?? 'Book',
+      author: bookMeta.value.authors?.[0]?.name ?? null,
+      coverUrl: bookMeta.value.coverSource ? `/api/v1/books/${bookId}/cover` : null,
+      totalChapters: totalSections.value,
+    }
+    await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), sectionIndex.value)
+  } catch {
+    toast.error('Failed to start TTS playback')
+  }
+}
+
 function onRelocateHandler(detail: RelocateDetail) {
   progress.onRelocate(detail)
   onActivity()
@@ -239,7 +288,7 @@ const {
   setTextSelectedHandler,
   view: foliateView,
   bookLanguage,
-} = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler)
+} = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler, onChapterLoadHandler)
 
 setTextSelectedHandler(selection.show)
 
@@ -248,10 +297,23 @@ onMounted(async () => {
     isFullscreen.value = !!document.fullscreenElement
   }
   document.addEventListener('fullscreenchange', onFullscreenChange)
-  onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenChange))
+  onUnmounted(() => {
+    document.removeEventListener('fullscreenchange', onFullscreenChange)
+    clearFoliateSource()
+  })
 
   // Specialized readers own their own progress/settings/loading lifecycle.
   if (isAudioFormat || isPdfFormat || isComicFormat) return
+
+  void Promise.all([
+    api(`/api/v1/books/${bookId}`)
+      .then((r) => r.json() as Promise<BookDetail>)
+      .then((b) => {
+        bookMeta.value = b
+      })
+      .catch(() => {}),
+    loadUserPreferences().catch(() => {}),
+  ])
 
   await customFonts.fetchFonts()
   setFontFaceCSS(customFonts.generateFontFaceCSS())
@@ -532,6 +594,7 @@ watch(
       :settings-open="showSettings"
       :footerMode="footerMode"
       :peek-mode="isPeekMode"
+      :isTtsActive="isTtsActive"
       class="transition-all duration-300"
       :class="headerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
       @back="router.back()"
@@ -543,6 +606,7 @@ watch(
       @toggleHelp="toggleHelpModal"
       @cycleFooterMode="cycleFooterMode"
       @startReading="startTrackedReading"
+      @startTts="handleStartTts"
     >
       <template #settingsPanel>
         <ReaderSettingsPanel :state="state" :customFonts="customFonts" @update="applyUpdate" />

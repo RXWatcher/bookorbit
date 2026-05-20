@@ -5,6 +5,7 @@ import SettingsPageHeader from './SettingsPageHeader.vue'
 import UsersPage from '@/features/admin/UsersPage.vue'
 import OidcSettings from './OidcSettings.vue'
 import MagicLinksSettings from './MagicLinksSettings.vue'
+import TtsAdminSettings from '@/features/tts/TtsAdminSettings.vue'
 import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { ADMIN_TAB_INFO, ADMIN_TABS, normalizeAdminTab, type AdminTab as Tab } from './lib/admin-tabs'
 
@@ -50,6 +51,7 @@ const tabWidths: Record<Tab, string> = {
   users: 'max-w-6xl',
   'magic-links': 'max-w-6xl',
   oidc: 'max-w-3xl',
+  tts: 'max-w-4xl',
 }
 
 function selectTab(tab: Tab) {
@@ -84,5 +86,6 @@ function selectTab(tab: Tab) {
     <UsersPage v-if="activeTab === 'users'" embedded />
     <MagicLinksSettings v-else-if="activeTab === 'magic-links'" :with-header="false" />
     <OidcSettings v-else-if="activeTab === 'oidc'" embedded />
+    <TtsAdminSettings v-else-if="activeTab === 'tts'" />
   </div>
 </template>

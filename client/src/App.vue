@@ -5,6 +5,7 @@ import { useChangePasswordDialog } from '@/composables/useChangePasswordDialog'
 import { useThemeStore } from '@/stores/theme'
 import { getBookorbitThemeName, initChartThemes } from '@/lib/echarts'
 import ChangePasswordDialog from '@/features/auth/ChangePasswordDialog.vue'
+import TtsMiniPlayer from '@/features/tts/components/TtsMiniPlayer.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -28,6 +29,7 @@ provide(
       </Transition>
     </router-view>
     <ChangePasswordDialog v-if="isOpen" />
+    <TtsMiniPlayer />
     <Toaster rich-colors position="bottom-right" :visible-toasts="5" :gap="8" />
   </TooltipProvider>
 </template>

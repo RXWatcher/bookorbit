@@ -1,0 +1,55 @@
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+
+import { Permission } from '@bookorbit/types';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { AddTtsProviderDto, UpdateEdgeTtsConfigDto, UpdateTtsProviderDto } from './dto/tts-admin.dto';
+import { TtsAdminService } from './tts-admin.service';
+
+@Controller('tts/admin')
+@RequirePermission(Permission.ManageAppSettings)
+export class TtsAdminController {
+  constructor(private readonly adminService: TtsAdminService) {}
+
+  @Get('providers')
+  getAllProviders() {
+    return this.adminService.getAllProviders();
+  }
+
+  @Post('providers')
+  addProvider(@Body() dto: AddTtsProviderDto) {
+    return this.adminService.addProvider(dto);
+  }
+
+  @Put('providers/:id')
+  @HttpCode(200)
+  updateProvider(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTtsProviderDto) {
+    return this.adminService.updateProvider(id, dto);
+  }
+
+  @Delete('providers/:id')
+  @HttpCode(204)
+  async deleteProvider(@Param('id', ParseIntPipe) id: number) {
+    await this.adminService.deleteProvider(id);
+  }
+
+  @Post('providers/:id/test')
+  testProvider(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.testProvider(id);
+  }
+
+  @Get('edge/config')
+  getEdgeConfig() {
+    return this.adminService.getEdgeConfig();
+  }
+
+  @Put('edge/config')
+  @HttpCode(200)
+  updateEdgeConfig(@Body() dto: UpdateEdgeTtsConfigDto) {
+    return this.adminService.updateEdgeConfig(dto);
+  }
+
+  @Get('edge/voices')
+  getAllEdgeVoices() {
+    return this.adminService.getAllEdgeVoices();
+  }
+}

@@ -166,6 +166,12 @@ export const routes: RouteRecordRaw[] = [
             redirect: { name: 'settings-reader-general', query: { tab: 'comics' } },
           },
           {
+            path: 'tts',
+            name: 'settings-tts',
+            component: () => import('@/features/tts/TtsSettings.vue'),
+            meta: { title: 'Text-to-Speech' },
+          },
+          {
             path: 'admin',
             name: 'settings-admin',
             component: () => import('@/features/settings/AdminAllSettings.vue'),

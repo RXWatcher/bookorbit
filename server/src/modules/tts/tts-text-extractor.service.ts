@@ -1,0 +1,165 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as unzipper from 'unzipper';
+import { XMLParser } from 'fast-xml-parser';
+
+import type { TtsChapterText } from '@bookorbit/types';
+import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
+import { BookReadService } from '../book/book-read.service';
+
+const MAX_CACHE_ENTRIES = 100;
+
+interface CacheEntry {
+  text: TtsChapterText;
+  lastAccessed: number;
+}
+
+export function normalizePath(p: string): string {
+  const parts = p.split('/');
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (part === '..') {
+      resolved.pop();
+    } else if (part !== '.') {
+      resolved.push(part);
+    }
+  }
+  return resolved.join('/');
+}
+
+function htmlToBlocks(html: string): string[] {
+  const BLOCK_SPLIT_RE = /<(?:p|div|h[1-6]|li|td|th|br)[^>]*>/gi;
+  const TAG_RE = /<[^>]+>/g;
+  const ENTITY_RE = /&(?:amp|lt|gt|quot|apos|nbsp);/g;
+  const ENTITY_MAP: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&nbsp;': ' ' };
+
+  const chunks = html.replace(BLOCK_SPLIT_RE, '\n$&').split('\n');
+  return chunks
+    .map((chunk) => {
+      const text = chunk
+        .replace(TAG_RE, '')
+        .replace(ENTITY_RE, (m) => ENTITY_MAP[m] ?? m)
+        .replace(/\s+/g, ' ')
+        .trim();
+      return text;
+    })
+    .filter((t) => t.length > 2);
+}
+
+@Injectable()
+export class TtsTextExtractorService {
+  private readonly logger = new Logger(TtsTextExtractorService.name);
+  private readonly textCache = new Map<string, CacheEntry>();
+
+  constructor(private readonly bookReadService: BookReadService) {}
+
+  async extractChapterText(bookFileId: number, chapterIndex: number): Promise<TtsChapterText> {
+    const cacheKey = `${bookFileId}:${chapterIndex}`;
+    const cached = this.textCache.get(cacheKey);
+    if (cached) {
+      cached.lastAccessed = Date.now();
+      return cached.text;
+    }
+
+    const event = 'tts.text_extractor.extract';
+    const startMs = Date.now();
+    this.logger.log(`[${event}] [start] bookFileId=${bookFileId} chapterIndex=${chapterIndex} - extracting chapter text`);
+
+    try {
+      const file = await this.bookReadService.findFileById(bookFileId);
+      if (!file) throw new NotFoundException(`Book file ${bookFileId} not found`);
+      if (file.format !== 'epub') throw new NotFoundException(`File ${bookFileId} is not an EPUB`);
+
+      const result = await this.extractFromEpub(file.absolutePath, chapterIndex);
+      this.logger.log(
+        `[${event}] [end] bookFileId=${bookFileId} chapterIndex=${chapterIndex} durationMs=${Date.now() - startMs} blocks=${result.sentences.length} - chapter text extracted`,
+      );
+
+      this.addToCache(cacheKey, result);
+      return result;
+    } catch (err) {
+      const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+      const error = err instanceof Error ? sanitizeLogValue(err.message) : 'unknown';
+      this.logger.error(
+        `[${event}] [fail] bookFileId=${bookFileId} chapterIndex=${chapterIndex} durationMs=${Date.now() - startMs} errorClass=${errorClass} error="${error}" - chapter text extraction failed`,
+      );
+      throw err;
+    }
+  }
+
+  private async extractFromEpub(epubPath: string, chapterIndex: number): Promise<TtsChapterText> {
+    const zip = await unzipper.Open.file(epubPath);
+    const containerXml = zip.files.find((f) => f.path === 'META-INF/container.xml');
+    if (!containerXml) throw new NotFoundException('Invalid EPUB: missing container.xml');
+
+    const containerContent = await containerXml.buffer();
+
+    const xmlParserWithAttrs = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', textNodeName: '#text' });
+    const containerParsedWithAttrs = xmlParserWithAttrs.parse(containerContent.toString()) as {
+      container?: { rootfiles?: { rootfile?: { '@_full-path'?: string } | Array<{ '@_full-path'?: string }> } };
+    };
+
+    const rootfiles = containerParsedWithAttrs.container?.rootfiles?.rootfile;
+    const rootfileItem = Array.isArray(rootfiles) ? rootfiles[0] : rootfiles;
+    const opfPath = rootfileItem?.['@_full-path'];
+    if (!opfPath) throw new NotFoundException('Invalid EPUB: missing OPF path');
+
+    const opfFile = zip.files.find((f) => f.path === opfPath);
+    if (!opfFile) throw new NotFoundException('Invalid EPUB: OPF file not found');
+
+    const opfContent = await opfFile.buffer();
+    const opfParsed = xmlParserWithAttrs.parse(opfContent.toString()) as {
+      package?: {
+        manifest?: { item?: Array<{ '@_id'?: string; '@_href'?: string; '@_media-type'?: string }> | { '@_id'?: string; '@_href'?: string } };
+        spine?: { itemref?: Array<{ '@_idref'?: string }> | { '@_idref'?: string } };
+      };
+    };
+
+    const items = opfParsed.package?.manifest?.item;
+    const manifestItems = Array.isArray(items) ? items : items ? [items] : [];
+    const spine = opfParsed.package?.spine?.itemref;
+    const spineItems = Array.isArray(spine) ? spine : spine ? [spine] : [];
+
+    if (chapterIndex < 0 || chapterIndex >= spineItems.length) {
+      throw new NotFoundException(`Chapter ${chapterIndex} not found in spine (total: ${spineItems.length})`);
+    }
+
+    const spineItem = spineItems[chapterIndex];
+    const idref = spineItem?.['@_idref'];
+    if (!idref) throw new NotFoundException(`Spine item ${chapterIndex} has no idref`);
+
+    const manifestItem = manifestItems.find((m) => m['@_id'] === idref);
+    if (!manifestItem) throw new NotFoundException(`Manifest item ${idref} not found`);
+
+    const href = manifestItem['@_href'];
+    if (!href) throw new NotFoundException(`Manifest item ${idref} has no href`);
+
+    const opfDir = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+    const chapterPath = normalizePath(opfDir + href);
+
+    const chapterFile = zip.files.find((f) => f.path === chapterPath);
+    if (!chapterFile) throw new NotFoundException(`Chapter file not found: ${chapterPath}`);
+
+    const chapterContent = await chapterFile.buffer();
+    const blocks = htmlToBlocks(chapterContent.toString('utf8'));
+
+    return {
+      chapterIndex,
+      sentences: blocks.map((text, index) => ({ text, index })),
+    };
+  }
+
+  private addToCache(key: string, text: TtsChapterText): void {
+    if (this.textCache.size >= MAX_CACHE_ENTRIES) {
+      let oldestKey: string | undefined;
+      let oldestTime = Infinity;
+      for (const [k, v] of this.textCache.entries()) {
+        if (v.lastAccessed < oldestTime) {
+          oldestTime = v.lastAccessed;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey) this.textCache.delete(oldestKey);
+    }
+    this.textCache.set(key, { text, lastAccessed: Date.now() });
+  }
+}

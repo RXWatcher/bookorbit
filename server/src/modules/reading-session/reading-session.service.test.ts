@@ -77,6 +77,7 @@ describe('ReadingSessionService', () => {
       2.5,
       10,
       'web',
+      'read',
     );
   });
 
@@ -104,6 +105,7 @@ describe('ReadingSessionService', () => {
       null,
       null,
       'web',
+      'read',
     );
   });
 
@@ -132,6 +134,7 @@ describe('ReadingSessionService', () => {
       5,
       20,
       'kobo',
+      'read',
     );
   });
 

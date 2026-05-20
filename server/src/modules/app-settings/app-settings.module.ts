@@ -10,6 +10,6 @@ import { OidcProviderService } from './oidc-provider.service';
 @Module({
   controllers: [AppSettingsController],
   providers: [AppSettingsRepository, AppSettingsService, OidcGroupMappingAdminService, OidcProviderRepository, OidcProviderService],
-  exports: [AppSettingsService, OidcProviderService],
+  exports: [AppSettingsService, OidcProviderService, AppSettingsRepository],
 })
 export class AppSettingsModule {}

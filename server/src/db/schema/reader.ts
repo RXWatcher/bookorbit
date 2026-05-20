@@ -141,6 +141,8 @@ export const readingSessions = pgTable(
     // Which client produced the session. Kobo analytics also writes sessions here, so this is the only
     // way to tell a genuine web-reader session apart from a device-origin one.
     source: varchar('source', { length: 10 }).$type<ReadingSessionSource>().notNull().default('web'),
+    // 'read' (default, manual reading) or 'tts' (text-to-speech listening session)
+    sessionType: varchar('session_type', { length: 20 }).notNull().default('read'),
   },
   (t) => [
     uniqueIndex('rs_user_session_id_uidx').on(t.userId, t.sessionId),
