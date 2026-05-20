@@ -44,9 +44,9 @@ export function useTtsPreferences() {
 
   async function saveBookPreferences(bookId: number, prefs: { providerId?: string | null; voiceId?: string | null; speed?: number | null }) {
     await ttsApi.saveBookPreferences(bookId, {
-      providerId: prefs.providerId ?? null,
-      voiceId: prefs.voiceId ?? null,
-      speed: prefs.speed ?? null,
+      ...(prefs.providerId !== undefined && { providerId: prefs.providerId }),
+      ...(prefs.voiceId !== undefined && { voiceId: prefs.voiceId }),
+      ...(prefs.speed !== undefined && { speed: prefs.speed }),
     })
     bookPrefsCache.delete(bookId)
   }

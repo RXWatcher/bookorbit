@@ -238,6 +238,7 @@ const clearingSavedTtsPosition = ref(false)
 const syncedHighlightChapterIndex = ref<number | null>(null)
 const syncedHighlightBlockIndex = ref<number | null>(null)
 const preferVisibleRangeForTtsSync = ref(false)
+const pendingTtsChapterNavigation = ref<number | null>(null)
 
 function applySavedTtsResumeHighlight() {
   if (!foliateReady.value || isTtsActive.value) return
@@ -276,6 +277,7 @@ watch([isTtsActive, foliateReady], ([active, ready]) => {
   if (!active) {
     syncedHighlightChapterIndex.value = null
     syncedHighlightBlockIndex.value = null
+    pendingTtsChapterNavigation.value = null
     return
   }
   if (!ready) {
@@ -298,6 +300,20 @@ watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.
 // Keep Foliate overlay in lockstep with TTS block changes.
 watch([currentChapterIndex, currentBlockIndex], ([chapterIdx, blockIdx]) => {
   if (!isTtsActive.value || !foliateReady.value) return
+
+  // Keep the visual reader chapter aligned with the TTS chapter before
+  // syncing sentence highlight; otherwise chapter rollover can jump to the
+  // start of the previous chapter and scroll backwards.
+  if (sectionIndex.value !== chapterIdx) {
+    if (pendingTtsChapterNavigation.value !== chapterIdx) {
+      pendingTtsChapterNavigation.value = chapterIdx
+      syncedHighlightChapterIndex.value = null
+      syncedHighlightBlockIndex.value = null
+      void goToSection(chapterIdx)
+    }
+    return
+  }
+  pendingTtsChapterNavigation.value = null
 
   const syncedChapter = syncedHighlightChapterIndex.value
   const syncedBlock = syncedHighlightBlockIndex.value

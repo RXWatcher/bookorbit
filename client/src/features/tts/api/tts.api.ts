@@ -29,9 +29,9 @@ export interface TtsPosition {
 }
 
 export interface TtsBookPrefs {
-  providerId: string | null
-  voiceId: string | null
-  speed: number | null
+  providerId?: string | null
+  voiceId?: string | null
+  speed?: number | null
 }
 
 async function assertOk(res: Response): Promise<void> {

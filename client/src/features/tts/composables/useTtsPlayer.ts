@@ -21,9 +21,9 @@ const currentChapterIndex = ref(0)
 const speed = ref(1.0)
 const error = ref<string | null>(null)
 const isActive = ref(false)
+const currentProviderId = ref('')
+const currentVoiceId = ref('')
 
-let currentProviderId = ''
-let currentVoiceId = ''
 const audioQueue = shallowRef<TtsAudioBlock[]>([])
 let currentAudio: HTMLAudioElement | null = null
 let getTextBlocks: TextSourceFn | null = null
@@ -67,8 +67,8 @@ export function useTtsPlayer() {
   ) {
     stopPlayback()
     currentBook.value = book
-    currentProviderId = providerId
-    currentVoiceId = voiceId
+    currentProviderId.value = providerId
+    currentVoiceId.value = voiceId
     speed.value = spd
     currentChapterIndex.value = startChapter
     currentBlockIndex.value = Math.max(0, startBlock)
@@ -119,8 +119,8 @@ export function useTtsPlayer() {
   async function fetchAudio(text: string): Promise<Blob> {
     const res = await ttsApi.synthesize({
       text,
-      voiceId: currentVoiceId,
-      providerId: currentProviderId,
+      voiceId: currentVoiceId.value,
+      providerId: currentProviderId.value,
       speed: speed.value,
       format: 'mp3',
     })
@@ -243,6 +243,8 @@ export function useTtsPlayer() {
     isActive.value = false
     playbackState.value = 'idle'
     currentBook.value = null
+    currentProviderId.value = ''
+    currentVoiceId.value = ''
     error.value = null
   }
 
@@ -272,7 +274,20 @@ export function useTtsPlayer() {
   }
 
   function setSpeed(newSpeed: number) {
-    speed.value = Math.min(MAX_SPEED, Math.max(MIN_SPEED, newSpeed))
+    const nextSpeed = Math.min(MAX_SPEED, Math.max(MIN_SPEED, newSpeed))
+    if (nextSpeed === speed.value) return
+    speed.value = nextSpeed
+    prefetchGeneration++
+    audioQueue.value = []
+    pendingPrefetches.clear()
+  }
+
+  function setVoice(providerId: string, voiceId: string) {
+    currentProviderId.value = providerId
+    currentVoiceId.value = voiceId
+    prefetchGeneration++
+    audioQueue.value = []
+    pendingPrefetches.clear()
   }
 
   function increaseSpeed() {
@@ -307,6 +322,8 @@ export function useTtsPlayer() {
     currentBlockIndex,
     currentChapterIndex,
     speed,
+    currentProviderId,
+    currentVoiceId,
     error,
     isActive,
     sleepTimer,
@@ -318,6 +335,7 @@ export function useTtsPlayer() {
     prevBlock,
     togglePlayPause,
     setSpeed,
+    setVoice,
     increaseSpeed,
     decreaseSpeed,
     startFromPosition,

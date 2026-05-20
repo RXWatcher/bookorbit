@@ -4,10 +4,16 @@ import { Search, Volume2, Loader2, Check } from 'lucide-vue-next'
 import { useTtsVoices } from '../composables/useTtsVoices'
 import type { TtsVoice } from '@bookorbit/types'
 
-const props = defineProps<{
-  selectedProviderId: string | null
-  selectedVoiceId: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    selectedProviderId: string | null
+    selectedVoiceId: string | null
+    heightClass?: string
+  }>(),
+  {
+    heightClass: 'h-[80vh] max-h-[600px]',
+  },
+)
 
 const emit = defineEmits<{
   'update:selectedVoiceId': [voiceId: string]
@@ -63,7 +69,7 @@ void loadVoices()
 </script>
 
 <template>
-  <div class="flex flex-col h-[80vh] max-h-[600px]">
+  <div class="flex flex-col" :class="props.heightClass">
     <div class="p-4 border-b border-border space-y-3">
       <div class="relative">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

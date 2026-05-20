@@ -115,6 +115,20 @@ describe('useTtsPreferences', () => {
     })
   })
 
+  describe('saveBookPreferences', () => {
+    it('should save only provided book preference fields', async () => {
+      vi.mocked(ttsApi.saveBookPreferences).mockResolvedValue(undefined)
+
+      const { saveBookPreferences } = useTtsPreferences()
+      await saveBookPreferences(3, { providerId: 'edge', voiceId: 'jenny' })
+
+      expect(ttsApi.saveBookPreferences).toHaveBeenCalledWith(3, {
+        providerId: 'edge',
+        voiceId: 'jenny',
+      })
+    })
+  })
+
   describe('deleteBookPreferences', () => {
     it('should call API and invalidate cache', async () => {
       vi.mocked(ttsApi.getBookPreferences).mockResolvedValue({ providerId: null, voiceId: null, speed: 1.0, isBookOverride: false })
