@@ -48,6 +48,7 @@ const router = useRouter()
 const bookId = Number(route.params.bookId)
 const fileId = Number(route.params.fileId)
 const fileFormat = (route.query.format as string) || 'epub'
+const normalizedFileFormat = fileFormat.toLowerCase()
 const isAudioFormat = getFormatGroup(fileFormat) === 'audio'
 const isPdfFormat = fileFormat === 'pdf'
 const isComicFormat = fileFormat === 'cbz' || fileFormat === 'cbr' || fileFormat === 'cb7'
@@ -56,6 +57,7 @@ const isPeekMode = computed(() => {
   return (Array.isArray(mode) ? mode[0] : mode) === 'peek'
 })
 const trackingEnabled = computed(() => !isPeekMode.value)
+const isTtsAvailable = normalizedFileFormat === 'epub'
 
 const containerRef = ref<HTMLElement | null>(null)
 const showSidebar = ref(false)
@@ -240,7 +242,14 @@ const syncedHighlightBlockIndex = ref<number | null>(null)
 const preferVisibleRangeForTtsSync = ref(false)
 const pendingTtsChapterNavigation = ref<number | null>(null)
 
+function ensureTtsAvailable(): boolean {
+  if (isTtsAvailable) return true
+  toast.error('TTS currently supports EPUB files only')
+  return false
+}
+
 function applySavedTtsResumeHighlight() {
+  if (!isTtsAvailable) return
   if (!foliateReady.value || isTtsActive.value) return
   const saved = ttsPosition.savedPosition.value
   if (!saved?.cfi) return
@@ -381,6 +390,7 @@ async function buildTtsBook(): Promise<{
 }
 
 async function handleStartTts() {
+  if (!ensureTtsAvailable()) return
   if (isTtsActive.value) {
     setMiniPlayerExpanded(true)
     return
@@ -398,6 +408,7 @@ async function handleStartTts() {
 }
 
 async function handleReadFromHere() {
+  if (!ensureTtsAvailable()) return
   const selectedSnippet = selection.text.value.trim()
   const range = selection.selectionRange.value
   selection.dismiss()
@@ -430,6 +441,7 @@ async function handleReadFromHere() {
 }
 
 async function handleResumeTts() {
+  if (!ensureTtsAvailable()) return
   showTtsResumePrompt.value = false
   const saved = ttsPosition.savedPosition.value
   if (!saved) {
@@ -479,6 +491,7 @@ async function handleClearSavedTtsPosition() {
 }
 
 async function handlePlayFromCurrentPage() {
+  if (!ensureTtsAvailable()) return
   showTtsResumePrompt.value = false
   const book = await buildTtsBook()
   if (!book) return
@@ -570,7 +583,7 @@ onMounted(async () => {
         bookMeta.value = b
       })
       .catch(() => {}),
-    loadUserPreferences().catch(() => {}),
+    ...(isTtsAvailable ? [loadUserPreferences().catch(() => {})] : []),
   ])
 
   await customFonts.fetchFonts()
@@ -604,11 +617,13 @@ onMounted(async () => {
   }
   void hydrateSidebarLocationMeta()
 
-  // Load saved TTS position and show its marker immediately on open.
-  await ttsPosition.loadPosition(fileId)
-  if (ttsPosition.hasSavedPosition.value) {
-    await nextTick()
-    applySavedTtsResumeHighlight()
+  if (isTtsAvailable) {
+    // Load saved TTS position and show its marker immediately on open.
+    await ttsPosition.loadPosition(fileId)
+    if (ttsPosition.hasSavedPosition.value) {
+      await nextTick()
+      applySavedTtsResumeHighlight()
+    }
   }
 })
 
@@ -854,6 +869,7 @@ watch(
       :footerMode="footerMode"
       :peek-mode="isPeekMode"
       :isTtsActive="isTtsActive"
+      :isTtsAvailable="isTtsAvailable"
       class="transition-all duration-300"
       :class="headerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
       @back="router.back()"
@@ -955,7 +971,7 @@ watch(
       :showBelow="selection.showBelow.value"
       :selectedText="selection.text.value"
       :overlappingAnnotationId="selection.overlappingAnnotationId.value"
-      :isTtsAvailable="true"
+      :isTtsAvailable="isTtsAvailable"
       @copy="selection.dismiss()"
       @highlight="handleHighlight"
       @search="() => openSearchWithText(selection.text.value)"

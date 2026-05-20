@@ -25,6 +25,7 @@ const props = defineProps<{
   footerMode: 0 | 1 | 2
   peekMode?: boolean
   isTtsActive?: boolean
+  isTtsAvailable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -120,7 +121,7 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
         </button>
       </div>
 
-      <Tooltip>
+      <Tooltip v-if="props.isTtsAvailable !== false">
         <TooltipTrigger as-child>
           <button class="viewer-btn" :class="props.isTtsActive ? '!text-primary' : ''" aria-label="Listen with TTS" @click="emit('startTts')">
             <Headphones :size="18" :class="{ 'animate-pulse': props.isTtsActive }" />

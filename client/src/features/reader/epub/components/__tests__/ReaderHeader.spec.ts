@@ -63,4 +63,19 @@ describe('ReaderHeader', () => {
     wrapper.findComponent(DropdownMenuStub).vm.$emit('update:open', false)
     expect(wrapper.emitted('update:settingsOpen')?.[0]).toEqual([false])
   })
+
+  it('hides TTS control when unavailable for current format', () => {
+    const wrapper = mount(ReaderHeader, {
+      props: {
+        chapterTitle: 'Chapter 4',
+        isBookmarked: true,
+        settingsOpen: false,
+        footerMode: 0,
+        isTtsAvailable: false,
+      },
+      global,
+    })
+
+    expect(wrapper.find('button[aria-label="Listen with TTS"]').exists()).toBe(false)
+  })
 })
