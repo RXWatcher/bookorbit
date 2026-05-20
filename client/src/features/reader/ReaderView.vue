@@ -19,7 +19,9 @@ import { useReaderKeyboardShortcuts } from './epub/composables/useReaderKeyboard
 import { useFoliateTts } from '@/features/tts/composables/useFoliateTts'
 import { useTtsPlayer } from '@/features/tts/composables/useTtsPlayer'
 import { useTtsPreferences } from '@/features/tts/composables/useTtsPreferences'
+import { useTtsPosition } from '@/features/tts/composables/useTtsPosition'
 import { getVoices } from '@/features/tts/api/tts.api'
+import TtsResumePrompt from '@/features/tts/components/TtsResumePrompt.vue'
 import ReaderHeader from './epub/components/ReaderHeader.vue'
 import ReaderFooter from './epub/components/ReaderFooter.vue'
 import ReaderSidebar from './epub/components/ReaderSidebar.vue'
@@ -208,43 +210,255 @@ function handleTranslate() {
 
 const bookMeta = ref<BookDetail | null>(null)
 
-const { setFoliateSource, clearFoliateSource, getServerTextBlocks } = useFoliateTts()
-const { startPlayback, isActive, currentBook } = useTtsPlayer()
+const {
+  foliateReady,
+  setFoliateSource,
+  clearFoliateSource,
+  getServerTextBlocks,
+  getVisibleRange,
+  clearStartAnchor,
+  advanceHighlight,
+  retreatHighlight,
+  syncHighlightAtBlockStart,
+  syncHighlightToBlockIndex,
+  showResumeHighlightFromCfi,
+  showResumeHighlightFromBlock,
+  clearHighlight,
+  startFromRange: startFoliateFromRange,
+} = useFoliateTts()
+const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex } = useTtsPlayer()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
+const ttsPosition = useTtsPosition()
 
 const isTtsActive = computed(() => isActive.value && currentBook.value?.bookFileId === fileId)
+const showTtsResumePrompt = ref(false)
+const syncedHighlightChapterIndex = ref<number | null>(null)
+const syncedHighlightBlockIndex = ref<number | null>(null)
+const preferVisibleRangeForTtsSync = ref(false)
+
+function applySavedTtsResumeHighlight() {
+  if (!foliateReady.value || isTtsActive.value) return
+  const saved = ttsPosition.savedPosition.value
+  if (!saved?.cfi) return
+
+  // Clear any stale TTS marker before applying the current saved one.
+  clearHighlight()
+
+  if (showResumeHighlightFromCfi(saved.cfi)) return
+
+  const match = /^tts:(\d+):(\d+)$/.exec(saved.cfi)
+  if (!match) return
+  const savedChapterIdx = parseInt(match[1]!, 10)
+  const savedBlockIdx = parseInt(match[2]!, 10)
+  void showResumeHighlightFromBlock(savedChapterIdx, savedBlockIdx, sectionIndex.value)
+}
 
 function onChapterLoadHandler(doc: Document, viewEl: HTMLElement) {
   setFoliateSource(doc, viewEl, () => {})
 }
 
-async function handleStartTts() {
-  if (!bookMeta.value) {
-    toast.error('Book metadata not loaded yet')
+function syncFoliateHighlightToCurrentBlock() {
+  const blockIdx = currentBlockIndex.value
+  const preferVisibleRange = preferVisibleRangeForTtsSync.value
+  if (blockIdx === 0) {
+    syncHighlightAtBlockStart(preferVisibleRange)
+  } else {
+    syncHighlightToBlockIndex(blockIdx, preferVisibleRange)
+  }
+  syncedHighlightChapterIndex.value = currentChapterIndex.value
+  syncedHighlightBlockIndex.value = blockIdx
+}
+
+watch([isTtsActive, foliateReady], ([active, ready]) => {
+  if (!active) {
+    clearHighlight()
+    clearStartAnchor()
+    syncedHighlightChapterIndex.value = null
+    syncedHighlightBlockIndex.value = null
+    preferVisibleRangeForTtsSync.value = false
     return
   }
+  if (!ready) {
+    syncedHighlightChapterIndex.value = null
+    syncedHighlightBlockIndex.value = null
+    return
+  }
+  syncFoliateHighlightToCurrentBlock()
+})
+
+watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.value?.cfi], ([ready, active, , savedCfi]) => {
+  if (!ready || active || !savedCfi || !showTtsResumePrompt.value) return
+  applySavedTtsResumeHighlight()
+})
+
+// Keep Foliate overlay in lockstep with TTS block changes.
+watch([currentChapterIndex, currentBlockIndex], ([chapterIdx, blockIdx]) => {
+  if (!isTtsActive.value || !foliateReady.value) return
+
+  const syncedChapter = syncedHighlightChapterIndex.value
+  const syncedBlock = syncedHighlightBlockIndex.value
+  if (syncedChapter === null || syncedBlock === null || syncedChapter !== chapterIdx) {
+    syncFoliateHighlightToCurrentBlock()
+    return
+  }
+
+  const delta = blockIdx - syncedBlock
+  if (delta === 1) {
+    advanceHighlight()
+  } else if (delta === -1) {
+    retreatHighlight()
+  } else if (delta !== 0) {
+    syncFoliateHighlightToCurrentBlock()
+    return
+  }
+  syncedHighlightBlockIndex.value = blockIdx
+})
+
+async function resolveProviderAndVoice(providerId: string) {
+  let voiceId = defaultVoiceId.value ?? ''
+  const effectivePrefs = await loadBookPreferences(bookId)
+  const resolvedProviderId = effectivePrefs.providerId ?? providerId
+  voiceId = effectivePrefs.voiceId ?? voiceId
+  if (!voiceId.trim()) {
+    const voices = await getVoices(resolvedProviderId)
+    voiceId = voices[0]?.id ?? ''
+  }
+  return { providerId: resolvedProviderId, voiceId, speed: effectivePrefs.speed ?? defaultSpeed.value ?? 1.0 }
+}
+
+async function buildTtsBook(): Promise<{
+  bookId: number
+  bookFileId: number
+  title: string
+  author: string | null
+  coverUrl: string | null
+  totalChapters: number
+} | null> {
+  if (!bookMeta.value) {
+    toast.error('Book metadata not loaded yet')
+    return null
+  }
+  return {
+    bookId,
+    bookFileId: fileId,
+    title: bookMeta.value.title ?? chapterTitle.value ?? 'Book',
+    author: bookMeta.value.authors?.[0]?.name ?? null,
+    coverUrl: bookMeta.value.coverSource ? `/api/v1/books/${bookId}/cover` : null,
+    totalChapters: totalSections.value,
+  }
+}
+
+async function handleStartTts() {
+  const book = await buildTtsBook()
+  if (!book) return
   try {
-    const effectivePrefs = await loadBookPreferences(bookId)
-    const providerId = effectivePrefs.providerId ?? defaultProviderId.value ?? 'edge'
-    let voiceId = effectivePrefs.voiceId ?? defaultVoiceId.value ?? ''
-    if (!voiceId.trim()) {
-      const voices = await getVoices(providerId)
-      voiceId = voices[0]?.id ?? ''
-    }
+    clearStartAnchor()
+    preferVisibleRangeForTtsSync.value = false
+    const baseProviderId = defaultProviderId.value ?? 'edge'
+    const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
     if (!voiceId.trim()) {
       toast.error('No TTS voices are available for the selected provider')
       return
     }
-    const speed = effectivePrefs.speed ?? defaultSpeed.value ?? 1.0
-    const book = {
-      bookId,
-      bookFileId: fileId,
-      title: bookMeta.value.title ?? chapterTitle.value ?? 'Book',
-      author: bookMeta.value.authors?.[0]?.name ?? null,
-      coverUrl: bookMeta.value.coverSource ? `/api/v1/books/${bookId}/cover` : null,
-      totalChapters: totalSections.value,
-    }
     await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), sectionIndex.value)
+  } catch {
+    toast.error('Failed to start TTS playback')
+  }
+}
+
+async function handleReadFromHere() {
+  const range = selection.selectionRange.value
+  selection.dismiss()
+  const book = await buildTtsBook()
+  if (!book) return
+  try {
+    clearStartAnchor()
+    preferVisibleRangeForTtsSync.value = true
+    const baseProviderId = defaultProviderId.value ?? 'edge'
+    const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
+    if (!voiceId.trim()) {
+      toast.error('No TTS voices are available for the selected provider')
+      return
+    }
+    const chapterIdx = sectionIndex.value
+    let startBlock = 0
+    if (range) {
+      // Use Foliate's from(range) to get the sentence text at the selection point
+      const foliateText = startFoliateFromRange(range)
+      if (foliateText) {
+        // Find the server block closest to the Foliate sentence
+        const blocks = await getServerTextBlocks(fileId, chapterIdx)
+        const selectedNorm = foliateText.toLowerCase().slice(0, 40)
+        const idx = blocks.findIndex((b) => b.toLowerCase().includes(selectedNorm) || selectedNorm.includes(b.toLowerCase().slice(0, 30)))
+        if (idx >= 0) startBlock = idx
+      }
+    }
+    await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, startBlock)
+  } catch {
+    toast.error('Failed to start TTS playback')
+  }
+}
+
+async function handleResumeTts() {
+  showTtsResumePrompt.value = false
+  const saved = ttsPosition.savedPosition.value
+  if (!saved) {
+    await handleStartTts()
+    return
+  }
+  const match = /^tts:(\d+):(\d+)$/.exec(saved.cfi)
+  const chapterIdx = match ? parseInt(match[1]!, 10) : (saved.chapterIndex ?? sectionIndex.value)
+  const blockIdx = match ? parseInt(match[2]!, 10) : 0
+  const book = await buildTtsBook()
+  if (!book) return
+  try {
+    // Resume should anchor highlight to saved block index, not current viewport.
+    clearStartAnchor()
+    preferVisibleRangeForTtsSync.value = false
+    const baseProviderId = defaultProviderId.value ?? 'edge'
+    const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
+    if (!voiceId.trim()) {
+      toast.error('No TTS voices are available for the selected provider')
+      return
+    }
+    await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, blockIdx)
+  } catch {
+    toast.error('Failed to resume TTS playback')
+  }
+}
+
+function dismissResumePrompt() {
+  showTtsResumePrompt.value = false
+}
+
+async function handlePlayFromCurrentPage() {
+  showTtsResumePrompt.value = false
+  const book = await buildTtsBook()
+  if (!book) return
+  try {
+    clearStartAnchor()
+    preferVisibleRangeForTtsSync.value = true
+    const baseProviderId = defaultProviderId.value ?? 'edge'
+    const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
+    if (!voiceId.trim()) {
+      toast.error('No TTS voices are available for the selected provider')
+      return
+    }
+    const chapterIdx = sectionIndex.value
+    let startBlock = 0
+    // Use the range cached from the last relocate event — it is the most reliable
+    // source of the currently visible position (same technique as Flutter).
+    const visibleRange = getVisibleRange()
+    if (visibleRange) {
+      const foliateText = startFoliateFromRange(visibleRange)
+      if (foliateText) {
+        const blocks = await getServerTextBlocks(fileId, chapterIdx)
+        const norm = foliateText.toLowerCase().slice(0, 40)
+        const idx = blocks.findIndex((b) => b.toLowerCase().includes(norm) || norm.includes(b.toLowerCase().slice(0, 30)))
+        if (idx >= 0) startBlock = idx
+      }
+    }
+    await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, startBlock)
   } catch {
     toast.error('Failed to start TTS playback')
   }
@@ -346,10 +560,12 @@ onMounted(async () => {
   }
   void hydrateSidebarLocationMeta()
 
-  if (hadProgress) {
-    const pct = Math.round(progress.percentage.value)
-    const label = chapterTitle.value || `Chapter ${sectionIndex.value + 1}`
-    toast.info(`Resumed at ${pct}% - ${label}`, { duration: 2500 })
+  // Load saved TTS position and show resume prompt if one exists
+  await ttsPosition.loadPosition(fileId)
+  if (ttsPosition.hasSavedPosition.value) {
+    showTtsResumePrompt.value = true
+    await nextTick()
+    applySavedTtsResumeHighlight()
   }
 })
 
@@ -696,6 +912,7 @@ watch(
       :showBelow="selection.showBelow.value"
       :selectedText="selection.text.value"
       :overlappingAnnotationId="selection.overlappingAnnotationId.value"
+      :isTtsAvailable="true"
       @copy="selection.dismiss()"
       @highlight="handleHighlight"
       @search="() => openSearchWithText(selection.text.value)"
@@ -704,7 +921,21 @@ watch(
       @note="selection.openNoteDialog()"
       @deleteAnnotation="handleDeleteAnnotation"
       @dismiss="selection.dismiss()"
+      @readFromHere="handleReadFromHere"
     />
+
+    <Teleport to="body">
+      <Transition name="tts-resume-fade">
+        <div v-if="showTtsResumePrompt && !isTtsActive" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
+          <TtsResumePrompt
+            :chapterIndex="ttsPosition.savedPosition.value?.chapterIndex ?? null"
+            @resume="handleResumeTts"
+            @playFromHere="handlePlayFromCurrentPage"
+            @cancel="dismissResumePrompt"
+          />
+        </div>
+      </Transition>
+    </Teleport>
 
     <DictionaryPopover
       v-if="showDictionary"
@@ -735,5 +966,16 @@ watch(
 .bookmark-fade-enter-from,
 .bookmark-fade-leave-to {
   opacity: 0;
+}
+.tts-resume-fade-enter-active,
+.tts-resume-fade-leave-active {
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+.tts-resume-fade-enter-from,
+.tts-resume-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
 }
 </style>

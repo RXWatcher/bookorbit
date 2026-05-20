@@ -27,12 +27,19 @@ export function normalizePath(p: string): string {
 }
 
 function htmlToBlocks(html: string): string[] {
-  const BLOCK_SPLIT_RE = /<(?:p|div|h[1-6]|li|td|th|br)[^>]*>/gi;
+  const bodyMatch = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html);
+  const bodyHtml = bodyMatch?.[1] ?? html;
+  const cleanedHtml = bodyHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+
+  // Keep this block list aligned with Foliate's TTS block segmentation so
+  // server-side audio blocks and client-side highlight blocks stay in sync.
+  const BLOCK_SPLIT_RE =
+    /<(?:article|aside|audio|blockquote|caption|details|dialog|div|dl|dt|dd|figure|footer|form|figcaption|h[1-6]|header|hgroup|hr|li|main|math|nav|ol|p|pre|section|tr)[^>]*>/gi;
   const TAG_RE = /<[^>]+>/g;
   const ENTITY_RE = /&(?:amp|lt|gt|quot|apos|nbsp);/g;
   const ENTITY_MAP: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&nbsp;': ' ' };
 
-  const chunks = html.replace(BLOCK_SPLIT_RE, '\n$&').split('\n');
+  const chunks = cleanedHtml.replace(BLOCK_SPLIT_RE, '\n$&').split('\n');
   return chunks
     .map((chunk) => {
       const text = chunk
@@ -42,7 +49,7 @@ function htmlToBlocks(html: string): string[] {
         .trim();
       return text;
     })
-    .filter((t) => t.length > 2);
+    .filter((t) => t.length > 0);
 }
 
 @Injectable()

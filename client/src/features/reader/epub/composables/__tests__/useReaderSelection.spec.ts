@@ -9,6 +9,7 @@ describe('useReaderSelection', () => {
     selection.show({
       text: 'Selected text',
       cfi: 'epubcfi(/6/2)',
+      range: null,
       popupPosition: { x: 120, y: 240, showBelow: true },
     })
 

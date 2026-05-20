@@ -36,16 +36,35 @@ const positionComposable = useTtsPosition()
 const mediaSession = useTtsMediaSession()
 const readingSession = useTtsReadingSession()
 
+function queueCurrentPositionSave(blockIdx = currentBlockIndex.value) {
+  if (!currentBook.value) return
+  positionComposable.scheduleSave(currentBook.value.bookFileId, `tts:${currentChapterIndex.value}:${blockIdx}`, currentChapterIndex.value)
+}
+
+function flushCurrentPositionSave() {
+  queueCurrentPositionSave()
+  void positionComposable.flushPendingSave()
+}
+
 function pausePlayback() {
   if (currentAudio) currentAudio.pause()
   playbackState.value = 'paused'
   mediaSession.setPlaybackState('paused')
+  flushCurrentPositionSave()
 }
 
 const sleepTimer = useTtsSleepTimer(pausePlayback)
 
 export function useTtsPlayer() {
-  async function startPlayback(book: TtsCurrentBook, providerId: string, voiceId: string, spd: number, textSource: TextSourceFn, startChapter = 0) {
+  async function startPlayback(
+    book: TtsCurrentBook,
+    providerId: string,
+    voiceId: string,
+    spd: number,
+    textSource: TextSourceFn,
+    startChapter = 0,
+    startBlock = 0,
+  ) {
     stopPlayback()
     currentBook.value = book
     currentProviderId = providerId
@@ -73,7 +92,7 @@ export function useTtsPlayer() {
       if (chapterBlocks.length === 0) {
         await advanceChapter()
       } else {
-        await fetchAndPlay(0)
+        await fetchAndPlay(startBlock)
       }
     } catch (err) {
       handleError(err)
@@ -128,9 +147,7 @@ export function useTtsPlayer() {
     playbackState.value = 'playing'
     mediaSession.setPlaybackState('playing')
     void audio.play().catch(handleError)
-    if (currentBook.value) {
-      positionComposable.scheduleSave(currentBook.value.bookFileId, `tts:${currentChapterIndex.value}:${blockIdx}`, currentChapterIndex.value)
-    }
+    queueCurrentPositionSave(blockIdx)
   }
 
   async function onBlockEnded(blockIdx: number) {
@@ -199,6 +216,7 @@ export function useTtsPlayer() {
   }
 
   function stopPlayback() {
+    flushCurrentPositionSave()
     if (currentAudio) {
       currentAudio.pause()
       currentAudio = null
@@ -229,6 +247,7 @@ export function useTtsPlayer() {
 
   async function nextBlock() {
     if (!isActive.value) return
+    flushCurrentPositionSave()
     const next = currentBlockIndex.value + 1
     if (next < chapterBlocks.length) {
       if (currentAudio) currentAudio.pause()
@@ -240,6 +259,7 @@ export function useTtsPlayer() {
 
   async function prevBlock() {
     if (!isActive.value) return
+    flushCurrentPositionSave()
     const prev = Math.max(0, currentBlockIndex.value - 1)
     if (currentAudio) currentAudio.pause()
     await fetchAndPlay(prev)
@@ -263,6 +283,7 @@ export function useTtsPlayer() {
   }
 
   function handleError(err: unknown) {
+    flushCurrentPositionSave()
     const message = err instanceof Error ? err.message : 'TTS error'
     error.value = message
     playbackState.value = 'error'

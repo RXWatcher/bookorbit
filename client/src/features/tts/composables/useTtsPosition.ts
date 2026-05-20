@@ -2,12 +2,15 @@ import { ref } from 'vue'
 import * as ttsApi from '../api/tts.api'
 import type { TtsPosition } from '../api/tts.api'
 
-const SAVE_DEBOUNCE_MS = 5000
+interface PendingSave extends TtsPosition {
+  bookFileId: number
+}
 
 export function useTtsPosition() {
   const savedPosition = ref<TtsPosition | null>(null)
   const hasSavedPosition = ref(false)
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingSave: PendingSave | null = null
+  let saveInFlight: Promise<void> | null = null
 
   async function loadPosition(bookFileId: number) {
     try {
@@ -19,42 +22,73 @@ export function useTtsPosition() {
     }
   }
 
+  function samePosition(a: TtsPosition | null, b: TtsPosition): boolean {
+    return !!a && a.cfi === b.cfi && a.chapterIndex === b.chapterIndex
+  }
+
+  function samePendingSave(a: PendingSave | null, b: PendingSave): boolean {
+    return !!a && a.bookFileId === b.bookFileId && a.cfi === b.cfi && a.chapterIndex === b.chapterIndex
+  }
+
+  async function processPendingSave() {
+    if (saveInFlight || !pendingSave) return
+
+    const next = pendingSave
+    pendingSave = null
+
+    saveInFlight = (async () => {
+      try {
+        await ttsApi.savePosition(next.bookFileId, { cfi: next.cfi, chapterIndex: next.chapterIndex })
+        savedPosition.value = { cfi: next.cfi, chapterIndex: next.chapterIndex }
+        hasSavedPosition.value = true
+      } catch {
+        // position save failure is non-fatal
+      }
+    })()
+
+    try {
+      await saveInFlight
+    } finally {
+      saveInFlight = null
+      if (pendingSave) void processPendingSave()
+    }
+  }
+
   function scheduleSave(bookFileId: number, cfi: string, chapterIndex: number | null) {
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      void savePositionNow(bookFileId, cfi, chapterIndex)
-    }, SAVE_DEBOUNCE_MS)
+    const next: PendingSave = { bookFileId, cfi, chapterIndex }
+    if (samePendingSave(pendingSave, next)) return
+    if (!pendingSave && samePosition(savedPosition.value, next)) return
+    pendingSave = next
+    void processPendingSave()
   }
 
   async function savePositionNow(bookFileId: number, cfi: string, chapterIndex: number | null) {
-    if (saveTimer) {
-      clearTimeout(saveTimer)
-      saveTimer = null
-    }
-    try {
-      await ttsApi.savePosition(bookFileId, { cfi, chapterIndex })
-      savedPosition.value = { cfi, chapterIndex }
-      hasSavedPosition.value = true
-    } catch {
-      // position save failure is non-fatal
+    scheduleSave(bookFileId, cfi, chapterIndex)
+    await flushPendingSave()
+  }
+
+  async function flushPendingSave() {
+    while (pendingSave || saveInFlight) {
+      if (!saveInFlight && pendingSave) {
+        await processPendingSave()
+        continue
+      }
+      if (saveInFlight) {
+        await saveInFlight
+      }
     }
   }
 
   async function clearPosition(bookFileId: number) {
-    if (saveTimer) {
-      clearTimeout(saveTimer)
-      saveTimer = null
-    }
+    pendingSave = null
+    if (saveInFlight) await saveInFlight
     await ttsApi.deletePosition(bookFileId)
     savedPosition.value = null
     hasSavedPosition.value = false
   }
 
   function cleanup() {
-    if (saveTimer) {
-      clearTimeout(saveTimer)
-      saveTimer = null
-    }
+    pendingSave = null
   }
 
   return {
@@ -63,6 +97,7 @@ export function useTtsPosition() {
     loadPosition,
     scheduleSave,
     savePositionNow,
+    flushPendingSave,
     clearPosition,
     cleanup,
   }

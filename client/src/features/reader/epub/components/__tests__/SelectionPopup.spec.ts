@@ -26,6 +26,7 @@ describe('SelectionPopup', () => {
         showBelow: false,
         selectedText: 'Important quote',
         overlappingAnnotationId: null,
+        isTtsAvailable: true,
       },
       global: globalStubs,
     })
@@ -44,6 +45,7 @@ describe('SelectionPopup', () => {
         showBelow: false,
         selectedText: 'Text',
         overlappingAnnotationId: null,
+        isTtsAvailable: true,
       },
       global: globalStubs,
     })
@@ -69,6 +71,7 @@ describe('SelectionPopup', () => {
         showBelow: false,
         selectedText: 'Text',
         overlappingAnnotationId: 55,
+        isTtsAvailable: false,
       },
       global: globalStubs,
     })
@@ -80,6 +83,7 @@ describe('SelectionPopup', () => {
         showBelow: false,
         selectedText: 'Text',
         overlappingAnnotationId: null,
+        isTtsAvailable: false,
       },
       global: globalStubs,
     })

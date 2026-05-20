@@ -126,6 +126,7 @@ export async function savePosition(bookFileId: number, pos: TtsPosition): Promis
   const res = await api(`/api/v1/tts/position/${bookFileId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
+    keepalive: true,
     body: JSON.stringify(pos),
   })
   await assertOk(res)

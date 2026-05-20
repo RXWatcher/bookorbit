@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { BookA, Copy, FileText, Highlighter, Languages, Search, Trash2 } from 'lucide-vue-next'
+import { BookA, Copy, FileText, Headphones, Highlighter, Languages, Search, Trash2 } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const props = defineProps<{
@@ -9,6 +9,7 @@ const props = defineProps<{
   showBelow: boolean
   selectedText: string
   overlappingAnnotationId: number | null
+  isTtsAvailable: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +21,7 @@ const emit = defineEmits<{
   note: []
   deleteAnnotation: [id: number]
   dismiss: []
+  readFromHere: []
 }>()
 
 const showColorPicker = ref(false)
@@ -162,6 +164,18 @@ function onCopy() {
                 </button>
               </TooltipTrigger>
               <TooltipContent>Delete annotation</TooltipContent>
+            </Tooltip>
+
+            <Tooltip v-if="isTtsAvailable">
+              <TooltipTrigger as-child>
+                <button
+                  class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                  @click="emit('readFromHere')"
+                >
+                  <Headphones :size="15" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Read from here</TooltipContent>
             </Tooltip>
           </div>
 
