@@ -18,6 +18,7 @@ import { useReaderSelection } from './epub/composables/useReaderSelection'
 import { useReaderKeyboardShortcuts } from './epub/composables/useReaderKeyboardShortcuts'
 import { useFoliateTts } from '@/features/tts/composables/useFoliateTts'
 import { useTtsPlayer } from '@/features/tts/composables/useTtsPlayer'
+import { useTtsMiniPlayerUi } from '@/features/tts/composables/useTtsMiniPlayerUi'
 import { useTtsPreferences } from '@/features/tts/composables/useTtsPreferences'
 import { useTtsPosition } from '@/features/tts/composables/useTtsPosition'
 import { getVoices } from '@/features/tts/api/tts.api'
@@ -227,11 +228,13 @@ const {
   startFromRange: startFoliateFromRange,
 } = useFoliateTts()
 const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex } = useTtsPlayer()
+const { setExpanded: setMiniPlayerExpanded } = useTtsMiniPlayerUi()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
 const ttsPosition = useTtsPosition()
 
 const isTtsActive = computed(() => isActive.value && currentBook.value?.bookFileId === fileId)
 const showTtsResumePrompt = ref(false)
+const clearingSavedTtsPosition = ref(false)
 const syncedHighlightChapterIndex = ref<number | null>(null)
 const syncedHighlightBlockIndex = ref<number | null>(null)
 const preferVisibleRangeForTtsSync = ref(false)
@@ -271,11 +274,8 @@ function syncFoliateHighlightToCurrentBlock() {
 
 watch([isTtsActive, foliateReady], ([active, ready]) => {
   if (!active) {
-    clearHighlight()
-    clearStartAnchor()
     syncedHighlightChapterIndex.value = null
     syncedHighlightBlockIndex.value = null
-    preferVisibleRangeForTtsSync.value = false
     return
   }
   if (!ready) {
@@ -286,8 +286,12 @@ watch([isTtsActive, foliateReady], ([active, ready]) => {
   syncFoliateHighlightToCurrentBlock()
 })
 
-watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.value?.cfi], ([ready, active, , savedCfi]) => {
-  if (!ready || active || !savedCfi || !showTtsResumePrompt.value) return
+watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.value?.cfi], ([ready, active, , savedCfi], previous) => {
+  if (!ready || active || !savedCfi) return
+  // On explicit TTS stop/close, keep the current sentence highlight in place
+  // instead of immediately re-resolving from persisted state.
+  const wasActive = previous?.[1] ?? false
+  if (wasActive && !active) return
   applySavedTtsResumeHighlight()
 })
 
@@ -326,6 +330,18 @@ async function resolveProviderAndVoice(providerId: string) {
   return { providerId: resolvedProviderId, voiceId, speed: effectivePrefs.speed ?? defaultSpeed.value ?? 1.0 }
 }
 
+async function resolveStartBlockByText(chapterIdx: number, snippet: string): Promise<number> {
+  if (!snippet) return 0
+  try {
+    const blocks = await getServerTextBlocks(fileId, chapterIdx)
+    const norm = snippet.toLowerCase().slice(0, 40)
+    const idx = blocks.findIndex((b) => b.toLowerCase().includes(norm) || norm.includes(b.toLowerCase().slice(0, 30)))
+    return idx >= 0 ? idx : 0
+  } catch {
+    return 0
+  }
+}
+
 async function buildTtsBook(): Promise<{
   bookId: number
   bookFileId: number
@@ -349,31 +365,33 @@ async function buildTtsBook(): Promise<{
 }
 
 async function handleStartTts() {
-  const book = await buildTtsBook()
-  if (!book) return
-  try {
-    clearStartAnchor()
-    preferVisibleRangeForTtsSync.value = false
-    const baseProviderId = defaultProviderId.value ?? 'edge'
-    const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
-    if (!voiceId.trim()) {
-      toast.error('No TTS voices are available for the selected provider')
-      return
-    }
-    await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), sectionIndex.value)
-  } catch {
-    toast.error('Failed to start TTS playback')
+  if (isTtsActive.value) {
+    setMiniPlayerExpanded(true)
+    return
   }
+
+  await ttsPosition.loadPosition(fileId)
+  if (ttsPosition.savedPosition.value?.cfi) {
+    showTtsResumePrompt.value = true
+    await nextTick()
+    applySavedTtsResumeHighlight()
+    return
+  }
+
+  await handlePlayFromCurrentPage()
 }
 
 async function handleReadFromHere() {
+  const selectedSnippet = selection.text.value.trim()
   const range = selection.selectionRange.value
   selection.dismiss()
   const book = await buildTtsBook()
   if (!book) return
   try {
     clearStartAnchor()
-    preferVisibleRangeForTtsSync.value = true
+    // For explicit "read from here", sync should follow the resolved
+    // sentence index instead of snapping to viewport start.
+    preferVisibleRangeForTtsSync.value = false
     const baseProviderId = defaultProviderId.value ?? 'edge'
     const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
     if (!voiceId.trim()) {
@@ -382,16 +400,12 @@ async function handleReadFromHere() {
     }
     const chapterIdx = sectionIndex.value
     let startBlock = 0
-    if (range) {
-      // Use Foliate's from(range) to get the sentence text at the selection point
-      const foliateText = startFoliateFromRange(range)
-      if (foliateText) {
-        // Find the server block closest to the Foliate sentence
-        const blocks = await getServerTextBlocks(fileId, chapterIdx)
-        const selectedNorm = foliateText.toLowerCase().slice(0, 40)
-        const idx = blocks.findIndex((b) => b.toLowerCase().includes(selectedNorm) || selectedNorm.includes(b.toLowerCase().slice(0, 30)))
-        if (idx >= 0) startBlock = idx
-      }
+    if (selectedSnippet) {
+      startBlock = await resolveStartBlockByText(chapterIdx, selectedSnippet)
+    } else if (range) {
+      // Fallback for edge cases where selection text is empty.
+      const fallbackSnippet = range.toString().trim() || startFoliateFromRange(range) || ''
+      startBlock = await resolveStartBlockByText(chapterIdx, fallbackSnippet)
     }
     await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, startBlock)
   } catch {
@@ -429,6 +443,23 @@ async function handleResumeTts() {
 
 function dismissResumePrompt() {
   showTtsResumePrompt.value = false
+  clearStartAnchor()
+  clearHighlight()
+}
+
+async function handleClearSavedTtsPosition() {
+  if (clearingSavedTtsPosition.value) return
+  clearingSavedTtsPosition.value = true
+  try {
+    await ttsPosition.clearPosition(fileId)
+    showTtsResumePrompt.value = false
+    clearStartAnchor()
+    clearHighlight()
+  } catch {
+    toast.error('Failed to clear saved TTS position')
+  } finally {
+    clearingSavedTtsPosition.value = false
+  }
 }
 
 async function handlePlayFromCurrentPage() {
@@ -452,10 +483,7 @@ async function handlePlayFromCurrentPage() {
     if (visibleRange) {
       const foliateText = startFoliateFromRange(visibleRange)
       if (foliateText) {
-        const blocks = await getServerTextBlocks(fileId, chapterIdx)
-        const norm = foliateText.toLowerCase().slice(0, 40)
-        const idx = blocks.findIndex((b) => b.toLowerCase().includes(norm) || norm.includes(b.toLowerCase().slice(0, 30)))
-        if (idx >= 0) startBlock = idx
+        startBlock = await resolveStartBlockByText(chapterIdx, foliateText)
       }
     }
     await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, startBlock)
@@ -560,10 +588,9 @@ onMounted(async () => {
   }
   void hydrateSidebarLocationMeta()
 
-  // Load saved TTS position and show resume prompt if one exists
+  // Load saved TTS position and show its marker immediately on open.
   await ttsPosition.loadPosition(fileId)
   if (ttsPosition.hasSavedPosition.value) {
-    showTtsResumePrompt.value = true
     await nextTick()
     applySavedTtsResumeHighlight()
   }
@@ -929,8 +956,10 @@ watch(
         <div v-if="showTtsResumePrompt && !isTtsActive" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
           <TtsResumePrompt
             :chapterIndex="ttsPosition.savedPosition.value?.chapterIndex ?? null"
+            :clearing="clearingSavedTtsPosition"
             @resume="handleResumeTts"
             @playFromHere="handlePlayFromCurrentPage"
+            @clearSavedPosition="handleClearSavedTtsPosition"
             @cancel="dismissResumePrompt"
           />
         </div>

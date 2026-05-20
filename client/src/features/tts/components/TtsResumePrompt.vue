@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { BookmarkCheck, Play, X } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { BookmarkCheck, Play, Trash2, X } from 'lucide-vue-next'
 
-const props = defineProps<{ chapterIndex: number | null }>()
-const emit = defineEmits<{ resume: []; playFromHere: []; cancel: [] }>()
+const props = withDefaults(
+  defineProps<{
+    chapterIndex: number | null
+    clearing?: boolean
+  }>(),
+  {
+    clearing: false,
+  },
+)
+const emit = defineEmits<{ resume: []; playFromHere: []; clearSavedPosition: []; cancel: [] }>()
+const confirmClear = ref(false)
 
 function handleResume() {
   emit('resume')
@@ -12,7 +22,21 @@ function handlePlayFromHere() {
   emit('playFromHere')
 }
 
+function handleClearSavedPosition() {
+  confirmClear.value = false
+  emit('clearSavedPosition')
+}
+
+function handleRequestClearSavedPosition() {
+  confirmClear.value = true
+}
+
+function handleCancelClearSavedPosition() {
+  confirmClear.value = false
+}
+
 function handleCancel() {
+  confirmClear.value = false
   emit('cancel')
 }
 </script>
@@ -47,8 +71,31 @@ function handleCancel() {
         @click="handlePlayFromHere"
       >
         <Play class="w-4 h-4" />
-        Play from here
+        Start this page
       </button>
     </div>
+    <div v-if="confirmClear" class="w-full flex gap-2">
+      <button
+        class="flex-1 px-3 py-2 rounded-lg border border-border text-sm font-medium hover:bg-accent transition-colors"
+        @click="handleCancelClearSavedPosition"
+      >
+        Cancel
+      </button>
+      <button
+        class="flex-1 px-3 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors disabled:opacity-60"
+        :disabled="props.clearing"
+        @click="handleClearSavedPosition"
+      >
+        {{ props.clearing ? 'Clearing…' : 'Confirm clear' }}
+      </button>
+    </div>
+    <button
+      v-else
+      class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+      @click="handleRequestClearSavedPosition"
+    >
+      <Trash2 class="w-4 h-4" />
+      Clear saved position
+    </button>
   </div>
 </template>

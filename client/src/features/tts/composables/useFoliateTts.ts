@@ -33,6 +33,7 @@ interface FoliateViewElement extends HTMLElement {
 
 const TTS_HIGHLIGHT_KEY = '__tts_highlight__'
 const TTS_HIGHLIGHT_COLOR = '#4FC3F7'
+const SSML_NAMESPACE = 'http://www.w3.org/2001/10/synthesis'
 
 const foliateReady = ref(false)
 let ttsInstance: FoliateTTSInstance | null = null
@@ -41,6 +42,8 @@ let foliateViewRef: FoliateViewElement | null = null
 let cachedVisibleRange: Range | null = null
 let startAnchorRange: Range | null = null
 let highlightedRange: Range | null = null
+let currentSentenceMarks: string[] = []
+let currentSentenceMarkIndex = 0
 let relocateCleanup: (() => void) | null = null
 
 function createSvgElement(tag: string): SVGElement {
@@ -115,12 +118,54 @@ function ssmlToPlainText(ssml: string): string {
     .trim()
 }
 
+function splitTextToSentences(text: string): string[] {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return []
+
+  const SegmenterCtor = (
+    Intl as unknown as {
+      Segmenter?: new (
+        locales?: string | string[],
+        options?: { granularity: 'sentence' | 'word' | 'grapheme' },
+      ) => {
+        segment(input: string): Iterable<{ segment: string }>
+      }
+    }
+  ).Segmenter
+
+  if (SegmenterCtor) {
+    const segmenter = new SegmenterCtor(undefined, { granularity: 'sentence' })
+    const chunks: string[] = []
+    for (const { segment } of segmenter.segment(normalized)) {
+      const sentence = segment.trim()
+      if (sentence) chunks.push(sentence)
+    }
+    if (chunks.length > 0) return chunks
+  }
+
+  return normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+}
+
+function extractSentenceMarks(ssml: string): string[] {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(ssml, 'application/xml')
+  const marks = Array.from(doc.getElementsByTagNameNS(SSML_NAMESPACE, 'mark'))
+    .map((el) => el.getAttribute('name')?.trim() ?? '')
+    .filter((name) => name.length > 0)
+  return marks
+}
+
 export function useFoliateTts() {
   function setFoliateSource(_doc: Document, viewEl: HTMLElement, highlightCallback: (range: Range) => void) {
     ttsInstance = null
     foliateReady.value = false
     cachedVisibleRange = null
     startAnchorRange = null
+    currentSentenceMarks = []
+    currentSentenceMarkIndex = 0
 
     // Remove previous relocate listener
     relocateCleanup?.()
@@ -167,6 +212,8 @@ export function useFoliateTts() {
     cachedVisibleRange = null
     startAnchorRange = null
     highlightedRange = null
+    currentSentenceMarks = []
+    currentSentenceMarkIndex = 0
     foliateReady.value = false
   }
 
@@ -199,22 +246,74 @@ export function useFoliateTts() {
   function startFromRange(range: Range): string | null {
     if (!ttsInstance) return null
     const anchoredRange = range.cloneRange()
-    // Keep a dedicated one-shot anchor for highlight sync used by
-    // "read/play from here", separate from relocate-driven visible range.
-    startAnchorRange = anchoredRange.cloneRange()
-    cachedVisibleRange = anchoredRange.cloneRange()
-    const ssml = ttsInstance.from(anchoredRange)
-    return ssml ? ssmlToPlainText(ssml) : null
+    try {
+      const ssml = ttsInstance.from(anchoredRange)
+      if (!ssml) return null
+      // Keep a dedicated one-shot anchor for highlight sync used by
+      // "read/play from here", separate from relocate-driven visible range.
+      startAnchorRange = anchoredRange.cloneRange()
+      cachedVisibleRange = anchoredRange.cloneRange()
+      return ssmlToPlainText(ssml)
+    } catch {
+      // Stale/detached ranges can occur around chapter transitions; caller
+      // will fall back to default chapter start/first available sentence.
+      return null
+    }
   }
 
   function setMark(mark: string) {
     ttsInstance?.setMark(mark)
   }
 
+  function setSentenceMarksFromSsml(ssml: string | null): boolean {
+    if (!ssml) {
+      currentSentenceMarks = []
+      currentSentenceMarkIndex = 0
+      return false
+    }
+    const marks = extractSentenceMarks(ssml)
+    currentSentenceMarks = marks
+    currentSentenceMarkIndex = 0
+    return marks.length > 0
+  }
+
+  function highlightCurrentSentence() {
+    if (!ttsInstance) return
+    const mark = currentSentenceMarks[currentSentenceMarkIndex]
+    if (!mark) return
+    ttsInstance.setMark(mark)
+    ensureHighlightVisible()
+  }
+
+  function moveToNextBlockWithSentences(applyFinalHighlight = true): boolean {
+    if (!ttsInstance) return false
+    while (true) {
+      const ssml = ttsInstance.next()
+      if (!ssml) return false
+      if (setSentenceMarksFromSsml(ssml)) {
+        if (applyFinalHighlight) highlightCurrentSentence()
+        return true
+      }
+    }
+  }
+
+  function moveToPrevBlockWithSentences(applyFinalHighlight = true): boolean {
+    if (!ttsInstance) return false
+    while (true) {
+      const ssml = ttsInstance.prev()
+      if (!ssml) return false
+      if (setSentenceMarksFromSsml(ssml)) {
+        currentSentenceMarkIndex = Math.max(0, currentSentenceMarks.length - 1)
+        if (applyFinalHighlight) highlightCurrentSentence()
+        return true
+      }
+    }
+  }
+
   function ensureHighlightVisible() {
     if (!rendererRef || !highlightedRange) return
     try {
-      void rendererRef.scrollToAnchor?.(highlightedRange.cloneRange(), true)
+      void rendererRef.scrollToAnchor?.(highlightedRange.cloneRange(), false)
     } catch {
       // Ignore — range can become stale while chapter is being redrawn.
     }
@@ -222,22 +321,37 @@ export function useFoliateTts() {
 
   function advanceHighlight() {
     if (!ttsInstance) return
-    ttsInstance.next(true)
-    ensureHighlightVisible()
+    if (currentSentenceMarkIndex + 1 < currentSentenceMarks.length) {
+      currentSentenceMarkIndex += 1
+      highlightCurrentSentence()
+      return
+    }
+    void moveToNextBlockWithSentences()
   }
 
   function retreatHighlight() {
     if (!ttsInstance) return
-    ttsInstance.prev(true)
+    if (currentSentenceMarkIndex > 0) {
+      currentSentenceMarkIndex -= 1
+      highlightCurrentSentence()
+      return
+    }
+    void moveToPrevBlockWithSentences()
+  }
+
+  function resetToFirstAvailableSentence(ssml: string | null): boolean {
+    if (!setSentenceMarksFromSsml(ssml)) {
+      return moveToNextBlockWithSentences()
+    }
+    highlightCurrentSentence()
     ensureHighlightVisible()
+    return true
   }
 
   function resetHighlightToStart() {
     if (!ttsInstance) return
-    ttsInstance.start()
-    // Mark names are block-local and start from "0"; this highlights the first
-    // sentence in the active block without advancing to the next block.
-    ttsInstance.setMark('0')
+    const ssml = ttsInstance.start()
+    resetToFirstAvailableSentence(ssml)
   }
 
   function resetHighlightToVisibleRange() {
@@ -248,8 +362,8 @@ export function useFoliateTts() {
       return
     }
     try {
-      ttsInstance.from(range.cloneRange())
-      ttsInstance.setMark('0')
+      const ssml = ttsInstance.from(range.cloneRange())
+      resetToFirstAvailableSentence(ssml)
       // Consume the anchor after first successful alignment.
       startAnchorRange = null
     } catch {
@@ -267,16 +381,36 @@ export function useFoliateTts() {
     resetHighlightToStart()
   }
 
-  function syncHighlightToBlockIndex(blockIndex: number, preferVisibleRange = false) {
+  function syncHighlightToSentenceIndex(sentenceIndex: number, preferVisibleRange = false) {
     if (!ttsInstance) return
-    if (blockIndex <= 0 || (preferVisibleRange && cachedVisibleRange)) {
+    if (sentenceIndex <= 0 || (preferVisibleRange && cachedVisibleRange)) {
       syncHighlightAtBlockStart(preferVisibleRange)
       return
     }
+
     resetHighlightToStart()
-    for (let i = 0; i < blockIndex; i++) {
-      ttsInstance.next(true)
+    let remaining = sentenceIndex
+    while (remaining > 0) {
+      const availableInCurrentBlock = Math.max(0, currentSentenceMarks.length - currentSentenceMarkIndex - 1)
+      if (remaining <= availableInCurrentBlock) {
+        currentSentenceMarkIndex += remaining
+        highlightCurrentSentence()
+        return
+      }
+
+      remaining -= availableInCurrentBlock + 1
+      if (!moveToNextBlockWithSentences(false)) {
+        // Clamp to the last available sentence if saved index overflows.
+        currentSentenceMarkIndex = Math.max(0, currentSentenceMarks.length - 1)
+        highlightCurrentSentence()
+        return
+      }
     }
+    highlightCurrentSentence()
+  }
+
+  function syncHighlightToBlockIndex(blockIndex: number, preferVisibleRange = false) {
+    syncHighlightToSentenceIndex(blockIndex, preferVisibleRange)
   }
 
   function showResumeHighlightFromCfi(cfi: string): boolean {
@@ -306,7 +440,7 @@ export function useFoliateTts() {
 
   async function getServerTextBlocks(bookFileId: number, chapterIndex: number): Promise<string[]> {
     const chapterText = await ttsApi.getChapterText(bookFileId, chapterIndex)
-    return chapterText.sentences.map((s) => s.text)
+    return chapterText.sentences.flatMap((s) => splitTextToSentences(s.text))
   }
 
   return {

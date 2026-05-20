@@ -71,7 +71,7 @@ export function useTtsPlayer() {
     currentVoiceId = voiceId
     speed.value = spd
     currentChapterIndex.value = startChapter
-    currentBlockIndex.value = 0
+    currentBlockIndex.value = Math.max(0, startBlock)
     getTextBlocks = textSource
     isActive.value = true
     playbackState.value = 'loading'
@@ -158,6 +158,7 @@ export function useTtsPlayer() {
       if (prefetched?.audioBlob) {
         playAudioBlob(prefetched.audioBlob, next)
         audioQueue.value = audioQueue.value.filter((b) => !(b.chapterIndex === currentChapterIndex.value && b.index === next))
+        prefetchAhead(next)
       } else {
         await fetchAndPlay(next)
       }

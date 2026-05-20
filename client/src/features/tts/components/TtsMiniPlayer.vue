@@ -1,22 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { Headphones, Pause, Play, X, SkipForward, SkipBack, ChevronUp } from 'lucide-vue-next'
 import { useTtsPlayer } from '../composables/useTtsPlayer'
+import { useTtsMiniPlayerUi } from '../composables/useTtsMiniPlayerUi'
 import TtsMiniPlayerExpanded from './TtsMiniPlayerExpanded.vue'
 
 const { playbackState, currentBook, currentBlockIndex, currentChapterIndex, speed, togglePlayPause, nextBlock, prevBlock, stopPlayback } =
   useTtsPlayer()
 
-const isExpanded = ref(false)
+const { isExpanded, setExpanded, toggleExpanded } = useTtsMiniPlayerUi()
 const isVisible = computed(() => playbackState.value !== 'idle')
 
 function handleToggleExpand() {
-  isExpanded.value = !isExpanded.value
+  toggleExpanded()
 }
 
 function handleClose() {
   stopPlayback()
-  isExpanded.value = false
+  setExpanded(false)
 }
 </script>
 
@@ -35,7 +36,9 @@ function handleClose() {
 
           <div class="flex-1 min-w-0 cursor-pointer" @click="handleToggleExpand">
             <div class="text-sm font-medium truncate text-foreground">{{ currentBook?.title ?? 'TTS Playback' }}</div>
-            <div class="text-xs text-muted-foreground">Chapter {{ currentChapterIndex + 1 }} - Block {{ currentBlockIndex + 1 }} - {{ speed }}x</div>
+            <div class="text-xs text-muted-foreground">
+              Chapter {{ currentChapterIndex + 1 }} - Sentence {{ currentBlockIndex + 1 }} - {{ speed }}x
+            </div>
           </div>
 
           <div class="flex items-center gap-1 flex-shrink-0">
@@ -76,7 +79,7 @@ function handleClose() {
         <div v-if="playbackState === 'error'" class="px-3 pb-2 text-xs text-destructive">Playback error - tap play to retry</div>
       </div>
 
-      <TtsMiniPlayerExpanded v-if="isExpanded" @close="isExpanded = false" />
+      <TtsMiniPlayerExpanded v-if="isExpanded" @close="setExpanded(false)" />
     </div>
   </Transition>
 </template>

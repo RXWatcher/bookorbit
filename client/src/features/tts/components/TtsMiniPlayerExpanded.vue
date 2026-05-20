@@ -54,7 +54,7 @@ function handleToggleSleepTimer() {
       <div class="flex-1 min-w-0">
         <div class="font-semibold text-foreground truncate">{{ currentBook?.title ?? 'TTS Playback' }}</div>
         <div class="text-sm text-muted-foreground">{{ currentBook?.author ?? '' }}</div>
-        <div class="text-xs text-muted-foreground mt-1">Chapter {{ currentChapterIndex + 1 }} - Block {{ currentBlockIndex + 1 }}</div>
+        <div class="text-xs text-muted-foreground mt-1">Chapter {{ currentChapterIndex + 1 }} - Sentence {{ currentBlockIndex + 1 }}</div>
       </div>
       <button class="p-1.5 rounded-md hover:bg-accent text-muted-foreground" @click="handleCollapse">
         <X class="w-4 h-4" />

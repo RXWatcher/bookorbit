@@ -59,6 +59,10 @@ export function useTtsPosition() {
     if (samePendingSave(pendingSave, next)) return
     if (!pendingSave && samePosition(savedPosition.value, next)) return
     pendingSave = next
+    // Keep local resume marker in sync with playback immediately so stopping
+    // playback does not briefly jump back to an older saved sentence.
+    savedPosition.value = { cfi: next.cfi, chapterIndex: next.chapterIndex }
+    hasSavedPosition.value = true
     void processPendingSave()
   }
 
