@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Search, Volume2, Loader2, Check } from 'lucide-vue-next'
 import { useTtsVoices } from '../composables/useTtsVoices'
 import type { TtsVoice } from '@bookorbit/types'
+import { formatVoiceDisplayName } from '../lib/voice-display'
 
 const props = withDefaults(
   defineProps<{
@@ -21,11 +22,24 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const { allVoices, providers, voicesLoading, loadVoices, loadProviders, searchVoices, previewVoice } = useTtsVoices()
+const { allVoices, providers, voicesLoading, loadVoices, loadProviders, previewVoice } = useTtsVoices()
 
 const searchQuery = ref('')
 const activeProviderId = ref(props.selectedProviderId ?? '')
 const previewingVoiceId = ref<string | null>(null)
+const languageFilter = ref('')
+const countryFilter = ref('')
+
+type VoiceListEntry = {
+  voice: TtsVoice
+  displayName: string
+  languageName: string
+  countryName: string
+  localeLabel: string
+}
+
+const languageDisplayNames = typeof Intl !== 'undefined' && 'DisplayNames' in Intl ? new Intl.DisplayNames(['en'], { type: 'language' }) : null
+const regionDisplayNames = typeof Intl !== 'undefined' && 'DisplayNames' in Intl ? new Intl.DisplayNames(['en'], { type: 'region' }) : null
 
 watch(
   () => props.selectedProviderId,
@@ -34,16 +48,63 @@ watch(
   },
 )
 
-const filteredGroups = computed(() => {
-  const voices = searchQuery.value ? searchVoices(searchQuery.value) : allVoices.value
-  const filtered = activeProviderId.value ? voices.filter((v) => v.providerId === activeProviderId.value) : voices
-  const groups: Record<string, { language: string; voices: TtsVoice[] }> = {}
-  for (const voice of filtered) {
-    const lang = voice.language || voice.locale || 'Unknown'
-    if (!groups[lang]) groups[lang] = { language: lang, voices: [] }
-    groups[lang]!.voices.push(voice)
+const entries = computed<VoiceListEntry[]>(() =>
+  allVoices.value.map((voice) => {
+    const parsed = parseLanguageCountryFromFriendlyName(voice.name) ?? parseLanguageCountryFromLocale(voice.locale)
+    const languageName = parsed.languageName
+    const countryName = parsed.countryName
+    return {
+      voice,
+      displayName: formatVoiceDisplayName(voice),
+      languageName,
+      countryName,
+      localeLabel: countryName ? `${languageName} (${countryName})` : languageName,
+    }
+  }),
+)
+
+const languageOptions = computed(() =>
+  [...new Set(entries.value.map((entry) => entry.languageName))].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })),
+)
+
+const countryOptions = computed(() => {
+  const source = languageFilter.value ? entries.value.filter((entry) => entry.languageName === languageFilter.value) : entries.value
+  return [...new Set(source.map((entry) => entry.countryName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
+})
+
+watch(countryOptions, (nextCountries) => {
+  if (countryFilter.value && !nextCountries.includes(countryFilter.value)) {
+    countryFilter.value = ''
   }
-  return Object.values(groups).sort((a, b) => a.language.localeCompare(b.language))
+})
+
+const filteredEntries = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  return entries.value.filter((entry) => {
+    if (activeProviderId.value && entry.voice.providerId !== activeProviderId.value) return false
+    if (languageFilter.value && entry.languageName !== languageFilter.value) return false
+    if (countryFilter.value && entry.countryName !== countryFilter.value) return false
+    if (!q) return true
+    return (
+      entry.displayName.toLowerCase().includes(q) ||
+      entry.languageName.toLowerCase().includes(q) ||
+      entry.countryName.toLowerCase().includes(q) ||
+      entry.localeLabel.toLowerCase().includes(q) ||
+      entry.voice.name.toLowerCase().includes(q) ||
+      entry.voice.locale.toLowerCase().includes(q) ||
+      entry.voice.providerName.toLowerCase().includes(q)
+    )
+  })
+})
+
+const filteredGroups = computed(() => {
+  const groups = new Map<string, VoiceListEntry[]>()
+  for (const entry of filteredEntries.value) {
+    const key = entry.localeLabel
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(entry)
+  }
+  return new Map([...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'en', { sensitivity: 'base' })))
 })
 
 async function handlePreview(voice: TtsVoice) {
@@ -62,6 +123,35 @@ function handleSelectVoice(voice: TtsVoice) {
 
 function handleSearchInput(event: Event) {
   searchQuery.value = (event.target as HTMLInputElement).value
+}
+
+function parseLanguageCountryFromFriendlyName(name: string): { languageName: string; countryName: string } | null {
+  const separator = name.lastIndexOf(' - ')
+  if (separator < 0) return null
+  const localePart = name.slice(separator + 3).trim()
+  const countryStart = localePart.lastIndexOf(' (')
+  if (countryStart < 0 || !localePart.endsWith(')')) return null
+  const languageName = localePart.slice(0, countryStart).trim()
+  const countryName = localePart.slice(countryStart + 2, -1).trim()
+  if (!languageName || !countryName) return null
+  return { languageName, countryName }
+}
+
+function parseLanguageCountryFromLocale(locale: string): { languageName: string; countryName: string } {
+  let languageCode = locale
+  let regionCode = ''
+  try {
+    const parsed = new Intl.Locale(locale)
+    languageCode = parsed.language ?? locale
+    regionCode = parsed.region ?? ''
+  } catch {
+    const [language = locale, region = ''] = locale.split('-')
+    languageCode = language
+    regionCode = region
+  }
+  const languageName = languageDisplayNames?.of(languageCode) ?? languageCode
+  const countryName = regionCode ? (regionDisplayNames?.of(regionCode) ?? regionCode) : ''
+  return { languageName, countryName }
 }
 
 void loadProviders()
@@ -99,40 +189,50 @@ void loadVoices()
           {{ provider.name }}
         </button>
       </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <select
+          v-model="languageFilter"
+          class="min-w-44 px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">All languages</option>
+          <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
+        </select>
+        <select
+          v-model="countryFilter"
+          class="min-w-44 px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">All countries</option>
+          <option v-for="country in countryOptions" :key="country" :value="country">{{ country }}</option>
+        </select>
+      </div>
     </div>
 
     <div class="flex-1 overflow-y-auto p-2">
       <div v-if="voicesLoading" class="flex items-center justify-center py-12">
         <Loader2 class="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
-      <div v-else-if="filteredGroups.length === 0" class="text-center py-12 text-muted-foreground text-sm">No voices found</div>
+      <div v-else-if="filteredGroups.size === 0" class="text-center py-12 text-muted-foreground text-sm">No voices found</div>
       <div v-else class="space-y-4">
-        <div v-for="group in filteredGroups" :key="group.language">
+        <div v-for="[locale, voices] in filteredGroups" :key="locale">
           <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 sticky top-0 bg-card">
-            {{ group.language }}
+            {{ locale }}
           </div>
           <div class="space-y-1">
             <div
-              v-for="voice in group.voices"
-              :key="voice.id"
+              v-for="entry in voices"
+              :key="entry.voice.id"
               class="flex items-center gap-3 p-2 rounded-lg hover:bg-accent cursor-pointer"
-              :class="{ 'bg-accent': props.selectedVoiceId === voice.id }"
-              @click="handleSelectVoice(voice)"
+              :class="{ 'bg-accent': props.selectedVoiceId === entry.voice.id }"
+              @click="handleSelectVoice(entry.voice)"
             >
-              <div class="flex-1 min-w-0">
-                <div class="text-sm font-medium truncate">{{ voice.name }}</div>
-                <div class="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{{ voice.locale }}</span>
-                  <span v-if="voice.gender" class="px-1.5 py-0.5 bg-muted rounded text-xs">{{ voice.gender }}</span>
-                  <span class="text-primary/70">{{ voice.providerName }}</span>
-                </div>
-              </div>
+              <div class="text-sm font-medium truncate flex-1 min-w-0">{{ entry.displayName }}</div>
               <div class="flex items-center gap-2 flex-shrink-0">
-                <button class="p-1.5 rounded-md hover:bg-background text-muted-foreground" @click.stop="handlePreview(voice)">
-                  <Loader2 v-if="previewingVoiceId === voice.id" class="w-4 h-4 animate-spin" />
+                <span v-if="entry.voice.gender" class="text-xs text-muted-foreground">{{ entry.voice.gender }}</span>
+                <button class="p-1.5 rounded-md hover:bg-background text-muted-foreground" @click.stop="handlePreview(entry.voice)">
+                  <Loader2 v-if="previewingVoiceId === entry.voice.id" class="w-4 h-4 animate-spin" />
                   <Volume2 v-else class="w-4 h-4" />
                 </button>
-                <Check v-if="props.selectedVoiceId === voice.id" class="w-4 h-4 text-primary" />
+                <Check v-if="props.selectedVoiceId === entry.voice.id" class="w-4 h-4 text-primary" />
               </div>
             </div>
           </div>

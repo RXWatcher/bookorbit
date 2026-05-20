@@ -1,23 +1,41 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Loader2, Save } from 'lucide-vue-next'
 import { useTtsPreferences } from './composables/useTtsPreferences'
 import { useTtsVoices } from './composables/useTtsVoices'
 import TtsVoicePicker from './components/TtsVoicePicker.vue'
 import TtsSpeedControl from './components/TtsSpeedControl.vue'
+import { formatVoiceDisplayName, formatVoiceLocaleLabel } from './lib/voice-display'
 
 const { userPrefs, loadUserPreferences, saveUserPreferences } = useTtsPreferences()
-const { loadProviders } = useTtsVoices()
+const { allVoices, loadProviders, loadVoices } = useTtsVoices()
 
 const selectedProviderId = ref<string | null>(null)
 const selectedVoiceId = ref<string | null>(null)
 const selectedSpeed = ref(1.0)
 const saving = ref(false)
 const showVoicePicker = ref(false)
+const selectedVoice = computed(() => {
+  const voiceId = selectedVoiceId.value
+  if (!voiceId) return null
+  return (
+    allVoices.value.find((voice) => voice.id === voiceId && (!selectedProviderId.value || voice.providerId === selectedProviderId.value)) ??
+    allVoices.value.find((voice) => voice.id === voiceId)
+  )
+})
+const selectedVoiceLabel = computed(() => {
+  if (!selectedVoice.value) return selectedVoiceId.value
+  return formatVoiceDisplayName(selectedVoice.value)
+})
+const selectedVoiceLocaleLabel = computed(() => {
+  if (!selectedVoice.value) return null
+  const localeLabel = formatVoiceLocaleLabel(selectedVoice.value)
+  return [localeLabel, selectedVoice.value.gender].filter(Boolean).join(' · ')
+})
 
 onMounted(async () => {
-  await Promise.all([loadUserPreferences(), loadProviders()])
+  await Promise.all([loadUserPreferences(), loadProviders(), loadVoices()])
   if (userPrefs.value) {
     selectedProviderId.value = userPrefs.value.providerId
     selectedVoiceId.value = userPrefs.value.voiceId
@@ -73,8 +91,13 @@ function handleToggleVoicePicker() {
           class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-background hover:bg-accent text-sm"
           @click="handleToggleVoicePicker"
         >
-          <span v-if="selectedVoiceId" class="text-foreground">{{ selectedVoiceId }}</span>
-          <span v-else class="text-muted-foreground">Select a voice...</span>
+          <div class="min-w-0 text-left">
+            <div v-if="selectedVoiceLabel" class="text-foreground truncate">{{ selectedVoiceLabel }}</div>
+            <div v-else class="text-muted-foreground">Select a voice...</div>
+            <div v-if="selectedVoiceLocaleLabel" class="text-xs text-muted-foreground truncate mt-0.5">
+              {{ selectedVoiceLocaleLabel }}
+            </div>
+          </div>
           <span class="text-muted-foreground text-xs">{{ showVoicePicker ? 'Hide' : 'Change' }}</span>
         </button>
         <div v-if="showVoicePicker" class="mt-2 border border-border rounded-xl overflow-hidden">

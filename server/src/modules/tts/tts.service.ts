@@ -36,6 +36,9 @@ export class TtsService {
 
   async previewVoice(providerId: string, voiceId: string): Promise<Buffer> {
     const provider = await this.resolveProvider(providerId);
+    if (providerId === EDGE_PROVIDER_ID) {
+      await this.assertEdgeVoiceAvailable(voiceId);
+    }
     return this.synthesisService.previewVoice(provider, providerId, voiceId);
   }
 
@@ -102,9 +105,10 @@ export class TtsService {
   async getUserPreferences(userId: number): Promise<TtsUserPreferences | null> {
     const row = await this.ttsRepo.findUserPreferences(userId);
     if (!row) return null;
+    const normalized = await this.normalizePreferenceVoiceForProvider(row.providerId != null ? String(row.providerId) : null, row.voiceId ?? null);
     return {
-      providerId: row.providerId != null ? String(row.providerId) : null,
-      voiceId: row.voiceId ?? null,
+      providerId: normalized.providerId,
+      voiceId: normalized.voiceId,
       speed: row.speed,
     };
   }
@@ -126,16 +130,24 @@ export class TtsService {
     await this.bookService.verifyBookAccess(bookId, user);
     const [userPrefs, bookPrefs] = await Promise.all([this.ttsRepo.findUserPreferences(userId), this.ttsRepo.findBookPreferences(userId, bookId)]);
     if (bookPrefs) {
+      const normalized = await this.normalizePreferenceVoiceForProvider(
+        bookPrefs.providerId != null ? String(bookPrefs.providerId) : userPrefs?.providerId != null ? String(userPrefs.providerId) : null,
+        bookPrefs.voiceId ?? userPrefs?.voiceId ?? null,
+      );
       return {
-        providerId: bookPrefs.providerId != null ? String(bookPrefs.providerId) : userPrefs?.providerId != null ? String(userPrefs.providerId) : null,
-        voiceId: bookPrefs.voiceId ?? userPrefs?.voiceId ?? null,
+        providerId: normalized.providerId,
+        voiceId: normalized.voiceId,
         speed: bookPrefs.speed ?? userPrefs?.speed ?? 1.0,
         isBookOverride: true,
       };
     }
+    const normalized = await this.normalizePreferenceVoiceForProvider(
+      userPrefs?.providerId != null ? String(userPrefs.providerId) : null,
+      userPrefs?.voiceId ?? null,
+    );
     return {
-      providerId: userPrefs?.providerId != null ? String(userPrefs.providerId) : null,
-      voiceId: userPrefs?.voiceId ?? null,
+      providerId: normalized.providerId,
+      voiceId: normalized.voiceId,
       speed: userPrefs?.speed ?? 1.0,
       isBookOverride: false,
     };
@@ -195,6 +207,9 @@ export class TtsService {
   private async resolveSynthesisVoiceId(providerId: string, requestedVoiceId: string | undefined, provider: ITtsProvider): Promise<string> {
     const trimmedVoiceId = requestedVoiceId?.trim();
     if (trimmedVoiceId) {
+      if (providerId === EDGE_PROVIDER_ID) {
+        await this.assertEdgeVoiceAvailable(trimmedVoiceId);
+      }
       return trimmedVoiceId;
     }
 
@@ -206,6 +221,43 @@ export class TtsService {
 
     this.logger.warn(`Missing voiceId for provider ${providerId}; falling back to voice ${fallbackVoiceId}`);
     return fallbackVoiceId;
+  }
+
+  private async normalizePreferenceVoiceForProvider(
+    providerId: string | null,
+    voiceId: string | null,
+  ): Promise<{ providerId: string | null; voiceId: string | null }> {
+    const trimmedVoiceId = voiceId?.trim() || null;
+    if (providerId) {
+      return { providerId, voiceId: trimmedVoiceId };
+    }
+
+    const edgeConfig = await this.ttsAdmin.getEdgeConfig();
+    if (!edgeConfig.enabled) {
+      return { providerId: null, voiceId: null };
+    }
+
+    if (!trimmedVoiceId) {
+      return { providerId: null, voiceId: null };
+    }
+
+    try {
+      const voices = await this.getEdgeVoicesFiltered();
+      const isAvailable = voices.some((voice) => voice.id === trimmedVoiceId);
+      return { providerId: null, voiceId: isAvailable ? trimmedVoiceId : null };
+    } catch {
+      // If voice lookup fails, keep the persisted value instead of forcing a reset.
+      return { providerId: null, voiceId: trimmedVoiceId };
+    }
+  }
+
+  private async assertEdgeVoiceAvailable(voiceId: string): Promise<void> {
+    const normalizedVoiceId = voiceId.trim();
+    const voices = await this.getEdgeVoicesFiltered();
+    const isAvailable = voices.some((voice) => voice.id === normalizedVoiceId);
+    if (!isAvailable) {
+      throw new NotFoundException(`Voice ${normalizedVoiceId} is not available for provider ${EDGE_PROVIDER_ID}`);
+    }
   }
 
   private providerIdToInt(providerId: string | undefined): number | null {

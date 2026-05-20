@@ -155,6 +155,14 @@ describe('TtsService', () => {
       expect(synthesis.synthesize).toHaveBeenCalledWith(OPENAI_PROVIDER_MOCK, '1', 'alloy', 1.0, 'Hello', 'mp3');
     });
 
+    it('should reject curated-out edge voiceId', async () => {
+      admin.getEdgeConfig.mockResolvedValue({ enabled: true, enabledVoices: ['en-US-JennyNeural'] });
+      await expect(service.synthesize({ providerId: EDGE_PROVIDER_ID, voiceId: 'en-GB-SoniaNeural', text: 'Hello', speed: 1.0 })).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(synthesis.synthesize).not.toHaveBeenCalled();
+    });
+
     it('should throw NotFoundException when no fallback voices are available', async () => {
       (factory.getEdgeProvider as vi.Mock).mockReturnValue({
         ...EDGE_PROVIDER_MOCK,
@@ -234,11 +242,12 @@ describe('TtsService', () => {
     });
 
     it('should return book override when it exists', async () => {
-      repo.findUserPreferences.mockResolvedValue({ providerId: null, voiceId: 'default-voice', speed: 1.0 });
-      repo.findBookPreferences.mockResolvedValue({ providerId: null, voiceId: 'book-voice', speed: 1.5 });
+      repo.findUserPreferences.mockResolvedValue({ providerId: 1, voiceId: 'default-voice', speed: 1.0 });
+      repo.findBookPreferences.mockResolvedValue({ providerId: 1, voiceId: 'book-voice', speed: 1.5 });
 
       const result: TtsEffectivePreferences = await service.getEffectiveBookPreferences(USER.id, 1, USER);
       expect(result.isBookOverride).toBe(true);
+      expect(result.providerId).toBe('1');
       expect(result.voiceId).toBe('book-voice');
       expect(result.speed).toBe(1.5);
     });
@@ -272,12 +281,23 @@ describe('TtsService', () => {
 
     it('should return null providerId when book override exists with null providerId and userPrefs is undefined', async () => {
       repo.findUserPreferences.mockResolvedValue(undefined);
-      repo.findBookPreferences.mockResolvedValue({ providerId: null, voiceId: 'book-voice', speed: 1.5 });
+      repo.findBookPreferences.mockResolvedValue({ providerId: null, voiceId: 'en-US-JennyNeural', speed: 1.5 });
 
       const result: TtsEffectivePreferences = await service.getEffectiveBookPreferences(USER.id, 1, USER);
       expect(result.providerId).toBeNull();
-      expect(result.voiceId).toBe('book-voice');
+      expect(result.voiceId).toBe('en-US-JennyNeural');
       expect(result.isBookOverride).toBe(true);
+    });
+
+    it('should clear curated-out edge voice from effective preferences', async () => {
+      repo.findUserPreferences.mockResolvedValue({ providerId: null, voiceId: 'en-GB-SoniaNeural', speed: 1.0 });
+      repo.findBookPreferences.mockResolvedValue(null);
+      admin.getEdgeConfig.mockResolvedValue({ enabled: true, enabledVoices: ['en-US-JennyNeural'] });
+
+      const result: TtsEffectivePreferences = await service.getEffectiveBookPreferences(USER.id, 1, USER);
+      expect(result.providerId).toBeNull();
+      expect(result.voiceId).toBeNull();
+      expect(result.speed).toBe(1.0);
     });
 
     it('should propagate ForbiddenException from bookService.verifyBookAccess', async () => {
@@ -303,6 +323,14 @@ describe('TtsService', () => {
       repo.findUserPreferences.mockResolvedValue({ providerId: null, voiceId: null, speed: 1.0 });
       const result = await service.getUserPreferences(42);
       expect(result?.providerId).toBeNull();
+    });
+
+    it('should clear curated-out edge voice from user preferences', async () => {
+      repo.findUserPreferences.mockResolvedValue({ providerId: null, voiceId: 'en-GB-SoniaNeural', speed: 1.25 });
+      admin.getEdgeConfig.mockResolvedValue({ enabled: true, enabledVoices: ['en-US-JennyNeural'] });
+
+      const result = await service.getUserPreferences(42);
+      expect(result).toEqual({ providerId: null, voiceId: null, speed: 1.25 });
     });
   });
 
