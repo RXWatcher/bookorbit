@@ -41,6 +41,7 @@ export function useFoliate(
   onApplyStyles?: (renderer: FoliateRenderer) => void,
   onMiddleTap?: () => void,
   onChapterLoad?: (doc: Document, viewEl: HTMLElement) => void,
+  canNavigate?: () => boolean,
 ) {
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -50,7 +51,7 @@ export function useFoliate(
 
   const annotations = useFoliateAnnotations()
   const selection = useFoliateSelection(() => viewRef.value)
-  const input = useFoliateInput(() => viewRef.value, onMiddleTap, selection.handleSelectionEnd, selection.handleSelectionChange)
+  const input = useFoliateInput(() => viewRef.value, onMiddleTap, selection.handleSelectionEnd, selection.handleSelectionChange, canNavigate)
 
   async function loadScript() {
     if (customElements.get('foliate-view')) return

@@ -112,7 +112,7 @@ const progress = useReaderProgress(bookId, fileId, elapsedMinutes, 0, { tracking
 const { cfi, chapterTitle, sectionIndex, totalSections, fraction, locationTotal, footerMode, cycleFooterMode, updateHeadsFeet } = progress
 
 const visibility = useVisibility()
-const { headerVisible, footerVisible, isPinned, handleMiddleTap, setVisibilityLock } = visibility
+const { headerVisible, footerVisible, isPinned, handleMiddleTap, hideOverlays, setVisibilityLock } = visibility
 
 useWakeLock()
 
@@ -154,8 +154,8 @@ const { showHelpModal } = useReaderKeyboardShortcuts({
   toggleFullscreen,
   cycleFooterMode,
   closePanel: closeAnyPanel,
-  goToStart: () => goToFraction(0),
-  goToEnd: () => goToFraction(1),
+  goToStart: () => navigateToFraction(0),
+  goToEnd: () => navigateToFraction(1),
 })
 
 function toggleHelpModal() {
@@ -232,12 +232,13 @@ const {
   clearHighlight,
   startFromRange: startFoliateFromRange,
 } = useFoliateTts()
-const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex, playbackState, pausePlayback } = useTtsPlayer()
+const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex, playbackState } = useTtsPlayer()
 const { setExpanded: setMiniPlayerExpanded, setReaderFooterVisible } = useTtsMiniPlayerUi()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
 const ttsPosition = useTtsPosition()
 
 const isTtsActive = computed(() => isActive.value && currentBook.value?.bookFileId === fileId)
+const isNavigationLocked = computed(() => isTtsActive.value && playbackState.value === 'playing')
 const isOverlayFooterVisible = computed(() => footerVisible.value && !showTapZones.value)
 const showTtsResumePrompt = ref(false)
 const clearingSavedTtsPosition = ref(false)
@@ -246,6 +247,7 @@ const syncedHighlightBlockIndex = ref<number | null>(null)
 const preferVisibleRangeForTtsSync = ref(false)
 const pendingTtsChapterNavigation = ref<number | null>(null)
 const isTtsRelocating = ref(false)
+const lastNavigationBlockedToastAt = ref(0)
 
 function withTtsRelocation(fn: () => void | Promise<void>) {
   isTtsRelocating.value = true
@@ -421,6 +423,11 @@ async function buildTtsBook(): Promise<{
 
 async function handleStartTts() {
   if (!ensureTtsAvailable()) return
+
+  showSettings.value = false
+  showTapZones.value = false
+  hideOverlays(true)
+
   if (isTtsActive.value) {
     setMiniPlayerExpanded(true)
     return
@@ -560,11 +567,6 @@ function onRelocateHandler(detail: RelocateDetail) {
   if (renderer) {
     updateHeadsFeet(renderer, activeMode.value)
   }
-
-  if (isTtsActive.value && !isTtsRelocating.value && playbackState.value === 'playing') {
-    pausePlayback()
-    toast.info('Playback paused because you navigated away.')
-  }
 }
 
 function onApplyStylesHandler(renderer: FoliateRenderer) {
@@ -575,6 +577,22 @@ function onApplyStylesHandler(renderer: FoliateRenderer) {
 
 function onMiddleTapHandler() {
   handleMiddleTap()
+}
+
+function canRunManualNavigation(): boolean {
+  if (!isNavigationLocked.value) return true
+
+  const now = Date.now()
+  if (now - lastNavigationBlockedToastAt.value >= 1200) {
+    lastNavigationBlockedToastAt.value = now
+    toast.info('Pause TTS playback to navigate pages.')
+  }
+
+  return false
+}
+
+function handleBlockedPageInteraction() {
+  canRunManualNavigation()
 }
 
 const {
@@ -594,7 +612,7 @@ const {
   setTextSelectedHandler,
   view: foliateView,
   bookLanguage,
-} = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler, onChapterLoadHandler)
+} = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler, onChapterLoadHandler, canRunManualNavigation)
 
 setTextSelectedHandler(selection.show)
 
@@ -721,6 +739,16 @@ function setSettingsOpen(open: boolean) {
 watch(showSettings, (open) => {
   setVisibilityLock(open)
 })
+
+watch(
+  () => isNavigationLocked.value,
+  (locked) => {
+    if (!locked) return
+    selection.dismiss()
+    showDictionary.value = false
+    showTranslation.value = false
+  },
+)
 
 watch(
   () => isOverlayFooterVisible.value,
@@ -853,8 +881,23 @@ function onSearchClear() {
   clearSearch(foliateView.value as FoliateView | null)
 }
 
+function navigateToTarget(target: string | number) {
+  if (!canRunManualNavigation()) return
+  goTo(target)
+}
+
+function navigateToFraction(targetFraction: number) {
+  if (!canRunManualNavigation()) return
+  goToFraction(targetFraction)
+}
+
+function navigateToSection(targetSection: number) {
+  if (!canRunManualNavigation()) return
+  goToSection(targetSection)
+}
+
 function navigateSearch(cfiTarget: string) {
-  goTo(cfiTarget)
+  navigateToTarget(cfiTarget)
 }
 
 async function navigateFromSidebar(cfiTarget: string) {
@@ -878,10 +921,6 @@ function closeSearch() {
   showSearch.value = false
 }
 
-<<<<<<< HEAD
-onUnmounted(() => {
-  setReaderFooterVisible(false)
-})
 watch(showSidebar, (open) => {
   if (open) {
     void hydrateSidebarLocationMeta()
@@ -965,6 +1004,13 @@ onUnmounted(() => {
       </div>
 
       <div ref="containerRef" class="absolute inset-0" />
+      <div
+        v-if="isNavigationLocked"
+        class="absolute inset-0 z-[40] touch-none"
+        @pointerdown.stop.prevent="handleBlockedPageInteraction"
+        @touchstart.stop.prevent="handleBlockedPageInteraction"
+        @click.stop.prevent="handleBlockedPageInteraction"
+      />
 
       <!-- Tap/Click Zones Reference Overlay -->
       <Transition name="fade">
@@ -1216,11 +1262,12 @@ onUnmounted(() => {
       :chapterStartFraction="chapterStartFraction"
       :chapterEndFraction="chapterEndFraction"
       :locationTotal="locationTotal"
+      :navigationLocked="isNavigationLocked"
       class="transition-all duration-300"
       :class="footerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-full pointer-events-none'"
-      @prevSection="goToSection(sectionIndex - 1)"
-      @nextSection="goToSection(sectionIndex + 1)"
-      @seek="goToFraction($event)"
+      @prevSection="navigateToSection(sectionIndex - 1)"
+      @nextSection="navigateToSection(sectionIndex + 1)"
+      @seek="navigateToFraction($event)"
     />
 
     <ReaderSidebar
@@ -1232,6 +1279,7 @@ onUnmounted(() => {
       :locationMetaByCfi="sidebarLocationMetaByCfi"
       :activeHref="activeHref"
       :expandedHrefs="expandedHrefs"
+      :navigationLocked="isNavigationLocked"
       @close="showSidebar = false"
       @navigateChapter="navigateChapterFromSidebar"
       @navigateBookmark="navigateFromSidebar"
@@ -1246,6 +1294,7 @@ onUnmounted(() => {
       :results="searchResults"
       :isSearching="isSearching"
       :initialQuery="searchInitialQuery"
+      :navigationLocked="isNavigationLocked"
       @search="onSearchQuery"
       @clear="onSearchClear"
       @navigate="navigateSearch($event)"

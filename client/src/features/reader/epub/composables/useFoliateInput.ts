@@ -8,6 +8,7 @@ export function useFoliateInput(
   onMiddleTap: (() => void) | undefined,
   handleSelectionEnd: (doc: Document) => void,
   handleSelectionChange: (doc: Document) => void,
+  canNavigate: (() => boolean) | undefined = undefined,
 ) {
   const clickedDocs = new WeakSet<Document>()
 
@@ -23,6 +24,10 @@ export function useFoliateInput(
 
   function getViewEl() {
     return getView() as { prev?: () => void; next?: () => void; getBoundingClientRect?: () => DOMRect } | null
+  }
+
+  function canProceedNavigation(): boolean {
+    return canNavigate ? canNavigate() : true
   }
 
   function handleTouchStart(e: TouchEvent) {
@@ -74,6 +79,7 @@ export function useFoliateInput(
 
       if (Math.abs(deltaX) >= SWIPE_THRESHOLD && Math.abs(deltaX) > deltaY) {
         if (isNavigating) return
+        if (!canProceedNavigation()) return
         isNavigating = true
         if (deltaX < 0) getViewEl()?.next?.()
         else getViewEl()?.prev?.()
@@ -200,10 +206,12 @@ export function useFoliateInput(
       if (!isMobile && (y < 64 || y > height - 64)) {
         onMiddleTap?.()
       } else if (currentZone === 'left' && !isMobile) {
+        if (!canProceedNavigation()) return
         isNavigating = true
         getViewEl()?.prev?.()
         setTimeout(() => (isNavigating = false), 300)
       } else if (currentZone === 'right' && !isMobile) {
+        if (!canProceedNavigation()) return
         isNavigating = true
         getViewEl()?.next?.()
         setTimeout(() => (isNavigating = false), 300)
@@ -275,17 +283,21 @@ export function useFoliateInput(
     const view = getViewEl()
     if (!view) return
     if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-      view.prev?.()
       e.preventDefault()
+      if (!canProceedNavigation()) return
+      view.prev?.()
     } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-      view.next?.()
       e.preventDefault()
+      if (!canProceedNavigation()) return
+      view.next?.()
     } else if (e.key === ' ' && e.shiftKey) {
+      e.preventDefault()
+      if (!canProceedNavigation()) return
       view.prev?.()
-      e.preventDefault()
     } else if (e.key === ' ') {
-      view.next?.()
       e.preventDefault()
+      if (!canProceedNavigation()) return
+      view.next?.()
     }
   }
 

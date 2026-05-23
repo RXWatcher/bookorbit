@@ -100,6 +100,48 @@ describe('useFoliateInput', () => {
     input.cleanup()
   })
 
+  it('calls canNavigate before keyboard paging and continues when allowed', () => {
+    const prev = vi.fn<() => void>()
+    const next = vi.fn<() => void>()
+    const canNavigate = vi.fn<() => boolean>(() => true)
+    const view: ViewLike = {
+      prev,
+      next,
+      getBoundingClientRect: () => ({ left: 0, width: 100 }) as DOMRect,
+    }
+
+    const input = useFoliateInput(() => view, undefined, vi.fn<() => void>(), vi.fn<() => void>(), canNavigate)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+
+    expect(canNavigate).toHaveBeenCalledTimes(1)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(prev).not.toHaveBeenCalled()
+
+    input.cleanup()
+  })
+
+  it('blocks keyboard paging when canNavigate returns false', () => {
+    const prev = vi.fn<() => void>()
+    const next = vi.fn<() => void>()
+    const canNavigate = vi.fn<() => boolean>(() => false)
+    const view: ViewLike = {
+      prev,
+      next,
+      getBoundingClientRect: () => ({ left: 0, width: 100 }) as DOMRect,
+    }
+
+    const input = useFoliateInput(() => view, undefined, vi.fn<() => void>(), vi.fn<() => void>(), canNavigate)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+
+    expect(canNavigate).toHaveBeenCalledTimes(1)
+    expect(next).not.toHaveBeenCalled()
+    expect(prev).not.toHaveBeenCalled()
+
+    input.cleanup()
+  })
+
   it('routes click-zone window messages to prev/next/middle actions', () => {
     vi.useFakeTimers()
 

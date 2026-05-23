@@ -53,6 +53,15 @@ export function useVisibility() {
     }
   }
 
+  function hideOverlays(force = false) {
+    if (isVisibilityLocked && !force) return
+
+    if (hideTimer) clearTimeout(hideTimer)
+    isPinned.value = false
+    headerVisible.value = false
+    footerVisible.value = false
+  }
+
   function setVisibilityLock(locked: boolean) {
     isVisibilityLocked = locked
 
@@ -77,5 +86,5 @@ export function useVisibility() {
     if (hideTimer) clearTimeout(hideTimer)
   })
 
-  return { headerVisible, footerVisible, isPinned, handleMiddleTap, showHeader, showFooter, setVisibilityLock }
+  return { headerVisible, footerVisible, isPinned, handleMiddleTap, showHeader, showFooter, hideOverlays, setVisibilityLock }
 }

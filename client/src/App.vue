@@ -11,6 +11,9 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 const { isOpen } = useChangePasswordDialog()
 const themeStore = useThemeStore()
+const toasterBottomOffset = 'max(16px, var(--tts-mini-player-clearance, 0px))'
+const toasterOffset = { right: '16px', bottom: toasterBottomOffset }
+const toasterMobileOffset = { left: '16px', right: '16px', bottom: toasterBottomOffset }
 
 initChartThemes()
 
@@ -30,6 +33,6 @@ provide(
     </router-view>
     <ChangePasswordDialog v-if="isOpen" />
     <TtsMiniPlayer />
-    <Toaster rich-colors position="bottom-right" :visible-toasts="5" :gap="8" />
+    <Toaster rich-colors position="bottom-right" :visible-toasts="5" :gap="8" :offset="toasterOffset" :mobile-offset="toasterMobileOffset" />
   </TooltipProvider>
 </template>

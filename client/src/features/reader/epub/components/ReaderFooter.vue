@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, ChevronsUpDown } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -11,6 +11,7 @@ const props = defineProps<{
   chapterStartFraction: number
   chapterEndFraction: number
   locationTotal: number
+  navigationLocked?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,17 +25,23 @@ const goToValue = ref('')
 const goToInputRef = ref<HTMLInputElement | null>(null)
 
 function onSeek(e: Event) {
+  if (props.navigationLocked) return
   const input = e.target as HTMLInputElement
   emit('seek', Number(input.value))
 }
 
 function handlePercentageClick() {
+  if (props.navigationLocked) return
   showGoToInput.value = true
   goToValue.value = ''
   setTimeout(() => goToInputRef.value?.focus(), 0)
 }
 
 function handleGoToSubmit() {
+  if (props.navigationLocked) {
+    showGoToInput.value = false
+    return
+  }
   const raw = goToValue.value.trim()
   if (!raw) {
     showGoToInput.value = false
@@ -66,6 +73,13 @@ function handleGoToKeydown(e: KeyboardEvent) {
 function handleGoToBlur() {
   showGoToInput.value = false
 }
+
+watch(
+  () => props.navigationLocked,
+  (locked) => {
+    if (locked) showGoToInput.value = false
+  },
+)
 </script>
 
 <template>
@@ -74,7 +88,13 @@ function handleGoToBlur() {
   >
     <Tooltip>
       <TooltipTrigger as-child>
-        <button type="button" aria-label="Previous section" class="viewer-btn" :disabled="sectionIndex === 0" @click="emit('prevSection')">
+        <button
+          type="button"
+          aria-label="Previous section"
+          class="viewer-btn"
+          :disabled="sectionIndex === 0 || !!props.navigationLocked"
+          @click="emit('prevSection')"
+        >
           <ChevronLeft :size="18" />
         </button>
       </TooltipTrigger>
@@ -99,8 +119,9 @@ function handleGoToBlur() {
         max="1"
         step="0.001"
         :value="fraction"
+        :disabled="!!props.navigationLocked"
         @input="onSeek"
-        class="w-full h-1 rounded-full appearance-none cursor-pointer relative z-10"
+        class="w-full h-1 rounded-full appearance-none relative z-10 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
         :style="{
           accentColor: 'var(--primary)',
           background: `linear-gradient(to right, var(--primary) ${fraction * 100}%, var(--border) ${fraction * 100}%)`,
@@ -133,7 +154,8 @@ function handleGoToBlur() {
           <button
             type="button"
             aria-label="Jump to location"
-            class="h-8 px-2 rounded-md border border-transparent hover:border-border text-xs tabular-nums shrink-0 min-w-18 text-center text-muted-foreground hover:text-foreground transition-colors inline-flex items-center justify-center gap-1"
+            :disabled="!!props.navigationLocked"
+            class="h-8 px-2 rounded-md border border-transparent hover:border-border text-xs tabular-nums shrink-0 min-w-18 text-center text-muted-foreground hover:text-foreground transition-colors inline-flex items-center justify-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:text-muted-foreground"
             @click="handlePercentageClick"
           >
             <span class="text-[11px] uppercase tracking-wide">Go</span>
@@ -151,7 +173,7 @@ function handleGoToBlur() {
           type="button"
           aria-label="Next section"
           class="viewer-btn"
-          :disabled="totalSections > 0 && sectionIndex >= totalSections - 1"
+          :disabled="(totalSections > 0 && sectionIndex >= totalSections - 1) || !!props.navigationLocked"
           @click="emit('nextSection')"
         >
           <ChevronRight :size="18" />
