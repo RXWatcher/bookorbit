@@ -3,18 +3,18 @@ import { onMounted, onUnmounted, ref } from 'vue'
 export function useVisibility() {
   const headerVisible = ref(false)
   const footerVisible = ref(false)
+  const isPinned = ref(false)
 
-  let isPinned = false
   let isVisibilityLocked = false
   let hideTimer: ReturnType<typeof setTimeout> | null = null
 
-  const HEADER_TRIGGER = 24
-  const FOOTER_TRIGGER = 24
+  const HEADER_TRIGGER = 48
+  const FOOTER_TRIGGER = 48
 
   function scheduleHide() {
     if (hideTimer) clearTimeout(hideTimer)
     hideTimer = setTimeout(() => {
-      if (!isPinned && !isVisibilityLocked) {
+      if (!isPinned.value && !isVisibilityLocked) {
         headerVisible.value = false
         footerVisible.value = false
       }
@@ -27,7 +27,7 @@ export function useVisibility() {
     const y = e.clientY
     const height = window.innerHeight
 
-    if (!isPinned) {
+    if (!isPinned.value) {
       if (y < HEADER_TRIGGER) {
         headerVisible.value = true
         scheduleHide()
@@ -47,10 +47,10 @@ export function useVisibility() {
   function handleMiddleTap() {
     if (isVisibilityLocked) return
 
-    isPinned = !isPinned
-    headerVisible.value = isPinned
-    footerVisible.value = isPinned
-    if (!isPinned) {
+    isPinned.value = !isPinned.value
+    headerVisible.value = isPinned.value
+    footerVisible.value = isPinned.value
+    if (!isPinned.value) {
       if (hideTimer) clearTimeout(hideTimer)
     }
   }
@@ -61,7 +61,7 @@ export function useVisibility() {
       return
     }
 
-    if (!isPinned) {
+    if (!isPinned.value) {
       headerVisible.value = true
       scheduleHide()
     }
@@ -73,7 +73,7 @@ export function useVisibility() {
       return
     }
 
-    if (!isPinned) {
+    if (!isPinned.value) {
       footerVisible.value = true
       scheduleHide()
     }
@@ -89,7 +89,7 @@ export function useVisibility() {
       return
     }
 
-    if (isPinned) {
+    if (isPinned.value) {
       headerVisible.value = true
       footerVisible.value = true
       return
@@ -108,5 +108,5 @@ export function useVisibility() {
     if (hideTimer) clearTimeout(hideTimer)
   })
 
-  return { headerVisible, footerVisible, handleMiddleTap, onMouseMove, showHeader, showFooter, setVisibilityLock }
+  return { headerVisible, footerVisible, isPinned, handleMiddleTap, onMouseMove, showHeader, showFooter, setVisibilityLock }
 }

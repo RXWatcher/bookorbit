@@ -32,6 +32,7 @@ export function useFoliateInput(
     touchStartY = touch.clientY
     touchStartTime = Date.now()
     isTextSelectionInProgress = false
+    if (longHoldTimeout) clearTimeout(longHoldTimeout)
     longHoldTimeout = setTimeout(() => {
       longHoldTimeout = null
     }, 500)
@@ -112,6 +113,7 @@ export function useFoliateInput(
     doc.addEventListener(
       'mousedown',
       () => {
+        if (longHoldTimeout) clearTimeout(longHoldTimeout)
         longHoldTimeout = setTimeout(() => {
           longHoldTimeout = null
         }, 500)
@@ -202,7 +204,9 @@ export function useFoliateInput(
         getViewEl()?.next?.()
         setTimeout(() => (isNavigating = false), 300)
       } else {
-        onMiddleTap?.()
+        if (isMobile) {
+          onMiddleTap?.()
+        }
       }
     }, DOUBLE_CLICK_MS)
   }

@@ -12,6 +12,8 @@ import {
   Headphones,
   Maximize,
   Minimize,
+  Pin,
+  PinOff,
   Search,
   Settings,
 } from 'lucide-vue-next'
@@ -26,6 +28,7 @@ const props = defineProps<{
   peekMode?: boolean
   isTtsActive?: boolean
   isTtsAvailable?: boolean
+  isPinned?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +42,7 @@ const emit = defineEmits<{
   cycleFooterMode: []
   startReading: []
   startTts: []
+  togglePin: []
 }>()
 
 const isFullscreen = ref(false)
@@ -169,6 +173,21 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
           </button>
         </TooltipTrigger>
         <TooltipContent>{{ isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen' }}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button
+            class="viewer-btn"
+            :class="props.isPinned ? '!bg-muted !text-primary' : ''"
+            :aria-label="props.isPinned ? 'Unpin menu' : 'Pin menu'"
+            @click="emit('togglePin')"
+          >
+            <PinOff v-if="props.isPinned" :size="18" />
+            <Pin v-else :size="18" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{{ props.isPinned ? 'Unpin menu' : 'Pin menu' }}</TooltipContent>
       </Tooltip>
 
       <DropdownMenu :open="props.settingsOpen" @update:open="onSettingsOpenChange">

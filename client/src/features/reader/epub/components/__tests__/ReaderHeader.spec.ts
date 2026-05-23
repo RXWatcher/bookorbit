@@ -39,6 +39,7 @@ describe('ReaderHeader', () => {
     await wrapper.get('button[aria-label="Cycle footer info mode"]').trigger('click')
     await wrapper.get('button[aria-label="Keyboard shortcuts"]').trigger('click')
     await wrapper.get('button[aria-label="Enter fullscreen"]').trigger('click')
+    await wrapper.get('button[aria-label="Pin menu"]').trigger('click')
 
     expect(wrapper.emitted('back')?.length).toBe(1)
     expect(wrapper.emitted('toggleSidebar')?.length).toBe(1)
@@ -47,6 +48,7 @@ describe('ReaderHeader', () => {
     expect(wrapper.emitted('cycleFooterMode')?.length).toBe(1)
     expect(wrapper.emitted('toggleHelp')?.length).toBe(1)
     expect(wrapper.emitted('toggleFullscreen')?.length).toBe(1)
+    expect(wrapper.emitted('togglePin')?.length).toBe(1)
   })
 
   it('forwards dropdown open changes', () => {

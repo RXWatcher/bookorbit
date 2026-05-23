@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { ChevronDown, Pause, Play, SkipForward, SkipBack, Headphones, Moon, Gauge, Mic2, Loader2, Book, Star } from 'lucide-vue-next'
 import { useTtsPlayer } from '../composables/useTtsPlayer'
@@ -28,7 +28,7 @@ const {
   setSpeed,
   setVoice,
 } = useTtsPlayer()
-const { saveBookPreferences, saveUserPreferences } = useTtsPreferences()
+const { saveBookPreferences, saveUserPreferences, loadBookPreferences, loadUserPreferences, defaultVoiceId, defaultProviderId } = useTtsPreferences()
 const { allVoices, voicesLoading, loadVoices } = useTtsVoices()
 
 const showSpeedControl = ref(false)
@@ -36,6 +36,8 @@ const showSleepTimer = ref(false)
 const showVoicePicker = ref(false)
 const savingBookVoice = ref(false)
 const savingDefaultVoice = ref(false)
+
+const currentBookPrefs = ref<{ providerId: string | null; voiceId: string | null } | null>(null)
 
 const selectedVoice = computed(() =>
   allVoices.value.find((voice) => voice.id === currentVoiceId.value && voice.providerId === currentProviderId.value),
@@ -45,8 +47,49 @@ const selectedVoiceLabel = computed(() => {
   return `${formatVoiceDisplayName(selectedVoice.value)} - ${formatVoiceLocaleLabel(selectedVoice.value)}`
 })
 
+async function fetchBookPrefs() {
+  if (!currentBook.value) return
+  try {
+    const prefs = await loadBookPreferences(currentBook.value.bookId)
+    currentBookPrefs.value = {
+      providerId: prefs.providerId,
+      voiceId: prefs.voiceId,
+    }
+  } catch {
+    // Ignore error
+  }
+}
+
+watch(
+  () => currentBook.value?.bookId,
+  () => {
+    void fetchBookPrefs()
+  },
+  { immediate: true },
+)
+
+function normalizeProviderId(id: string | null | undefined): string {
+  if (!id || id === 'edge') return 'edge'
+  return id
+}
+
+const isBookDefault = computed(() => {
+  return (
+    !!currentBookPrefs.value &&
+    normalizeProviderId(currentBookPrefs.value.providerId) === normalizeProviderId(currentProviderId.value) &&
+    currentBookPrefs.value.voiceId === currentVoiceId.value
+  )
+})
+
+const isGlobalDefault = computed(() => {
+  return (
+    normalizeProviderId(defaultProviderId.value) === normalizeProviderId(currentProviderId.value) && defaultVoiceId.value === currentVoiceId.value
+  )
+})
+
 onMounted(() => {
   if (allVoices.value.length === 0) void loadVoices()
+  void loadUserPreferences()
 })
 
 function handleCollapse() {
@@ -97,6 +140,10 @@ async function handleSaveBookVoice() {
       providerId: currentProviderId.value,
       voiceId: currentVoiceId.value,
     })
+    currentBookPrefs.value = {
+      providerId: currentProviderId.value,
+      voiceId: currentVoiceId.value,
+    }
     toast.success('Voice saved for this book')
   } catch {
     toast.error('Failed to save book voice')
@@ -197,22 +244,32 @@ async function handleSaveDefaultVoice() {
         </div>
         <div class="flex items-center gap-1.5 flex-shrink-0">
           <button
-            class="p-1.5 rounded-md border border-border text-muted-foreground bg-background hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors"
+            class="p-1.5 rounded-md border transition-colors disabled:opacity-50"
+            :class="
+              isBookDefault
+                ? 'border-primary/30 text-primary bg-primary/10 hover:bg-primary/20'
+                : 'border-border text-muted-foreground bg-background hover:bg-accent hover:text-foreground'
+            "
             title="Save for this book"
             :disabled="savingBookVoice || !currentVoiceId"
             @click="handleSaveBookVoice"
           >
             <Loader2 v-if="savingBookVoice" class="w-4 h-4 animate-spin" />
-            <Book v-else class="w-4 h-4" />
+            <Book v-else class="w-4 h-4" :class="{ 'fill-primary/20': isBookDefault }" />
           </button>
           <button
-            class="p-1.5 rounded-md border border-border text-muted-foreground bg-background hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors"
+            class="p-1.5 rounded-md border transition-colors disabled:opacity-50"
+            :class="
+              isGlobalDefault
+                ? 'border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
+                : 'border-border text-muted-foreground bg-background hover:bg-accent hover:text-foreground'
+            "
             title="Set as global default"
             :disabled="savingDefaultVoice || !currentVoiceId"
             @click="handleSaveDefaultVoice"
           >
             <Loader2 v-if="savingDefaultVoice" class="w-4 h-4 animate-spin" />
-            <Star v-else class="w-4 h-4" />
+            <Star v-else class="w-4 h-4" :class="{ 'fill-current': isGlobalDefault }" />
           </button>
         </div>
       </div>

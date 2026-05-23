@@ -19,6 +19,8 @@ import {
   LayoutGrid,
   Maximize,
   Moon,
+  Pin,
+  PinOff,
   ScanLine,
   Settings,
   Sun,
@@ -42,7 +44,7 @@ const route = useRoute()
 const router = useRouter()
 const trackingEnabled = computed(() => !props.peekMode)
 
-const { headerVisible, footerVisible, handleMiddleTap, showHeader, showFooter, setVisibilityLock } = useVisibility()
+const { headerVisible, footerVisible, isPinned, handleMiddleTap, showHeader, showFooter, setVisibilityLock } = useVisibility()
 
 const { onActivity, elapsedMinutes } = useReadingSession(
   props.fileId,
@@ -401,7 +403,10 @@ function handleImageClick(e: MouseEvent) {
     else nextPage()
     return
   }
-  handleMiddleTap()
+  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  if (isMobile) {
+    handleMiddleTap()
+  }
 }
 
 // ── Touch / swipe ──────────────────────────────────────────────────────────────
@@ -622,6 +627,22 @@ onUnmounted(() => {
             Start reading
           </button>
         </div>
+
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              class="viewer-btn"
+              :class="isPinned ? '!bg-muted !text-primary' : ''"
+              :aria-label="isPinned ? 'Unpin menu' : 'Pin menu'"
+              @click="handleMiddleTap"
+            >
+              <PinOff v-if="isPinned" :size="15" />
+              <Pin v-else :size="15" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ isPinned ? 'Unpin menu' : 'Pin menu' }}</TooltipContent>
+        </Tooltip>
+
         <DropdownMenu v-model:open="showSettings">
           <DropdownMenuTrigger as-child>
             <button class="viewer-btn" :class="showSettings ? '!bg-muted !text-foreground' : ''">

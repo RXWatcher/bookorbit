@@ -111,7 +111,7 @@ const progress = useReaderProgress(bookId, fileId, elapsedMinutes, 0, { tracking
 const { cfi, chapterTitle, sectionIndex, totalSections, fraction, locationTotal, footerMode, cycleFooterMode, updateHeadsFeet } = progress
 
 const visibility = useVisibility()
-const { headerVisible, footerVisible, handleMiddleTap, setVisibilityLock } = visibility
+const { headerVisible, footerVisible, isPinned, handleMiddleTap, setVisibilityLock } = visibility
 
 useWakeLock()
 
@@ -229,7 +229,7 @@ const {
   clearHighlight,
   startFromRange: startFoliateFromRange,
 } = useFoliateTts()
-const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex } = useTtsPlayer()
+const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex, playbackState, pausePlayback } = useTtsPlayer()
 const { setExpanded: setMiniPlayerExpanded } = useTtsMiniPlayerUi()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
 const ttsPosition = useTtsPosition()
@@ -241,6 +241,23 @@ const syncedHighlightChapterIndex = ref<number | null>(null)
 const syncedHighlightBlockIndex = ref<number | null>(null)
 const preferVisibleRangeForTtsSync = ref(false)
 const pendingTtsChapterNavigation = ref<number | null>(null)
+const isTtsRelocating = ref(false)
+
+function withTtsRelocation(fn: () => void | Promise<void>) {
+  isTtsRelocating.value = true
+  const res = fn()
+  if (res instanceof Promise) {
+    void res.finally(() => {
+      setTimeout(() => {
+        isTtsRelocating.value = false
+      }, 150)
+    })
+  } else {
+    setTimeout(() => {
+      isTtsRelocating.value = false
+    }, 150)
+  }
+}
 
 function ensureTtsAvailable(): boolean {
   if (isTtsAvailable) return true
@@ -271,6 +288,11 @@ function onChapterLoadHandler(doc: Document, viewEl: HTMLElement) {
 }
 
 function syncFoliateHighlightToCurrentBlock() {
+  if (currentChapterIndex.value !== sectionIndex.value) {
+    clearHighlight()
+    return
+  }
+
   const blockIdx = currentBlockIndex.value
   const preferVisibleRange = preferVisibleRangeForTtsSync.value
   if (blockIdx === 0) {
@@ -294,7 +316,9 @@ watch([isTtsActive, foliateReady], ([active, ready]) => {
     syncedHighlightBlockIndex.value = null
     return
   }
-  syncFoliateHighlightToCurrentBlock()
+  withTtsRelocation(() => {
+    syncFoliateHighlightToCurrentBlock()
+  })
 })
 
 watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.value?.cfi], ([ready, active, , savedCfi], previous) => {
@@ -310,37 +334,39 @@ watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.
 watch([currentChapterIndex, currentBlockIndex], ([chapterIdx, blockIdx]) => {
   if (!isTtsActive.value || !foliateReady.value) return
 
-  // Keep the visual reader chapter aligned with the TTS chapter before
-  // syncing sentence highlight; otherwise chapter rollover can jump to the
-  // start of the previous chapter and scroll backwards.
-  if (sectionIndex.value !== chapterIdx) {
-    if (pendingTtsChapterNavigation.value !== chapterIdx) {
-      pendingTtsChapterNavigation.value = chapterIdx
-      syncedHighlightChapterIndex.value = null
-      syncedHighlightBlockIndex.value = null
-      void goToSection(chapterIdx)
+  withTtsRelocation(async () => {
+    // Keep the visual reader chapter aligned with the TTS chapter before
+    // syncing sentence highlight; otherwise chapter rollover can jump to the
+    // start of the previous chapter and scroll backwards.
+    if (sectionIndex.value !== chapterIdx) {
+      if (pendingTtsChapterNavigation.value !== chapterIdx) {
+        pendingTtsChapterNavigation.value = chapterIdx
+        syncedHighlightChapterIndex.value = null
+        syncedHighlightBlockIndex.value = null
+        await goToSection(chapterIdx)
+      }
+      return
     }
-    return
-  }
-  pendingTtsChapterNavigation.value = null
+    pendingTtsChapterNavigation.value = null
 
-  const syncedChapter = syncedHighlightChapterIndex.value
-  const syncedBlock = syncedHighlightBlockIndex.value
-  if (syncedChapter === null || syncedBlock === null || syncedChapter !== chapterIdx) {
-    syncFoliateHighlightToCurrentBlock()
-    return
-  }
+    const syncedChapter = syncedHighlightChapterIndex.value
+    const syncedBlock = syncedHighlightBlockIndex.value
+    if (syncedChapter === null || syncedBlock === null || syncedChapter !== chapterIdx) {
+      syncFoliateHighlightToCurrentBlock()
+      return
+    }
 
-  const delta = blockIdx - syncedBlock
-  if (delta === 1) {
-    advanceHighlight()
-  } else if (delta === -1) {
-    retreatHighlight()
-  } else if (delta !== 0) {
-    syncFoliateHighlightToCurrentBlock()
-    return
-  }
-  syncedHighlightBlockIndex.value = blockIdx
+    const delta = blockIdx - syncedBlock
+    if (delta === 1) {
+      advanceHighlight()
+    } else if (delta === -1) {
+      retreatHighlight()
+    } else if (delta !== 0) {
+      syncFoliateHighlightToCurrentBlock()
+      return
+    }
+    syncedHighlightBlockIndex.value = blockIdx
+  })
 })
 
 async function resolveProviderAndVoice(providerId: string) {
@@ -529,6 +555,11 @@ function onRelocateHandler(detail: RelocateDetail) {
   const renderer = getRenderer()
   if (renderer) {
     updateHeadsFeet(renderer, activeMode.value)
+  }
+
+  if (isTtsActive.value && !isTtsRelocating.value && playbackState.value === 'playing') {
+    pausePlayback()
+    toast.info('Playback paused because you navigated away.')
   }
 }
 
@@ -870,6 +901,7 @@ watch(
       :peek-mode="isPeekMode"
       :isTtsActive="isTtsActive"
       :isTtsAvailable="isTtsAvailable"
+      :isPinned="isPinned"
       class="transition-all duration-300"
       :class="headerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
       @back="router.back()"
@@ -882,6 +914,7 @@ watch(
       @cycleFooterMode="cycleFooterMode"
       @startReading="startTrackedReading"
       @startTts="handleStartTts"
+      @togglePin="handleMiddleTap"
     >
       <template #settingsPanel>
         <ReaderSettingsPanel :state="state" :customFonts="customFonts" @update="applyUpdate" />

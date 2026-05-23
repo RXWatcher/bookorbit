@@ -142,6 +142,18 @@ describe('useFoliateInput', () => {
     doc.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'foliate-click', clientX: 50 }, origin: window.location.origin }))
     vi.advanceTimersByTime(300)
+    // On desktop view, middle-zone click should NOT trigger onMiddleTap
+    expect(onMiddleTap).toHaveBeenCalledTimes(0)
+
+    // On mobile view (simulated by touch points), middle-zone click SHOULD trigger onMiddleTap
+    Object.defineProperty(navigator, 'maxTouchPoints', {
+      configurable: true,
+      get: () => 5,
+    })
+
+    doc.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'foliate-click', clientX: 50 }, origin: window.location.origin }))
+    vi.advanceTimersByTime(300)
     expect(onMiddleTap).toHaveBeenCalledTimes(1)
 
     input.cleanup()
