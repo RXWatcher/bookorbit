@@ -8,8 +8,13 @@ export function formatVoiceDisplayName(voice: TtsVoice): string {
 }
 
 export function formatVoiceLocaleLabel(voice: TtsVoice): string {
-  const parsed = parseLanguageCountryFromFriendlyName(voice.name) ?? parseLanguageCountryFromLocale(voice.locale)
+  const parsed = parseVoiceLanguageCountry(voice)
   return parsed.countryName ? `${parsed.languageName} (${parsed.countryName})` : parsed.languageName
+}
+
+export function parseVoiceLanguageCountry(voice: TtsVoice): { languageName: string; countryName: string } {
+  const parsed = parseLanguageCountryFromFriendlyName(voice.name) ?? parseLanguageCountryFromLocale(voice.locale)
+  return parsed
 }
 
 function parseLanguageCountryFromFriendlyName(name: string): { languageName: string; countryName: string } | null {

@@ -160,68 +160,74 @@ void loadVoices()
 
 <template>
   <div class="flex flex-col" :class="props.heightClass">
-    <div class="p-4 border-b border-border space-y-3">
+    <div class="p-3 border-b border-border space-y-2.5 bg-muted/10">
       <div class="relative">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <input
           type="text"
           placeholder="Search voices..."
-          class="w-full pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          class="w-full pl-9 pr-3 py-1.5 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary transition-shadow"
           :value="searchQuery"
           @input="handleSearchInput"
         />
       </div>
-      <div class="flex gap-2 overflow-x-auto pb-1">
-        <button
-          class="px-3 py-1 rounded-full text-sm flex-shrink-0 border transition-colors"
-          :class="activeProviderId === '' ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'"
-          @click="activeProviderId = ''"
-        >
-          All
-        </button>
-        <button
-          v-for="provider in providers"
-          :key="provider.id"
-          class="px-3 py-1 rounded-full text-sm flex-shrink-0 border transition-colors"
-          :class="activeProviderId === provider.id ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'"
-          @click="activeProviderId = provider.id"
-        >
-          {{ provider.name }}
-        </button>
-      </div>
       <div class="flex flex-wrap items-center gap-2">
-        <select
-          v-model="languageFilter"
-          class="min-w-44 px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">All languages</option>
-          <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
-        </select>
-        <select
-          v-model="countryFilter"
-          class="min-w-44 px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">All countries</option>
-          <option v-for="country in countryOptions" :key="country" :value="country">{{ country }}</option>
-        </select>
+        <div class="flex items-center gap-1 bg-muted/50 p-1 rounded-md border border-border">
+          <button
+            class="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            :class="activeProviderId === '' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="activeProviderId = ''"
+          >
+            All
+          </button>
+          <button
+            v-for="provider in providers"
+            :key="provider.id"
+            class="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            :class="activeProviderId === provider.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="activeProviderId = provider.id"
+          >
+            {{ provider.name }}
+          </button>
+        </div>
+        <div class="flex flex-1 items-center gap-2 min-w-[200px]">
+          <select
+            v-model="languageFilter"
+            class="flex-1 w-full px-2 py-1.5 text-xs bg-background border border-border rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">All languages</option>
+            <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
+          </select>
+          <select
+            v-model="countryFilter"
+            class="flex-1 w-full px-2 py-1.5 text-xs bg-background border border-border rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">All countries</option>
+            <option v-for="country in countryOptions" :key="country" :value="country">{{ country }}</option>
+          </select>
+        </div>
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-2">
+    <div class="flex-1 overflow-y-auto px-4 pb-4 min-h-0 relative">
       <div v-if="voicesLoading" class="flex items-center justify-center py-12">
         <Loader2 class="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
       <div v-else-if="filteredGroups.size === 0" class="text-center py-12 text-muted-foreground text-sm">No voices found</div>
-      <div v-else class="space-y-4">
-        <div v-for="[locale, voices] in filteredGroups" :key="locale">
-          <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 sticky top-0 bg-card">
-            {{ locale }}
+      <div v-else>
+        <div
+          v-for="[locale, voices] in filteredGroups"
+          :key="locale"
+          class="space-y-1 border-b border-border/30 last:border-b-0 pb-1.5 pt-1.5 first:pt-0"
+        >
+          <div class="sticky top-0 z-10 -mx-4 px-4 py-1 bg-background/95 backdrop-blur-md border-b border-border/50">
+            <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{{ locale }}</span>
           </div>
-          <div class="space-y-1">
+          <div>
             <div
               v-for="entry in voices"
               :key="entry.voice.id"
-              class="flex items-center gap-3 p-2 rounded-lg hover:bg-accent cursor-pointer"
+              class="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-accent cursor-pointer"
               :class="{ 'bg-accent': props.selectedVoiceId === entry.voice.id }"
               @click="handleSelectVoice(entry.voice)"
             >

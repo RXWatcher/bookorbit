@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Loader2, Plus, TestTube, Trash2, WifiOff } from 'lucide-vue-next'
 import * as ttsApi from './api/tts.api'
 import TtsEdgeVoiceCuration from './TtsEdgeVoiceCuration.vue'
+import { formatVoiceDisplayName, formatVoiceLocaleLabel, parseVoiceLanguageCountry } from './lib/voice-display'
 import type { TtsDbProvider, TtsEdgeConfig } from './api/tts.api'
+import type { TtsVoice } from '@bookorbit/types'
 
 const loading = ref(true)
 const providers = ref<TtsDbProvider[]>([])
 const edgeConfig = ref<TtsEdgeConfig>({ enabled: true, enabledVoices: [] })
+const allEdgeVoices = ref<TtsVoice[]>([])
 const showEdgeCuration = ref(false)
 const testingId = ref<number | null>(null)
 const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
@@ -28,9 +31,10 @@ onMounted(async () => {
 async function load() {
   loading.value = true
   try {
-    const [pList, eCfg] = await Promise.all([ttsApi.getAdminProviders(), ttsApi.getEdgeConfig()])
+    const [pList, eCfg, eVoices] = await Promise.all([ttsApi.getAdminProviders(), ttsApi.getEdgeConfig(), ttsApi.getAllEdgeVoices()])
     providers.value = pList
     edgeConfig.value = eCfg
+    allEdgeVoices.value = eVoices
   } catch {
     toast.error('Failed to load TTS configuration')
   } finally {
@@ -55,6 +59,23 @@ function handleOpenEdgeCuration() {
 function handleCloseEdgeCuration() {
   showEdgeCuration.value = false
 }
+
+const curatedVoicesList = computed(() => {
+  if (!edgeConfig.value.enabledVoices) return []
+  return edgeConfig.value.enabledVoices.map((shortName) => {
+    const v = allEdgeVoices.value.find((v) => v.shortName === shortName)
+    if (!v) return { shortName, name: shortName, gender: '', localeLabel: '', languageName: '', countryName: '' }
+    const { languageName, countryName } = parseVoiceLanguageCountry(v)
+    return {
+      shortName,
+      name: formatVoiceDisplayName(v),
+      gender: v.gender,
+      localeLabel: formatVoiceLocaleLabel(v),
+      languageName,
+      countryName,
+    }
+  })
+})
 
 async function handleEdgeConfigSaved(config: TtsEdgeConfig) {
   edgeConfig.value = config
@@ -179,11 +200,36 @@ async function toggleProviderEnabled(provider: TtsDbProvider) {
             />
           </button>
         </div>
-        <div v-if="edgeConfig.enabled" class="border-t border-border pt-3 flex items-center justify-between">
-          <div class="text-sm text-muted-foreground">
-            {{ edgeConfig.enabledVoices.length === 0 ? 'All voices available' : `${edgeConfig.enabledVoices.length} voices curated` }}
+        <div v-if="edgeConfig.enabled" class="border-t border-border pt-3 flex items-start justify-between gap-4">
+          <div class="text-sm text-muted-foreground min-w-0 flex-1">
+            <template v-if="edgeConfig.enabledVoices.length === 0"> All voices available </template>
+            <template v-else>
+              <div class="mb-2">{{ edgeConfig.enabledVoices.length }} voices curated:</div>
+              <div class="mt-2 text-xs border border-border rounded-md overflow-hidden bg-card">
+                <div class="grid grid-cols-[1fr_1fr_1fr_1fr] gap-3 px-3 py-1.5 bg-muted/50 border-b border-border font-medium text-muted-foreground">
+                  <div>Name</div>
+                  <div>Gender</div>
+                  <div>Language</div>
+                  <div>Region</div>
+                </div>
+                <div class="divide-y divide-border max-h-38.75 overflow-y-auto">
+                  <div
+                    v-for="v in curatedVoicesList"
+                    :key="v.shortName"
+                    class="grid grid-cols-[1fr_1fr_1fr_1fr] gap-3 px-3 py-1.5 items-center hover:bg-accent/30"
+                  >
+                    <span class="font-medium text-foreground truncate" :title="v.name">{{ v.name }}</span>
+                    <span class="truncate text-muted-foreground">{{ v.gender }}</span>
+                    <span class="truncate text-muted-foreground" :title="v.languageName">{{ v.languageName }}</span>
+                    <span class="truncate text-muted-foreground" :title="v.countryName">{{ v.countryName || '-' }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
-          <button class="text-sm font-medium text-primary hover:text-primary/80 underline" @click="handleOpenEdgeCuration">Curate voices</button>
+          <button class="text-sm font-medium text-primary hover:text-primary/80 underline whitespace-nowrap pt-0.5" @click="handleOpenEdgeCuration">
+            Curate voices
+          </button>
         </div>
       </div>
 

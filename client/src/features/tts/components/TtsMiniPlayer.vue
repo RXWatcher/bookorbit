@@ -5,6 +5,7 @@ import { useTtsPlayer } from '../composables/useTtsPlayer'
 import { useTtsMiniPlayerUi } from '../composables/useTtsMiniPlayerUi'
 import { useTtsVoices } from '../composables/useTtsVoices'
 import TtsMiniPlayerExpanded from './TtsMiniPlayerExpanded.vue'
+import { formatVoiceDisplayName } from '../lib/voice-display'
 
 const { playbackState, currentBook, currentBlockIndex, currentChapterIndex, speed, currentProviderId, currentVoiceId, togglePlayPause } =
   useTtsPlayer()
@@ -16,7 +17,7 @@ const selectedVoice = computed(() =>
   allVoices.value.find((voice) => voice.id === currentVoiceId.value && voice.providerId === currentProviderId.value),
 )
 const compactMeta = computed(() => {
-  const voiceName = selectedVoice.value?.name ?? currentVoiceId.value
+  const voiceName = selectedVoice.value ? formatVoiceDisplayName(selectedVoice.value) : currentVoiceId.value
   return [`Ch ${currentChapterIndex.value + 1}`, `Sent ${currentBlockIndex.value + 1}`, voiceName, `${speed.value}x`].filter(Boolean).join(' - ')
 })
 
@@ -32,7 +33,7 @@ function handleToggleExpand() {
 <template>
   <Transition name="slide-up">
     <div v-if="isVisible" class="tts-mini-player fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[min(480px,calc(100vw-16px))]">
-      <div class="bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
+      <div v-if="!isExpanded" class="bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
         <div class="flex items-center gap-2 px-3 py-2.5">
           <div
             class="flex-shrink-0 w-8 h-10 rounded bg-muted overflow-hidden flex items-center justify-center cursor-pointer"
