@@ -403,10 +403,7 @@ function handleImageClick(e: MouseEvent) {
     else nextPage()
     return
   }
-  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-  if (isMobile) {
-    handleMiddleTap()
-  }
+  handleMiddleTap()
 }
 
 // ── Touch / swipe ──────────────────────────────────────────────────────────────

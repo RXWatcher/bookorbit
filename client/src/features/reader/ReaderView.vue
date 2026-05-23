@@ -63,6 +63,7 @@ const containerRef = ref<HTMLElement | null>(null)
 const showSidebar = ref(false)
 const showSettings = ref(false)
 const showSearch = ref(false)
+const showTapZones = ref(false)
 const searchInitialQuery = ref('')
 const isFullscreen = ref(false)
 const sectionFractions = ref<number[]>([])
@@ -127,7 +128,9 @@ const { results: searchResults, isSearching, search: doSearch, clear: clearSearc
 const selection = useReaderSelection()
 
 function closeAnyPanel() {
-  if (showSearch.value) {
+  if (showTapZones.value) {
+    showTapZones.value = false
+  } else if (showSearch.value) {
     closeSearch()
   } else if (showSidebar.value) {
     showSidebar.value = false
@@ -230,11 +233,12 @@ const {
   startFromRange: startFoliateFromRange,
 } = useFoliateTts()
 const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex, playbackState, pausePlayback } = useTtsPlayer()
-const { setExpanded: setMiniPlayerExpanded } = useTtsMiniPlayerUi()
+const { setExpanded: setMiniPlayerExpanded, setReaderFooterVisible } = useTtsMiniPlayerUi()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
 const ttsPosition = useTtsPosition()
 
 const isTtsActive = computed(() => isActive.value && currentBook.value?.bookFileId === fileId)
+const isOverlayFooterVisible = computed(() => footerVisible.value && !showTapZones.value)
 const showTtsResumePrompt = ref(false)
 const clearingSavedTtsPosition = ref(false)
 const syncedHighlightChapterIndex = ref<number | null>(null)
@@ -719,6 +723,14 @@ watch(showSettings, (open) => {
 })
 
 watch(
+  () => isOverlayFooterVisible.value,
+  (visible) => {
+    setReaderFooterVisible(visible)
+  },
+  { immediate: true },
+)
+
+watch(
   () => customFonts.fonts.value,
   () => {
     setFontFaceCSS(customFonts.generateFontFaceCSS())
@@ -866,6 +878,10 @@ function closeSearch() {
   showSearch.value = false
 }
 
+<<<<<<< HEAD
+onUnmounted(() => {
+  setReaderFooterVisible(false)
+})
 watch(showSidebar, (open) => {
   if (open) {
     void hydrateSidebarLocationMeta()
@@ -880,6 +896,10 @@ watch(
     }
   },
 )
+
+onUnmounted(() => {
+  setReaderFooterVisible(false)
+})
 </script>
 
 <template>
@@ -902,8 +922,9 @@ watch(
       :isTtsActive="isTtsActive"
       :isTtsAvailable="isTtsAvailable"
       :isPinned="isPinned"
+      :showTapZones="showTapZones"
       class="transition-all duration-300"
-      :class="headerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
+      :class="headerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
       @back="router.back()"
       @toggleSidebar="showSidebar = !showSidebar"
       @toggleSearch="showSearch = !showSearch"
@@ -915,6 +936,7 @@ watch(
       @startReading="startTrackedReading"
       @startTts="handleStartTts"
       @togglePin="handleMiddleTap"
+      @toggleTapZones="showTapZones = !showTapZones"
     >
       <template #settingsPanel>
         <ReaderSettingsPanel :state="state" :customFonts="customFonts" @update="applyUpdate" />
@@ -943,6 +965,247 @@ watch(
       </div>
 
       <div ref="containerRef" class="absolute inset-0" />
+
+      <!-- Tap/Click Zones Reference Overlay -->
+      <Transition name="fade">
+        <div v-if="showTapZones" class="absolute inset-0 z-20 pointer-events-none flex select-none">
+          <!-- Floating Exit Button -->
+          <button
+            class="absolute top-4 right-4 z-50 px-3.5 py-2 rounded-xl bg-background/90 text-foreground border border-border/80 shadow-lg hover:bg-background pointer-events-auto flex items-center gap-2 text-xs font-semibold cursor-pointer transition-all duration-200 active:scale-95 animate-pulse"
+            @click="showTapZones = false"
+            title="Close Guide"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-x text-primary"
+            >
+              <line x1="18" x2="6" y1="6" y2="18" />
+              <line x1="6" x2="18" y1="6" y2="18" />
+            </svg>
+            <span>Exit Guide</span>
+          </button>
+
+          <!-- Mobile Guide -->
+          <div v-if="isMobile" class="w-full h-full flex flex-col items-center justify-center bg-primary/[0.24] backdrop-blur-[4px] p-6 text-center">
+            <div
+              class="flex flex-col items-center gap-4 p-6 max-w-sm rounded-2xl bg-background/90 border border-border/70 shadow-2xl text-muted-foreground"
+            >
+              <div class="flex gap-4 items-center">
+                <span class="p-3 rounded-full bg-primary/10 text-primary">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="lucide lucide-touchpad"
+                  >
+                    <rect width="20" height="20" x="2" y="2" rx="2" />
+                    <path d="M12 14v4" />
+                    <path d="M10 16h4" />
+                    <circle cx="12" cy="8" r="2" />
+                  </svg>
+                </span>
+                <span class="p-3 rounded-full bg-primary/10 text-primary">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="lucide lucide-hand"
+                  >
+                    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+                    <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+                    <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v4.5" />
+                    <path
+                      d="M6 14.5V11a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7.5A8.5 8.5 0 0 0 10.5 27h3A8.5 8.5 0 0 0 22 18.5V14a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v.5"
+                    />
+                  </svg>
+                </span>
+              </div>
+              <div>
+                <h3 class="text-sm font-semibold tracking-wide uppercase text-foreground mb-1">Mobile Interactions</h3>
+                <p class="text-xs text-muted-foreground mb-4">Optimized for handheld touch reading</p>
+                <div class="space-y-3 text-left">
+                  <div class="flex items-start gap-2.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-primary mt-1.5" />
+                    <div>
+                      <p class="text-xs font-medium text-foreground">Tap Anywhere</p>
+                      <p class="text-[10px] text-muted-foreground">Toggles the header and footer overlays</p>
+                    </div>
+                  </div>
+                  <div class="flex items-start gap-2.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-primary mt-1.5" />
+                    <div>
+                      <p class="text-xs font-medium text-foreground">Swipe Left / Right</p>
+                      <p class="text-[10px] text-muted-foreground">Turns pages smoothly forward or backward</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Desktop Guide -->
+          <div v-else class="w-full h-full flex flex-col">
+            <!-- Top Zone (64px) -->
+            <div
+              class="h-16 w-full flex items-center justify-center border-b-2 border-dashed border-primary/40 bg-primary/[0.18] backdrop-blur-[3px] shrink-0"
+            >
+              <div
+                class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background/90 border border-border/70 shadow-md text-muted-foreground text-center animate-pulse"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-menu text-primary"
+                >
+                  <line x1="4" x2="20" y1="12" y2="12" />
+                  <line x1="4" x2="20" y1="6" y2="6" />
+                  <line x1="4" x2="20" y1="18" y2="18" />
+                </svg>
+                <span class="text-xs font-semibold tracking-wide uppercase text-foreground">Toggle Header</span>
+                <span class="text-[10px] text-muted-foreground">Click top edge (y &lt; 64px)</span>
+              </div>
+            </div>
+
+            <!-- Central Content Area -->
+            <div class="flex-1 w-full flex min-h-0">
+              <!-- Left Zone (30%) -->
+              <div class="w-[30%] h-full flex flex-col items-center justify-center border-r-2 border-dashed border-primary/40 bg-primary/[0.08]">
+                <div
+                  class="flex flex-col items-center gap-2 p-4 mx-2 rounded-xl bg-background/90 border border-border/70 shadow-md text-muted-foreground animate-pulse text-center"
+                >
+                  <span class="p-2 rounded-full bg-primary/10 text-primary">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="lucide lucide-chevron-left"
+                    >
+                      <path d="m15 18-6-6 6-6" />
+                    </svg>
+                  </span>
+                  <span class="text-xs font-semibold tracking-wide uppercase text-foreground">Previous Page</span>
+                  <span class="text-[10px] text-muted-foreground max-w-[120px]">Click left 30%</span>
+                </div>
+              </div>
+
+              <!-- Middle Zone (40%) -->
+              <div class="w-[40%] h-full flex flex-col items-center justify-center border-r-2 border-dashed border-primary/40 bg-transparent">
+                <div
+                  class="flex flex-col items-center gap-2 p-4 mx-2 rounded-xl bg-background/90 border border-border/70 text-muted-foreground text-center shadow-md animate-pulse"
+                >
+                  <span class="p-2 rounded-full bg-primary/10 text-primary">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="lucide lucide-menu"
+                    >
+                      <line x1="4" x2="20" y1="12" y2="12" />
+                      <line x1="4" x2="20" y1="6" y2="6" />
+                      <line x1="4" x2="20" y1="18" y2="18" />
+                    </svg>
+                  </span>
+                  <span class="text-xs font-semibold tracking-wide uppercase text-foreground">Toggle Header & Footer</span>
+                  <span class="text-[10px] text-muted-foreground max-w-[120px]">Click center 40%</span>
+                </div>
+              </div>
+
+              <!-- Right Zone (30%) -->
+              <div class="w-[30%] h-full flex flex-col items-center justify-center bg-primary/[0.08]">
+                <div
+                  class="flex flex-col items-center gap-2 p-4 mx-2 rounded-xl bg-background/90 border border-border/70 shadow-md text-muted-foreground animate-pulse text-center"
+                >
+                  <span class="p-2 rounded-full bg-primary/10 text-primary">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="lucide lucide-chevron-right"
+                    >
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </span>
+                  <span class="text-xs font-semibold tracking-wide uppercase text-foreground">Next Page</span>
+                  <span class="text-[10px] text-muted-foreground max-w-[120px]">Click right 30%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Zone (64px) -->
+            <div
+              class="h-16 w-full flex items-center justify-center border-t-2 border-dashed border-primary/40 bg-primary/[0.18] backdrop-blur-[3px] shrink-0"
+            >
+              <div
+                class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background/90 border border-border/70 shadow-md text-muted-foreground text-center animate-pulse"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-menu text-primary"
+                >
+                  <line x1="4" x2="20" y1="12" y2="12" />
+                  <line x1="4" x2="20" y1="6" y2="6" />
+                  <line x1="4" x2="20" y1="18" y2="18" />
+                </svg>
+                <span class="text-xs font-semibold tracking-wide uppercase text-foreground">Toggle Footer</span>
+                <span class="text-[10px] text-muted-foreground">Click bottom edge (y &gt; height - 64px)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
     </div>
 
     <ReaderFooter
@@ -954,7 +1217,7 @@ watch(
       :chapterEndFraction="chapterEndFraction"
       :locationTotal="locationTotal"
       class="transition-all duration-300"
-      :class="footerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-full pointer-events-none'"
+      :class="footerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-full pointer-events-none'"
       @prevSection="goToSection(sectionIndex - 1)"
       @nextSection="goToSection(sectionIndex + 1)"
       @seek="goToFraction($event)"
@@ -1071,5 +1334,13 @@ watch(
 .tts-resume-fade-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(10px);
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

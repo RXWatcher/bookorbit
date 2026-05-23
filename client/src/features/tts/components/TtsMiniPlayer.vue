@@ -10,9 +10,12 @@ import { formatVoiceDisplayName } from '../lib/voice-display'
 const { playbackState, currentBook, currentBlockIndex, currentChapterIndex, speed, currentProviderId, currentVoiceId, togglePlayPause } =
   useTtsPlayer()
 
-const { isExpanded, setExpanded, toggleExpanded } = useTtsMiniPlayerUi()
+const { isExpanded, isReaderFooterVisible, setExpanded, toggleExpanded } = useTtsMiniPlayerUi()
 const { allVoices, loadVoices } = useTtsVoices()
 const isVisible = computed(() => playbackState.value !== 'idle')
+const containerPositionClass = computed(() =>
+  isReaderFooterVisible.value ? 'bottom-[calc(1rem+2.5rem)] sm:bottom-[calc(1rem+2.75rem)]' : 'bottom-4',
+)
 const selectedVoice = computed(() =>
   allVoices.value.find((voice) => voice.id === currentVoiceId.value && voice.providerId === currentProviderId.value),
 )
@@ -32,7 +35,11 @@ function handleToggleExpand() {
 
 <template>
   <Transition name="slide-up">
-    <div v-if="isVisible" class="tts-mini-player fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[min(480px,calc(100vw-16px))]">
+    <div
+      v-if="isVisible"
+      class="tts-mini-player fixed left-1/2 -translate-x-1/2 z-50 w-[min(480px,calc(100vw-16px))] transition-[bottom] duration-300"
+      :class="containerPositionClass"
+    >
       <div v-if="!isExpanded" class="bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
         <div class="flex items-center gap-2 px-3 py-2.5">
           <div

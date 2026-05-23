@@ -8,6 +8,7 @@ import {
   BookmarkCheck,
   CircleHelp,
   Clock3,
+  Columns3,
   FileText,
   Headphones,
   Maximize,
@@ -29,6 +30,7 @@ const props = defineProps<{
   isTtsActive?: boolean
   isTtsAvailable?: boolean
   isPinned?: boolean
+  showTapZones?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -43,6 +45,7 @@ const emit = defineEmits<{
   startReading: []
   startTts: []
   togglePin: []
+  toggleTapZones: []
 }>()
 
 const isFullscreen = ref(false)
@@ -178,7 +181,21 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
       <Tooltip>
         <TooltipTrigger as-child>
           <button
-            class="viewer-btn"
+            class="viewer-btn hidden sm:flex"
+            :class="props.showTapZones ? '!bg-muted !text-primary' : ''"
+            aria-label="Toggle tap zones"
+            @click="emit('toggleTapZones')"
+          >
+            <Columns3 :size="18" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Show tap zones</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button
+            class="viewer-btn hidden sm:flex"
             :class="props.isPinned ? '!bg-muted !text-primary' : ''"
             :aria-label="props.isPinned ? 'Unpin menu' : 'Pin menu'"
             @click="emit('togglePin')"

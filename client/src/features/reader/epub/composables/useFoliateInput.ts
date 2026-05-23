@@ -194,8 +194,12 @@ export function useFoliateInput(
       if (isNavigating) return
 
       const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+      const y = e.data.clientY
+      const height = window.innerHeight
 
-      if (currentZone === 'left' && !isMobile) {
+      if (!isMobile && (y < 64 || y > height - 64)) {
+        onMiddleTap?.()
+      } else if (currentZone === 'left' && !isMobile) {
         isNavigating = true
         getViewEl()?.prev?.()
         setTimeout(() => (isNavigating = false), 300)
@@ -204,11 +208,65 @@ export function useFoliateInput(
         getViewEl()?.next?.()
         setTimeout(() => (isNavigating = false), 300)
       } else {
-        if (isMobile) {
-          onMiddleTap?.()
-        }
+        onMiddleTap?.()
       }
     }, DOUBLE_CLICK_MS)
+  }
+
+  function isInteractive(el: HTMLElement | null): boolean {
+    if (!el) return false
+    if (typeof el.closest === 'function') {
+      if (el.closest('[role="menu"]') || el.closest('[role="dialog"]') || el.closest('.bg-card')) {
+        return true
+      }
+    }
+    let current: HTMLElement | null = el
+    while (current && current !== document.body) {
+      const tagName = typeof current.tagName === 'string' ? current.tagName.toLowerCase() : ''
+      if (tagName === 'button' || tagName === 'input' || tagName === 'select' || tagName === 'a' || tagName === 'textarea') {
+        return true
+      }
+      if (typeof current.getAttribute === 'function') {
+        const role = current.getAttribute('role')
+        if (role === 'button' || role === 'link' || role === 'checkbox' || role === 'switch') {
+          return true
+        }
+      }
+      if (current.classList && typeof current.classList.contains === 'function') {
+        if (current.classList.contains('cursor-pointer')) {
+          return true
+        }
+      }
+      current = current.parentElement
+    }
+    return false
+  }
+
+  function handleParentClick(e: MouseEvent) {
+    if (Date.now() - lastTouchTime < 500) return
+    const view = getViewEl() as unknown as HTMLElement | null
+    if (!view) return
+
+    const target = e.target as HTMLElement | null
+    if (!target) return
+
+    const isInsideView = target === view || (view.contains && typeof view.contains === 'function' && view.contains(target))
+    const headerEl = document.querySelector('header')
+    const footerEl = document.querySelector('footer')
+    const isInsideHeader = headerEl && typeof headerEl.contains === 'function' && headerEl.contains(target)
+    const isInsideFooter = footerEl && typeof footerEl.contains === 'function' && footerEl.contains(target)
+
+    if (!isInsideView && !isInsideHeader && !isInsideFooter) return
+    if (isInteractive(target)) return
+
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (!isMobile) {
+      const y = e.clientY
+      const height = window.innerHeight
+      if (y < 64 || y > height - 64) {
+        onMiddleTap?.()
+      }
+    }
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -233,10 +291,12 @@ export function useFoliateInput(
 
   window.addEventListener('message', handleWindowMessage)
   document.addEventListener('keydown', handleKeydown)
+  document.addEventListener('click', handleParentClick, true)
 
   function cleanup() {
     window.removeEventListener('message', handleWindowMessage)
     document.removeEventListener('keydown', handleKeydown)
+    document.removeEventListener('click', handleParentClick, true)
   }
 
   return { attachIframeClicks, cleanup }
