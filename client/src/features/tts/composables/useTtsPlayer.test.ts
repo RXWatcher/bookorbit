@@ -164,6 +164,44 @@ describe('useTtsPlayer (AudioContext)', () => {
     player.setSpeed(1.0)
   })
 
+  describe('primeAudioContext', () => {
+    it('creates AudioContext if none exists', () => {
+      const player = useTtsPlayer()
+      player.primeAudioContext()
+      expect(MockAudioContext).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not call resume if context is already running', () => {
+      const player = useTtsPlayer()
+      player.primeAudioContext()
+      expect(mockCtxInstance.resume).not.toHaveBeenCalled()
+    })
+
+    it('calls resume if context is suspended', async () => {
+      const player = useTtsPlayer()
+      player.primeAudioContext()
+      await mockCtxInstance.suspend()
+      player.primeAudioContext()
+      expect(mockCtxInstance.resume).toHaveBeenCalled()
+    })
+
+    it('reuses existing context on repeated calls', () => {
+      const player = useTtsPlayer()
+      player.primeAudioContext()
+      player.primeAudioContext()
+      expect(MockAudioContext).toHaveBeenCalledTimes(1)
+    })
+
+    it('startPlayback reuses the primed context instead of creating a new one', async () => {
+      const player = useTtsPlayer()
+      player.primeAudioContext()
+      const ctxCreationsAfterPrime = (MockAudioContext as Mock).mock.calls.length
+      await player.startPlayback(makeBook(), 'provider1', 'voice1', 1.0, makeTextSource([['Block.']]))
+      expect((MockAudioContext as Mock).mock.calls.length).toBe(ctxCreationsAfterPrime)
+      expect(player.playbackState.value).toBe('playing')
+    })
+  })
+
   describe('startPlayback', () => {
     it('fetches and schedules first block on start', async () => {
       await startWithBlocks(['Hello world.'])
@@ -196,6 +234,27 @@ describe('useTtsPlayer (AudioContext)', () => {
     it('sets isActive to true', async () => {
       const player = await startWithBlocks(['Block.'])
       expect(player.isActive.value).toBe(true)
+    })
+
+    it('schedules and plays when starting from a non-zero block (regression: silent stall)', async () => {
+      const player = useTtsPlayer()
+      await player.startPlayback(makeBook(), 'provider1', 'voice1', 1.0, makeTextSource([['B0.', 'B1.', 'B2.']]), 0, 2)
+      expect(player.currentBlockIndex.value).toBe(2)
+      expect(player.playbackState.value).toBe('playing')
+      // Before the fix, the decoded buffer for block 2 was queued but never
+      // scheduled (lastScheduledBlockIdx stayed at -1), so nothing ever played.
+      expect(mockCtxInstance.createdSources.length).toBe(1)
+      expect(mockCtxInstance.createdSources[0]!.start).toHaveBeenCalled()
+      expect(ttsApi.synthesize).toHaveBeenCalledWith(expect.objectContaining({ text: 'B2.' }))
+    })
+
+    it('clamps an out-of-range start block to the last block', async () => {
+      const player = useTtsPlayer()
+      await player.startPlayback(makeBook(), 'provider1', 'voice1', 1.0, makeTextSource([['B0.', 'B1.']]), 0, 99)
+      expect(player.currentBlockIndex.value).toBe(1)
+      expect(player.playbackState.value).toBe('playing')
+      expect(mockCtxInstance.createdSources.length).toBeGreaterThanOrEqual(1)
+      expect(ttsApi.synthesize).toHaveBeenCalledWith(expect.objectContaining({ text: 'B1.' }))
     })
   })
 

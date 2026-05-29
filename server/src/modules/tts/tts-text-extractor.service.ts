@@ -26,7 +26,7 @@ export function normalizePath(p: string): string {
   return resolved.join('/');
 }
 
-function htmlToBlocks(html: string): string[] {
+export function htmlToBlocks(html: string): string[] {
   const bodyMatch = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html);
   const bodyHtml = bodyMatch?.[1] ?? html;
   const cleanedHtml = bodyHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
@@ -39,7 +39,19 @@ function htmlToBlocks(html: string): string[] {
   const ENTITY_RE = /&(?:amp|lt|gt|quot|apos|nbsp);/g;
   const ENTITY_MAP: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&nbsp;': ' ' };
 
-  const chunks = cleanedHtml.replace(BLOCK_SPLIT_RE, '\n$&').split('\n');
+  // Foliate's getBlocks() starts the first block at the first block-level
+  // element and discards any content before it. Anchor extraction at the same
+  // point; otherwise leading content (bare text, an inline drop-cap/span, etc.)
+  // becomes an extra server-only block 0, shifting every audio block index by
+  // one so playback runs a paragraph behind the highlight.
+  const firstBlockIdx = cleanedHtml.search(BLOCK_SPLIT_RE);
+  const fromFirstBlock = firstBlockIdx >= 0 ? cleanedHtml.slice(firstBlockIdx) : cleanedHtml;
+
+  // Split on the block-element opening tags themselves (split consumes them).
+  // Splitting on the tags - rather than on inserted newlines - means a newline
+  // inside a paragraph (common in pretty-printed EPUB HTML) never splits one
+  // paragraph into several blocks and desyncs the indices.
+  const chunks = fromFirstBlock.split(BLOCK_SPLIT_RE);
   return chunks
     .map((chunk) => {
       const text = chunk

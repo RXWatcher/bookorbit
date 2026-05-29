@@ -56,6 +56,34 @@ function getOrCreateAudioContext(): AudioContext {
   return audioCtx
 }
 
+function primeAudioContext(): void {
+  getOrCreateAudioContext()
+}
+
+function internalReset(): void {
+  flushCurrentPositionSave()
+  stopAllSources()
+  if (currentBook.value && readingSession.sessionId.value) {
+    void readingSession.endSession({
+      bookFileId: currentBook.value.bookFileId,
+      endedAt: new Date(),
+      durationSeconds: 0,
+      progressDelta: null,
+      endProgress: null,
+    })
+  }
+  mediaSession.clearHandlers()
+  mediaSession.setPlaybackState('none')
+  isActive.value = false
+  playbackState.value = 'idle'
+  currentBook.value = null
+  currentProviderId.value = ''
+  currentVoiceId.value = ''
+  error.value = null
+  chapterBlocks = []
+  getTextBlocks = null
+}
+
 async function decodeAudioBlob(blob: Blob): Promise<AudioBuffer> {
   const ctx = getOrCreateAudioContext()
   const ab = await blob.arrayBuffer()
@@ -156,7 +184,7 @@ export function useTtsPlayer() {
     startChapter = 0,
     startBlock = 0,
   ) {
-    stopPlayback()
+    internalReset()
     currentBook.value = book
     currentProviderId.value = providerId
     currentVoiceId.value = voiceId
@@ -183,7 +211,15 @@ export function useTtsPlayer() {
       if (chapterBlocks.length === 0) {
         await advanceChapter()
       } else {
-        await fetchAndPlay(startBlock)
+        // Clamp the requested start block and align the scheduler to it.
+        // Without resetting lastScheduledBlockIdx, scheduleIfNext() would only
+        // schedule when blockIdx === lastScheduledBlockIdx + 1 (i.e. block 0),
+        // so any non-zero start block (read-from-here / play-from-here) would be
+        // decoded but never scheduled, leaving playback silently stuck.
+        const safeStartBlock = Math.min(Math.max(0, startBlock), chapterBlocks.length - 1)
+        currentBlockIndex.value = safeStartBlock
+        stopAndResetFor(safeStartBlock)
+        await fetchAndPlay(safeStartBlock)
       }
     } catch (err) {
       handleError(err)
@@ -299,28 +335,9 @@ export function useTtsPlayer() {
   }
 
   function stopPlayback() {
-    flushCurrentPositionSave()
-    stopAllSources()
+    internalReset()
+    void audioCtx?.close?.()
     audioCtx = null
-    if (currentBook.value && readingSession.sessionId.value) {
-      void readingSession.endSession({
-        bookFileId: currentBook.value.bookFileId,
-        endedAt: new Date(),
-        durationSeconds: 0,
-        progressDelta: null,
-        endProgress: null,
-      })
-    }
-    mediaSession.clearHandlers()
-    mediaSession.setPlaybackState('none')
-    isActive.value = false
-    playbackState.value = 'idle'
-    currentBook.value = null
-    currentProviderId.value = ''
-    currentVoiceId.value = ''
-    error.value = null
-    chapterBlocks = []
-    getTextBlocks = null
   }
 
   async function nextBlock() {
@@ -404,6 +421,7 @@ export function useTtsPlayer() {
     error,
     isActive,
     sleepTimer,
+    primeAudioContext,
     startPlayback,
     pausePlayback,
     resumePlayback,

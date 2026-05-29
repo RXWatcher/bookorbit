@@ -222,17 +222,13 @@ const {
   clearFoliateSource,
   getServerTextBlocks,
   getVisibleRange,
-  clearStartAnchor,
-  advanceHighlight,
-  retreatHighlight,
-  syncHighlightAtBlockStart,
-  syncHighlightToBlockIndex,
+  getBlockIndexForRange,
+  highlightBlock,
   showResumeHighlightFromCfi,
   showResumeHighlightFromBlock,
   clearHighlight,
-  startFromRange: startFoliateFromRange,
 } = useFoliateTts()
-const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex, playbackState } = useTtsPlayer()
+const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterIndex, playbackState, primeAudioContext } = useTtsPlayer()
 const { setExpanded: setMiniPlayerExpanded, setReaderFooterVisible } = useTtsMiniPlayerUi()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
 const ttsPosition = useTtsPosition()
@@ -242,9 +238,6 @@ const isNavigationLocked = computed(() => isTtsActive.value && playbackState.val
 const isOverlayFooterVisible = computed(() => footerVisible.value && !showTapZones.value)
 const showTtsResumePrompt = ref(false)
 const clearingSavedTtsPosition = ref(false)
-const syncedHighlightChapterIndex = ref<number | null>(null)
-const syncedHighlightBlockIndex = ref<number | null>(null)
-const preferVisibleRangeForTtsSync = ref(false)
 const pendingTtsChapterNavigation = ref<number | null>(null)
 const isTtsRelocating = ref(false)
 const lastNavigationBlockedToastAt = ref(0)
@@ -290,7 +283,7 @@ function applySavedTtsResumeHighlight() {
 }
 
 function onChapterLoadHandler(doc: Document, viewEl: HTMLElement) {
-  setFoliateSource(doc, viewEl, () => {})
+  setFoliateSource(doc, viewEl)
 }
 
 function syncFoliateHighlightToCurrentBlock() {
@@ -298,28 +291,16 @@ function syncFoliateHighlightToCurrentBlock() {
     clearHighlight()
     return
   }
-
-  const blockIdx = currentBlockIndex.value
-  const preferVisibleRange = preferVisibleRangeForTtsSync.value
-  if (blockIdx === 0) {
-    syncHighlightAtBlockStart(preferVisibleRange)
-  } else {
-    syncHighlightToBlockIndex(blockIdx, preferVisibleRange)
-  }
-  syncedHighlightChapterIndex.value = currentChapterIndex.value
-  syncedHighlightBlockIndex.value = blockIdx
+  highlightBlock(currentBlockIndex.value)
 }
 
-watch([isTtsActive, foliateReady], ([active, ready]) => {
-  if (!active) {
-    syncedHighlightChapterIndex.value = null
-    syncedHighlightBlockIndex.value = null
+// Re-run the highlight sync whenever TTS becomes active, the chapter document
+// reloads (foliateReady toggles), or the visible chapter changes. sectionIndex
+// only changes on chapter boundaries, so this also catches the moment a TTS
+// chapter navigation settles.
+watch([isTtsActive, foliateReady, sectionIndex], () => {
+  if (!isTtsActive.value || !foliateReady.value) {
     pendingTtsChapterNavigation.value = null
-    return
-  }
-  if (!ready) {
-    syncedHighlightChapterIndex.value = null
-    syncedHighlightBlockIndex.value = null
     return
   }
   withTtsRelocation(() => {
@@ -336,42 +317,24 @@ watch([foliateReady, isTtsActive, sectionIndex, () => ttsPosition.savedPosition.
   applySavedTtsResumeHighlight()
 })
 
-// Keep Foliate overlay in lockstep with TTS block changes.
-watch([currentChapterIndex, currentBlockIndex], ([chapterIdx, blockIdx]) => {
+// Keep the Foliate overlay in lockstep with TTS block changes.
+watch([currentChapterIndex, currentBlockIndex], ([chapterIdx]) => {
   if (!isTtsActive.value || !foliateReady.value) return
 
   withTtsRelocation(async () => {
     // Keep the visual reader chapter aligned with the TTS chapter before
-    // syncing sentence highlight; otherwise chapter rollover can jump to the
-    // start of the previous chapter and scroll backwards.
+    // highlighting; otherwise chapter rollover can jump backwards. The highlight
+    // for the new chapter is applied by the foliateReady/sectionIndex watcher
+    // once navigation settles and the new document's block ranges are ready.
     if (sectionIndex.value !== chapterIdx) {
       if (pendingTtsChapterNavigation.value !== chapterIdx) {
         pendingTtsChapterNavigation.value = chapterIdx
-        syncedHighlightChapterIndex.value = null
-        syncedHighlightBlockIndex.value = null
         await goToSection(chapterIdx)
       }
       return
     }
     pendingTtsChapterNavigation.value = null
-
-    const syncedChapter = syncedHighlightChapterIndex.value
-    const syncedBlock = syncedHighlightBlockIndex.value
-    if (syncedChapter === null || syncedBlock === null || syncedChapter !== chapterIdx) {
-      syncFoliateHighlightToCurrentBlock()
-      return
-    }
-
-    const delta = blockIdx - syncedBlock
-    if (delta === 1) {
-      advanceHighlight()
-    } else if (delta === -1) {
-      retreatHighlight()
-    } else if (delta !== 0) {
-      syncFoliateHighlightToCurrentBlock()
-      return
-    }
-    syncedHighlightBlockIndex.value = blockIdx
+    syncFoliateHighlightToCurrentBlock()
   })
 })
 
@@ -385,18 +348,6 @@ async function resolveProviderAndVoice(providerId: string) {
     voiceId = voices[0]?.id ?? ''
   }
   return { providerId: resolvedProviderId, voiceId, speed: effectivePrefs.speed ?? defaultSpeed.value ?? 1.0 }
-}
-
-async function resolveStartBlockByText(chapterIdx: number, snippet: string): Promise<number> {
-  if (!snippet) return 0
-  try {
-    const blocks = await getServerTextBlocks(fileId, chapterIdx)
-    const norm = snippet.toLowerCase().slice(0, 40)
-    const idx = blocks.findIndex((b) => b.toLowerCase().includes(norm) || norm.includes(b.toLowerCase().slice(0, 30)))
-    return idx >= 0 ? idx : 0
-  } catch {
-    return 0
-  }
 }
 
 async function buildTtsBook(): Promise<{
@@ -423,6 +374,7 @@ async function buildTtsBook(): Promise<{
 
 async function handleStartTts() {
   if (!ensureTtsAvailable()) return
+  primeAudioContext()
 
   showSettings.value = false
   showTapZones.value = false
@@ -446,16 +398,12 @@ async function handleStartTts() {
 
 async function handleReadFromHere() {
   if (!ensureTtsAvailable()) return
-  const selectedSnippet = selection.text.value.trim()
+  primeAudioContext()
   const range = selection.selectionRange.value
   selection.dismiss()
   const book = await buildTtsBook()
   if (!book) return
   try {
-    clearStartAnchor()
-    // For explicit "read from here", sync should follow the resolved
-    // sentence index instead of snapping to viewport start.
-    preferVisibleRangeForTtsSync.value = false
     const baseProviderId = defaultProviderId.value ?? 'edge'
     const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
     if (!voiceId.trim()) {
@@ -463,14 +411,11 @@ async function handleReadFromHere() {
       return
     }
     const chapterIdx = sectionIndex.value
-    let startBlock = 0
-    if (selectedSnippet) {
-      startBlock = await resolveStartBlockByText(chapterIdx, selectedSnippet)
-    } else if (range) {
-      // Fallback for edge cases where selection text is empty.
-      const fallbackSnippet = range.toString().trim() || startFoliateFromRange(range) || ''
-      startBlock = await resolveStartBlockByText(chapterIdx, fallbackSnippet)
-    }
+    // Map the selection directly to its paragraph index. The block ranges come
+    // from the same segmentation the server uses, so this index matches the
+    // audio block exactly - no fuzzy text matching.
+    const blockIndex = range ? getBlockIndexForRange(range) : -1
+    const startBlock = blockIndex >= 0 ? blockIndex : 0
     await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, startBlock)
   } catch {
     toast.error('Failed to start TTS playback')
@@ -479,6 +424,7 @@ async function handleReadFromHere() {
 
 async function handleResumeTts() {
   if (!ensureTtsAvailable()) return
+  primeAudioContext()
   showTtsResumePrompt.value = false
   const saved = ttsPosition.savedPosition.value
   if (!saved) {
@@ -491,9 +437,6 @@ async function handleResumeTts() {
   const book = await buildTtsBook()
   if (!book) return
   try {
-    // Resume should anchor highlight to saved block index, not current viewport.
-    clearStartAnchor()
-    preferVisibleRangeForTtsSync.value = false
     const baseProviderId = defaultProviderId.value ?? 'edge'
     const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
     if (!voiceId.trim()) {
@@ -508,7 +451,6 @@ async function handleResumeTts() {
 
 function dismissResumePrompt() {
   showTtsResumePrompt.value = false
-  clearStartAnchor()
   clearHighlight()
 }
 
@@ -518,7 +460,6 @@ async function handleClearSavedTtsPosition() {
   try {
     await ttsPosition.clearPosition(fileId)
     showTtsResumePrompt.value = false
-    clearStartAnchor()
     clearHighlight()
   } catch {
     toast.error('Failed to clear saved TTS position')
@@ -529,12 +470,11 @@ async function handleClearSavedTtsPosition() {
 
 async function handlePlayFromCurrentPage() {
   if (!ensureTtsAvailable()) return
+  primeAudioContext()
   showTtsResumePrompt.value = false
   const book = await buildTtsBook()
   if (!book) return
   try {
-    clearStartAnchor()
-    preferVisibleRangeForTtsSync.value = true
     const baseProviderId = defaultProviderId.value ?? 'edge'
     const { providerId, voiceId, speed } = await resolveProviderAndVoice(baseProviderId)
     if (!voiceId.trim()) {
@@ -542,16 +482,10 @@ async function handlePlayFromCurrentPage() {
       return
     }
     const chapterIdx = sectionIndex.value
-    let startBlock = 0
-    // Use the range cached from the last relocate event — it is the most reliable
-    // source of the currently visible position (same technique as Flutter).
-    const visibleRange = getVisibleRange()
-    if (visibleRange) {
-      const foliateText = startFoliateFromRange(visibleRange)
-      if (foliateText) {
-        startBlock = await resolveStartBlockByText(chapterIdx, foliateText)
-      }
-    }
+    // The range cached from the last relocate event is the most reliable source
+    // of the currently visible position; map it to its paragraph index.
+    const blockIndex = getBlockIndexForRange(getVisibleRange())
+    const startBlock = blockIndex >= 0 ? blockIndex : 0
     await startPlayback(book, providerId, voiceId, speed, (chapterIndex) => getServerTextBlocks(fileId, chapterIndex), chapterIdx, startBlock)
   } catch {
     toast.error('Failed to start TTS playback')
