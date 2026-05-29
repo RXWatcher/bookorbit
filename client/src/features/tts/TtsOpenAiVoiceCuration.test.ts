@@ -140,39 +140,10 @@ describe('TtsOpenAiVoiceCuration', () => {
   })
 
   describe('Add voice manually', () => {
-    it('shows add form when clicking Add voice manually', async () => {
+    it('does not show an add voice form or button', () => {
       const wrapper = mountCuration()
-      await wrapper.find('button[class*="text-primary"]').trigger('click')
-      expect(wrapper.find('input[placeholder="af_heart"]').exists()).toBe(true)
-    })
-
-    it('adds a voice to the list', async () => {
-      const wrapper = mountCuration()
-      await wrapper.find('button[class*="text-primary"]').trigger('click')
-      await wrapper.find('input[placeholder="af_heart"]').setValue('custom_voice')
-      await wrapper.find('input[placeholder="Heart"]').setValue('Custom Voice')
-      const addBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'Add')
-      await addBtn!.trigger('click')
-      expect(wrapper.text()).toContain('custom_voice')
-      expect(wrapper.text()).toContain('Custom Voice')
-    })
-
-    it('shows error for duplicate ID', async () => {
-      const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
-      await wrapper.find('button[class*="text-primary"]').trigger('click')
-      await wrapper.find('input[placeholder="af_heart"]').setValue('af_heart')
-      await wrapper.find('input[placeholder="Heart"]').setValue('Duplicate')
-      const addBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'Add')
-      await addBtn!.trigger('click')
-      expect(wrapper.text()).toContain('already exists')
-    })
-
-    it('shows error for missing ID or name', async () => {
-      const wrapper = mountCuration()
-      await wrapper.find('button[class*="text-primary"]').trigger('click')
-      const addBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'Add')
-      await addBtn!.trigger('click')
-      expect(wrapper.text()).toContain('ID and Name are required')
+      expect(wrapper.text()).not.toContain('Add voice manually')
+      expect(wrapper.find('input[placeholder="af_heart"]').exists()).toBe(false)
     })
   })
 

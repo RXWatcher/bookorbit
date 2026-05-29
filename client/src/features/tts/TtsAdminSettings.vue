@@ -432,14 +432,14 @@ async function toggleProviderEnabled(provider: TtsDbProvider) {
               </div>
             </div>
             <!-- Voice summary row -->
-            <div class="border-t border-border pt-3 flex items-center justify-between gap-4">
-              <div class="text-sm text-muted-foreground">
+            <div class="border-t border-border pt-3 flex items-start justify-between gap-4">
+              <div class="text-sm text-muted-foreground min-w-0 flex-1">
                 <template v-if="!provider.staticVoices || provider.staticVoices.length === 0">No voices configured</template>
                 <template v-else>
                   <div class="mb-2">{{ provider.staticVoices.length }} voice{{ provider.staticVoices.length === 1 ? '' : 's' }} curated:</div>
                   <div class="mt-2 text-xs border border-border rounded-md overflow-hidden bg-card">
                     <div
-                      class="grid grid-cols-[1fr_1fr_80px_80px] gap-2 px-3 py-1.5 bg-muted/50 border-b border-border font-medium text-muted-foreground"
+                      class="grid grid-cols-[1fr_1fr_1fr_1fr] gap-3 px-3 py-1.5 bg-muted/50 border-b border-border font-medium text-muted-foreground"
                     >
                       <div>ID</div>
                       <div>Name</div>
@@ -450,7 +450,7 @@ async function toggleProviderEnabled(provider: TtsDbProvider) {
                       <div
                         v-for="v in provider.staticVoices"
                         :key="v.id"
-                        class="grid grid-cols-[1fr_1fr_80px_80px] gap-2 px-3 py-1.5 items-center hover:bg-accent/30"
+                        class="grid grid-cols-[1fr_1fr_1fr_1fr] gap-3 px-3 py-1.5 items-center hover:bg-accent/30"
                       >
                         <span class="font-mono text-muted-foreground truncate" :title="v.id">{{ v.id }}</span>
                         <span class="font-medium text-foreground truncate" :title="v.name">{{ v.name }}</span>

@@ -25,10 +25,6 @@ const discoverError = ref<string | null>(null)
 const editingIdx = ref<number | null>(null)
 const editForm = ref<StaticVoiceConfig>({ id: '', name: '', shortName: '', language: '', locale: '', gender: '' })
 
-const showAddForm = ref(false)
-const addForm = ref<StaticVoiceConfig>({ id: '', name: '', shortName: '', language: '', locale: '', gender: '' })
-const addError = ref<string | null>(null)
-
 const saving = ref(false)
 
 const presetKey = computed(() => detectPreset(props.provider.defaultModel))
@@ -102,38 +98,6 @@ function handleDeleteVoice(idx: number) {
   if (editingIdx.value === idx) editingIdx.value = null
 }
 
-function handleShowAddForm() {
-  showAddForm.value = true
-  addForm.value = { id: '', name: '', shortName: '', language: '', locale: '', gender: '' }
-  addError.value = null
-}
-
-function handleHideAddForm() {
-  showAddForm.value = false
-  addError.value = null
-}
-
-function handleAddVoice() {
-  const trimmedId = addForm.value.id.trim()
-  const trimmedName = addForm.value.name.trim()
-  if (!trimmedId || !trimmedName) {
-    addError.value = 'ID and Name are required'
-    return
-  }
-  if (voices.value.some((v) => v.id === trimmedId)) {
-    addError.value = `Voice ID "${trimmedId}" already exists`
-    return
-  }
-  voices.value.push({
-    ...addForm.value,
-    id: trimmedId,
-    name: trimmedName,
-    shortName: addForm.value.shortName.trim() || trimmedId,
-  })
-  showAddForm.value = false
-  addError.value = null
-}
-
 async function handleSave() {
   saving.value = true
   try {
@@ -196,11 +160,11 @@ function handleClose() {
       <!-- Voice table -->
       <div class="flex-1 overflow-y-auto min-h-0">
         <div v-if="voices.length === 0" class="text-sm text-muted-foreground text-center py-10">
-          No voices configured. Import from provider, load a preset, or add manually.
+          No voices configured. Import from provider or load a preset.
         </div>
         <template v-else>
           <div class="text-xs border-b border-border bg-muted/50">
-            <div class="grid grid-cols-[1fr_1fr_80px_80px_auto] gap-2 px-4 py-2 font-medium text-muted-foreground">
+            <div class="grid grid-cols-[1fr_1fr_80px_80px_56px] gap-2 px-4 py-2 font-medium text-muted-foreground">
               <div>ID</div>
               <div>Name</div>
               <div>Locale</div>
@@ -212,7 +176,7 @@ function handleClose() {
             <div v-for="(voice, idx) in voices" :key="voice.id">
               <!-- Edit row -->
               <template v-if="editingIdx === idx">
-                <div class="grid grid-cols-[1fr_1fr_80px_80px_auto] gap-2 px-4 py-2 items-center">
+                <div class="grid grid-cols-[1fr_1fr_80px_80px_56px] gap-2 px-4 py-2 items-center">
                   <input
                     v-model="editForm.id"
                     class="px-2 py-1 text-xs bg-background border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -242,7 +206,7 @@ function handleClose() {
               </template>
               <!-- Display row -->
               <template v-else>
-                <div class="grid grid-cols-[1fr_1fr_80px_80px_auto] gap-2 px-4 py-2 items-center hover:bg-accent/20">
+                <div class="grid grid-cols-[1fr_1fr_80px_80px_56px] gap-2 px-4 py-2 items-center hover:bg-accent/20">
                   <span class="text-xs text-muted-foreground font-mono truncate" :title="voice.id">{{ voice.id }}</span>
                   <span class="text-xs text-foreground truncate" :title="voice.name">{{ voice.name }}</span>
                   <span class="text-xs text-muted-foreground">{{ voice.locale || '-' }}</span>
@@ -258,70 +222,6 @@ function handleClose() {
                 </div>
               </template>
             </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- Add voice form -->
-      <div class="border-t border-border flex-shrink-0">
-        <template v-if="showAddForm">
-          <div class="p-4 space-y-2">
-            <div class="grid grid-cols-[1fr_1fr_80px_80px_auto] gap-2 items-end">
-              <div>
-                <label class="block text-xs text-muted-foreground mb-1">ID</label>
-                <input
-                  v-model="addForm.id"
-                  placeholder="af_heart"
-                  class="w-full px-2 py-1.5 text-xs bg-background border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label class="block text-xs text-muted-foreground mb-1">Name</label>
-                <input
-                  v-model="addForm.name"
-                  placeholder="Heart"
-                  class="w-full px-2 py-1.5 text-xs bg-background border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label class="block text-xs text-muted-foreground mb-1">Locale</label>
-                <input
-                  v-model="addForm.locale"
-                  placeholder="en-US"
-                  class="w-full px-2 py-1.5 text-xs bg-background border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label class="block text-xs text-muted-foreground mb-1">Gender</label>
-                <select
-                  v-model="addForm.gender"
-                  class="w-full px-2 py-1.5 text-xs bg-background border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option v-for="g in GENDER_OPTIONS" :key="g" :value="g">{{ g || '—' }}</option>
-                </select>
-              </div>
-              <div class="flex gap-1">
-                <button
-                  class="flex items-center gap-1 px-2.5 py-1.5 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90"
-                  @click="handleAddVoice"
-                >
-                  <Plus class="w-3 h-3" />
-                  Add
-                </button>
-                <button class="p-1.5 rounded hover:bg-accent" @click="handleHideAddForm">
-                  <X class="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-              </div>
-            </div>
-            <p v-if="addError" class="text-xs text-destructive">{{ addError }}</p>
-          </div>
-        </template>
-        <template v-else>
-          <div class="px-4 py-3">
-            <button class="flex items-center gap-1.5 text-xs text-primary font-medium hover:underline" @click="handleShowAddForm">
-              <Plus class="w-3.5 h-3.5" />
-              Add voice manually
-            </button>
           </div>
         </template>
       </div>
