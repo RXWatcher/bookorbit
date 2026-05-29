@@ -9,14 +9,6 @@ export interface TtsCurrentBook {
   totalChapters: number
 }
 
-export interface TtsAudioBlock {
-  index: number
-  text: string
-  chapterIndex: number
-  audioBlob: Blob | null
-  audioUrl: string | null
-}
-
 export interface TtsPlayerState {
   playbackState: TtsPlaybackState
   currentBook: TtsCurrentBook | null

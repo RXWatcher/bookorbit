@@ -1,16 +1,17 @@
-import { ref, shallowRef } from 'vue'
+import { ref } from 'vue'
 import type { TtsPlaybackState } from '@bookorbit/types'
 import * as ttsApi from '../api/tts.api'
 import { useTtsPosition } from './useTtsPosition'
 import { useTtsMediaSession } from './useTtsMediaSession'
 import { useTtsSleepTimer } from './useTtsSleepTimer'
 import { useTtsReadingSession } from './useTtsReadingSession'
-import type { TtsCurrentBook, TtsAudioBlock } from '../lib/tts-state'
+import type { TtsCurrentBook } from '../lib/tts-state'
 
 const PREFETCH_AHEAD = 3
 const MIN_SPEED = 0.25
 const MAX_SPEED = 4.0
 const SPEED_STEP = 0.25
+const SCHEDULE_LATENCY = 0.05
 
 type TextSourceFn = (chapterIndex: number) => Promise<string[]>
 
@@ -24,12 +25,15 @@ const isActive = ref(false)
 const currentProviderId = ref('')
 const currentVoiceId = ref('')
 
-const audioQueue = shallowRef<TtsAudioBlock[]>([])
-let currentAudio: HTMLAudioElement | null = null
+let audioCtx: AudioContext | null = null
+let scheduledSources: Array<{ source: AudioBufferSourceNode; blockIdx: number; endTime: number }> = []
+let nextScheduleTime = 0
+const decodedQueue = new Map<number, AudioBuffer>()
+let lastScheduledBlockIdx = -1
+
 let getTextBlocks: TextSourceFn | null = null
 let chapterBlocks: string[] = []
 const pendingPrefetches = new Set<number>()
-let objectUrls: string[] = []
 let prefetchGeneration = 0
 
 const positionComposable = useTtsPosition()
@@ -46,8 +50,59 @@ function flushCurrentPositionSave() {
   void positionComposable.flushPendingSave()
 }
 
+function getOrCreateAudioContext(): AudioContext {
+  if (!audioCtx) audioCtx = new AudioContext()
+  if (audioCtx.state === 'suspended') void audioCtx.resume()
+  return audioCtx
+}
+
+async function decodeAudioBlob(blob: Blob): Promise<AudioBuffer> {
+  const ctx = getOrCreateAudioContext()
+  const ab = await blob.arrayBuffer()
+  return ctx.decodeAudioData(ab)
+}
+
+function stopAllSources(): void {
+  for (const { source } of scheduledSources) {
+    source.onended = null
+    try {
+      source.stop(0)
+    } catch {
+      // Source may have already ended naturally
+    }
+  }
+  scheduledSources = []
+  decodedQueue.clear()
+  nextScheduleTime = 0
+  lastScheduledBlockIdx = -1
+  pendingPrefetches.clear()
+  prefetchGeneration++
+}
+
+function stopAndResetFor(blockIdx: number): void {
+  stopAllSources()
+  lastScheduledBlockIdx = blockIdx - 1
+}
+
+function stopScheduledExcept(keepBlockIdx: number): void {
+  const toStop = scheduledSources.filter((s) => s.blockIdx !== keepBlockIdx)
+  for (const { source } of toStop) {
+    source.onended = null
+    try {
+      source.stop(0)
+    } catch {
+      // Source may have already ended naturally
+    }
+  }
+  scheduledSources = scheduledSources.filter((s) => s.blockIdx === keepBlockIdx)
+  decodedQueue.clear()
+  lastScheduledBlockIdx = keepBlockIdx
+  const currentEntry = scheduledSources[0]
+  if (currentEntry) nextScheduleTime = currentEntry.endTime
+}
+
 function pausePlayback() {
-  if (currentAudio) currentAudio.pause()
+  void audioCtx?.suspend()
   playbackState.value = 'paused'
   mediaSession.setPlaybackState('paused')
   flushCurrentPositionSave()
@@ -56,6 +111,42 @@ function pausePlayback() {
 const sleepTimer = useTtsSleepTimer(pausePlayback)
 
 export function useTtsPlayer() {
+  function scheduleAudioBuffer(buffer: AudioBuffer, blockIdx: number): void {
+    const ctx = getOrCreateAudioContext()
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.connect(ctx.destination)
+    const startTime = Math.max(ctx.currentTime + SCHEDULE_LATENCY, nextScheduleTime)
+    source.start(startTime)
+    const endTime = startTime + buffer.duration
+    nextScheduleTime = endTime
+    scheduledSources.push({ source, blockIdx, endTime })
+    const capturedGen = prefetchGeneration
+    source.onended = () => {
+      scheduledSources = scheduledSources.filter((s) => s.source !== source)
+      if (prefetchGeneration !== capturedGen) return
+      if (playbackState.value !== 'playing') return
+      void onBlockEnded(blockIdx)
+    }
+  }
+
+  function scheduleIfNext(blockIdx: number, buffer: AudioBuffer): void {
+    if (blockIdx === lastScheduledBlockIdx + 1) {
+      scheduleAudioBuffer(buffer, blockIdx)
+      lastScheduledBlockIdx = blockIdx
+      let nextIdx = lastScheduledBlockIdx + 1
+      while (decodedQueue.has(nextIdx)) {
+        const buf = decodedQueue.get(nextIdx)!
+        decodedQueue.delete(nextIdx)
+        scheduleAudioBuffer(buf, nextIdx)
+        lastScheduledBlockIdx = nextIdx
+        nextIdx++
+      }
+    } else {
+      decodedQueue.set(blockIdx, buffer)
+    }
+  }
+
   async function startPlayback(
     book: TtsCurrentBook,
     providerId: string,
@@ -107,9 +198,17 @@ export function useTtsPlayer() {
       await advanceChapter()
       return
     }
+    const gen = prefetchGeneration
     try {
-      const audioBlob = await fetchAudio(text)
-      playAudioBlob(audioBlob, blockIdx)
+      const blob = await fetchAudio(text)
+      if (prefetchGeneration !== gen) return
+      const buffer = await decodeAudioBlob(blob)
+      if (prefetchGeneration !== gen) return
+      scheduleIfNext(blockIdx, buffer)
+      currentBlockIndex.value = blockIdx
+      playbackState.value = 'playing'
+      mediaSession.setPlaybackState('playing')
+      queueCurrentPositionSave(blockIdx)
       prefetchAhead(blockIdx)
     } catch (err) {
       handleError(err)
@@ -128,42 +227,18 @@ export function useTtsPlayer() {
     return res.blob()
   }
 
-  function playAudioBlob(blob: Blob, blockIdx: number) {
-    if (currentAudio) {
-      currentAudio.pause()
-      currentAudio = null
-    }
-    const url = URL.createObjectURL(blob)
-    objectUrls.push(url)
-    const audio = new Audio(url)
-    audio.onended = () => {
-      URL.revokeObjectURL(url)
-      objectUrls = objectUrls.filter((u) => u !== url)
-      void onBlockEnded(blockIdx)
-    }
-    audio.onerror = () => handleError(new Error('Audio playback error'))
-    currentAudio = audio
-    currentBlockIndex.value = blockIdx
-    playbackState.value = 'playing'
-    mediaSession.setPlaybackState('playing')
-    void audio.play().catch(handleError)
-    queueCurrentPositionSave(blockIdx)
-  }
-
   async function onBlockEnded(blockIdx: number) {
     if (playbackState.value !== 'playing') return
     const next = blockIdx + 1
-    if (next < chapterBlocks.length) {
-      const prefetched = audioQueue.value.find((b) => b.chapterIndex === currentChapterIndex.value && b.index === next)
-      if (prefetched?.audioBlob) {
-        playAudioBlob(prefetched.audioBlob, next)
-        audioQueue.value = audioQueue.value.filter((b) => !(b.chapterIndex === currentChapterIndex.value && b.index === next))
-        prefetchAhead(next)
-      } else {
-        await fetchAndPlay(next)
-      }
-    } else {
+    if (next >= chapterBlocks.length) {
       await advanceChapter()
+      return
+    }
+    currentBlockIndex.value = next
+    queueCurrentPositionSave(next)
+    prefetchAhead(next)
+    if (next > lastScheduledBlockIdx && !pendingPrefetches.has(next) && !decodedQueue.has(next)) {
+      await fetchAndPlay(next)
     }
   }
 
@@ -173,15 +248,25 @@ export function useTtsPlayer() {
       const idx = currentIdx + i
       if (idx >= chapterBlocks.length) break
       if (pendingPrefetches.has(idx)) continue
-      if (audioQueue.value.some((b) => b.chapterIndex === currentChapterIndex.value && b.index === idx)) continue
+      if (idx <= lastScheduledBlockIdx) continue
+      if (decodedQueue.has(idx)) continue
       pendingPrefetches.add(idx)
       const text = chapterBlocks[idx]
-      if (!text) continue
+      if (!text) {
+        pendingPrefetches.delete(idx)
+        continue
+      }
       fetchAudio(text)
         .then((blob) => {
-          pendingPrefetches.delete(idx)
-          if (prefetchGeneration !== gen) return
-          audioQueue.value = [...audioQueue.value, { index: idx, text, chapterIndex: currentChapterIndex.value, audioBlob: blob, audioUrl: null }]
+          if (prefetchGeneration !== gen) {
+            pendingPrefetches.delete(idx)
+            return
+          }
+          return decodeAudioBlob(blob).then((buffer) => {
+            pendingPrefetches.delete(idx)
+            if (prefetchGeneration !== gen) return
+            scheduleIfNext(idx, buffer)
+          })
         })
         .catch(() => pendingPrefetches.delete(idx))
     }
@@ -196,9 +281,7 @@ export function useTtsPlayer() {
     }
     currentChapterIndex.value = next
     currentBlockIndex.value = 0
-    prefetchGeneration++
-    audioQueue.value = []
-    pendingPrefetches.clear()
+    stopAllSources()
     if (!getTextBlocks) return
     chapterBlocks = await getTextBlocks(next)
     if (chapterBlocks.length > 0) {
@@ -209,26 +292,16 @@ export function useTtsPlayer() {
   }
 
   function resumePlayback() {
-    if (currentAudio && playbackState.value === 'paused') {
-      void currentAudio.play()
-      playbackState.value = 'playing'
-      mediaSession.setPlaybackState('playing')
-    }
+    if (playbackState.value !== 'paused') return
+    if (audioCtx) void audioCtx.resume()
+    playbackState.value = 'playing'
+    mediaSession.setPlaybackState('playing')
   }
 
   function stopPlayback() {
     flushCurrentPositionSave()
-    if (currentAudio) {
-      currentAudio.pause()
-      currentAudio = null
-    }
-    for (const url of objectUrls) URL.revokeObjectURL(url)
-    objectUrls = []
-    prefetchGeneration++
-    audioQueue.value = []
-    pendingPrefetches.clear()
-    chapterBlocks = []
-    getTextBlocks = null
+    stopAllSources()
+    audioCtx = null
     if (currentBook.value && readingSession.sessionId.value) {
       void readingSession.endSession({
         bookFileId: currentBook.value.bookFileId,
@@ -246,6 +319,8 @@ export function useTtsPlayer() {
     currentProviderId.value = ''
     currentVoiceId.value = ''
     error.value = null
+    chapterBlocks = []
+    getTextBlocks = null
   }
 
   async function nextBlock() {
@@ -253,7 +328,7 @@ export function useTtsPlayer() {
     flushCurrentPositionSave()
     const next = currentBlockIndex.value + 1
     if (next < chapterBlocks.length) {
-      if (currentAudio) currentAudio.pause()
+      stopAndResetFor(next)
       await fetchAndPlay(next)
     } else {
       await advanceChapter()
@@ -264,7 +339,7 @@ export function useTtsPlayer() {
     if (!isActive.value) return
     flushCurrentPositionSave()
     const prev = Math.max(0, currentBlockIndex.value - 1)
-    if (currentAudio) currentAudio.pause()
+    stopAndResetFor(prev)
     await fetchAndPlay(prev)
   }
 
@@ -277,17 +352,19 @@ export function useTtsPlayer() {
     const nextSpeed = Math.min(MAX_SPEED, Math.max(MIN_SPEED, newSpeed))
     if (nextSpeed === speed.value) return
     speed.value = nextSpeed
+    if (!isActive.value) return
     prefetchGeneration++
-    audioQueue.value = []
     pendingPrefetches.clear()
+    stopScheduledExcept(currentBlockIndex.value)
   }
 
   function setVoice(providerId: string, voiceId: string) {
     currentProviderId.value = providerId
     currentVoiceId.value = voiceId
+    if (!isActive.value) return
     prefetchGeneration++
-    audioQueue.value = []
     pendingPrefetches.clear()
+    stopScheduledExcept(currentBlockIndex.value)
   }
 
   function increaseSpeed() {
@@ -312,7 +389,7 @@ export function useTtsPlayer() {
       currentChapterIndex.value = chapterIndex
       chapterBlocks = await getTextBlocks(chapterIndex)
     }
-    if (currentAudio) currentAudio.pause()
+    stopAndResetFor(blockIndex)
     await fetchAndPlay(blockIndex)
   }
 

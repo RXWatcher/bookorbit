@@ -118,6 +118,26 @@ function ssmlToPlainText(ssml: string): string {
     .trim()
 }
 
+const MAX_CHUNK_CHARS = 800
+
+export function groupByCap(text: string, maxChars: number): string[] {
+  const sentences = splitTextToSentences(text)
+  const groups: string[] = []
+  let current = ''
+  for (const sentence of sentences) {
+    if (!current) {
+      current = sentence
+    } else if (current.length + 1 + sentence.length <= maxChars) {
+      current += ' ' + sentence
+    } else {
+      groups.push(current)
+      current = sentence
+    }
+  }
+  if (current) groups.push(current)
+  return groups
+}
+
 function splitTextToSentences(text: string): string[] {
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (!normalized) return []
@@ -381,36 +401,17 @@ export function useFoliateTts() {
     resetHighlightToStart()
   }
 
-  function syncHighlightToSentenceIndex(sentenceIndex: number, preferVisibleRange = false) {
+  function syncHighlightToBlockIndex(blockIndex: number, preferVisibleRange = false) {
     if (!ttsInstance) return
-    if (sentenceIndex <= 0 || (preferVisibleRange && cachedVisibleRange)) {
+    if (blockIndex <= 0 || (preferVisibleRange && cachedVisibleRange)) {
       syncHighlightAtBlockStart(preferVisibleRange)
       return
     }
-
     resetHighlightToStart()
-    let remaining = sentenceIndex
-    while (remaining > 0) {
-      const availableInCurrentBlock = Math.max(0, currentSentenceMarks.length - currentSentenceMarkIndex - 1)
-      if (remaining <= availableInCurrentBlock) {
-        currentSentenceMarkIndex += remaining
-        highlightCurrentSentence()
-        return
-      }
-
-      remaining -= availableInCurrentBlock + 1
-      if (!moveToNextBlockWithSentences(false)) {
-        // Clamp to the last available sentence if saved index overflows.
-        currentSentenceMarkIndex = Math.max(0, currentSentenceMarks.length - 1)
-        highlightCurrentSentence()
-        return
-      }
+    for (let i = 0; i < blockIndex; i++) {
+      if (!moveToNextBlockWithSentences(false)) break
     }
     highlightCurrentSentence()
-  }
-
-  function syncHighlightToBlockIndex(blockIndex: number, preferVisibleRange = false) {
-    syncHighlightToSentenceIndex(blockIndex, preferVisibleRange)
   }
 
   function showResumeHighlightFromCfi(cfi: string): boolean {
@@ -440,7 +441,7 @@ export function useFoliateTts() {
 
   async function getServerTextBlocks(bookFileId: number, chapterIndex: number): Promise<string[]> {
     const chapterText = await ttsApi.getChapterText(bookFileId, chapterIndex)
-    return chapterText.sentences.flatMap((s) => splitTextToSentences(s.text))
+    return chapterText.sentences.flatMap((s) => groupByCap(s.text, MAX_CHUNK_CHARS))
   }
 
   return {
