@@ -1,0 +1,1 @@
+ALTER TABLE "tts_providers" ADD COLUMN "supports_voice_discovery" boolean DEFAULT true NOT NULL;

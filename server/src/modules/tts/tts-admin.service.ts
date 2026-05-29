@@ -67,6 +67,7 @@ export class TtsAdminService {
       defaultModel: dto.defaultModel ?? null,
       staticVoices: dto.staticVoices ?? null,
       enabled: true,
+      supportsVoiceDiscovery: dto.supportsVoiceDiscovery ?? true,
     });
   }
 
@@ -81,6 +82,7 @@ export class TtsAdminService {
       ...(dto.enabled !== undefined && { enabled: dto.enabled }),
       ...(dto.defaultModel !== undefined && { defaultModel: dto.defaultModel }),
       ...(dto.staticVoices !== undefined && { staticVoices: dto.staticVoices }),
+      ...(dto.supportsVoiceDiscovery !== undefined && { supportsVoiceDiscovery: dto.supportsVoiceDiscovery }),
     });
   }
 
@@ -97,6 +99,12 @@ export class TtsAdminService {
     this.logger.log(`[${event}] [start] providerId=${id} - discovering provider voices`);
     const dbProvider = await this.ttsRepo.findProviderById(id);
     if (!dbProvider) throw new NotFoundException(`TTS provider ${id} not found`);
+    if (!dbProvider.supportsVoiceDiscovery) {
+      this.logger.log(
+        `[${event}] [end] providerId=${id} durationMs=${Date.now() - startMs} supported=false count=0 - voice discovery skipped (disabled)`,
+      );
+      return { voices: [], supported: false };
+    }
     const provider = new OpenAiCompatibleProvider({
       providerId: String(dbProvider.id),
       providerName: dbProvider.name,

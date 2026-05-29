@@ -36,9 +36,6 @@ export class TtsService {
 
   async previewVoice(providerId: string, voiceId: string): Promise<Buffer> {
     const provider = await this.resolveProvider(providerId);
-    if (providerId === EDGE_PROVIDER_ID) {
-      await this.assertEdgeVoiceAvailable(voiceId);
-    }
     return this.synthesisService.previewVoice(provider, providerId, voiceId);
   }
 

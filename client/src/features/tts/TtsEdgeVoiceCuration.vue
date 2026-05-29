@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
-import { Loader2, Search, Volume2, Square, X } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Search, Volume2, Square, X } from 'lucide-vue-next'
 import * as ttsApi from './api/tts.api'
 import type { TtsEdgeConfig } from './api/tts.api'
 import type { TtsVoice } from '@bookorbit/types'
@@ -24,6 +24,7 @@ const selectedVoices = ref<Set<string>>(new Set(props.initialConfig.enabledVoice
 const persistedSelectedVoices = ref<Set<string>>(new Set(props.initialConfig.enabledVoices))
 const previewingVoiceId = ref<string | null>(null)
 const playingVoiceId = ref<string | null>(null)
+const previewErrorVoiceId = ref<string | null>(null)
 let previewAudio: HTMLAudioElement | null = null
 let previewAudioUrl: string | null = null
 
@@ -224,6 +225,7 @@ async function handlePreview(entry: CuratedVoice) {
     return
   }
   stopPreview()
+  previewErrorVoiceId.value = null
   previewingVoiceId.value = voice.shortName
   try {
     const response = await ttsApi.previewVoice(voice.providerId, voice.id)
@@ -238,7 +240,11 @@ async function handlePreview(entry: CuratedVoice) {
     audio.onpause = () => clearPreviewAudio()
     await audio.play()
   } catch {
+    previewErrorVoiceId.value = voice.shortName
     clearPreviewAudio()
+    setTimeout(() => {
+      if (previewErrorVoiceId.value === voice.shortName) previewErrorVoiceId.value = null
+    }, 3000)
   } finally {
     previewingVoiceId.value = null
   }
@@ -250,6 +256,7 @@ function stopPreview() {
   }
   clearPreviewAudio()
   previewingVoiceId.value = null
+  previewErrorVoiceId.value = null
 }
 
 function clearPreviewAudio() {
@@ -415,6 +422,7 @@ onUnmounted(() => {
                 >
                   <Loader2 v-if="previewingVoiceId === voice.voice.shortName" class="w-3.5 h-3.5 animate-spin" />
                   <Square v-else-if="playingVoiceId === voice.voice.shortName" class="w-3.5 h-3.5" />
+                  <AlertCircle v-else-if="previewErrorVoiceId === voice.voice.shortName" class="w-3.5 h-3.5 text-destructive" />
                   <Volume2 v-else class="w-3.5 h-3.5" />
                 </button>
                 <span class="text-xs text-muted-foreground flex-shrink-0">{{ voice.voice.gender }}</span>

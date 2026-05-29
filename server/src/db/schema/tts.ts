@@ -21,6 +21,7 @@ export const ttsProviders = pgTable('tts_providers', {
   apiKey: varchar('api_key', { length: 500 }),
   defaultModel: varchar('default_model', { length: 100 }),
   staticVoices: jsonb('static_voices').$type<StaticVoice[]>(),
+  supportsVoiceDiscovery: boolean('supports_voice_discovery').notNull().default(true),
   displayOrder: integer('display_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true })

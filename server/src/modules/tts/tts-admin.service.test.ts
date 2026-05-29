@@ -49,6 +49,7 @@ const DB_PROVIDER = {
   defaultModel: null,
   staticVoices: null,
   enabled: true,
+  supportsVoiceDiscovery: true,
   displayOrder: 0,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -144,6 +145,18 @@ describe('TtsAdminService', () => {
       await service.addProvider({ name: 'Kokoro', baseUrl: 'http://localhost:8880/v1' });
       expect(repo.insertProvider).toHaveBeenCalledWith(expect.objectContaining({ staticVoices: null }));
     });
+
+    it('should default supportsVoiceDiscovery to true when not provided', async () => {
+      repo.insertProvider.mockResolvedValue(DB_PROVIDER);
+      await service.addProvider({ name: 'Kokoro', baseUrl: 'http://localhost:8880/v1' });
+      expect(repo.insertProvider).toHaveBeenCalledWith(expect.objectContaining({ supportsVoiceDiscovery: true }));
+    });
+
+    it('should pass supportsVoiceDiscovery: false when explicitly set', async () => {
+      repo.insertProvider.mockResolvedValue({ ...DB_PROVIDER, supportsVoiceDiscovery: false });
+      await service.addProvider({ name: 'Kokoro', baseUrl: 'http://localhost:8880/v1', supportsVoiceDiscovery: false });
+      expect(repo.insertProvider).toHaveBeenCalledWith(expect.objectContaining({ supportsVoiceDiscovery: false }));
+    });
   });
 
   describe('updateProvider', () => {
@@ -177,6 +190,20 @@ describe('TtsAdminService', () => {
       repo.updateProvider.mockResolvedValue({ ...DB_PROVIDER, staticVoices: [] });
       await service.updateProvider(1, { staticVoices: [] });
       expect(repo.updateProvider).toHaveBeenCalledWith(1, expect.objectContaining({ staticVoices: [] }));
+    });
+
+    it('should update supportsVoiceDiscovery to false', async () => {
+      repo.findProviderById.mockResolvedValue(DB_PROVIDER);
+      repo.updateProvider.mockResolvedValue({ ...DB_PROVIDER, supportsVoiceDiscovery: false });
+      await service.updateProvider(1, { supportsVoiceDiscovery: false });
+      expect(repo.updateProvider).toHaveBeenCalledWith(1, expect.objectContaining({ supportsVoiceDiscovery: false }));
+    });
+
+    it('should not include supportsVoiceDiscovery in update when not provided', async () => {
+      repo.findProviderById.mockResolvedValue(DB_PROVIDER);
+      repo.updateProvider.mockResolvedValue(DB_PROVIDER);
+      await service.updateProvider(1, { name: 'Updated' });
+      expect(repo.updateProvider).toHaveBeenCalledWith(1, expect.not.objectContaining({ supportsVoiceDiscovery: expect.anything() }));
     });
   });
 
@@ -233,6 +260,16 @@ describe('TtsAdminService', () => {
     it('should throw NotFoundException when provider not found', async () => {
       repo.findProviderById.mockResolvedValue(null);
       await expect(service.discoverProviderVoices(99)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should return {supported:false, voices:[]} immediately when supportsVoiceDiscovery is false, without calling fetch', async () => {
+      repo.findProviderById.mockResolvedValue({ ...DB_PROVIDER, supportsVoiceDiscovery: false });
+      const fetchSpy = vi.spyOn(global, 'fetch');
+
+      const result = await service.discoverProviderVoices(1);
+      expect(result.supported).toBe(false);
+      expect(result.voices).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it('should return voices and supported=true when provider exposes /audio/voices', async () => {

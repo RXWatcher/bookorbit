@@ -1,6 +1,6 @@
 {
-  "id": "faf29503-ed28-40a0-aa32-f227fec606b5",
-  "prevId": "83f0250b-9d64-484b-93d7-e2fa62c523e1",
+  "id": "abe3f17b-85a8-4609-870e-a5d74b6e37a1",
+  "prevId": "417ed284-59c2-405a-b4ff-a2474b5e72d7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2232,7 +2232,7 @@
         },
         "libraries_reading_threshold_range_chk": {
           "name": "libraries_reading_threshold_range_chk",
-          "value": "\"libraries\".\"reading_threshold\" >= 0 and \"libraries\".\"reading_threshold\" <= 100"
+          "value": "\"libraries\".\"reading_threshold\" >= 0 and \"libraries\".\"reading_threshold\" <= 1"
         },
         "libraries_mark_finished_percent_range_chk": {
           "name": "libraries_mark_finished_percent_range_chk",
@@ -3680,12 +3680,6 @@
         },
         "comicvine_id": {
           "name": "comicvine_id",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ranobedb_id": {
-          "name": "ranobedb_id",
           "type": "varchar(50)",
           "primaryKey": false,
           "notNull": false
@@ -5349,6 +5343,13 @@
           "type": "real",
           "primaryKey": false,
           "notNull": false
+        },
+        "session_type": {
+          "name": "session_type",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'read'"
         }
       },
       "indexes": {
@@ -10144,8 +10145,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.user_preferences": {
-      "name": "user_preferences",
+    "public.tts_book_preferences": {
+      "name": "tts_book_preferences",
       "schema": "",
       "columns": {
         "id": {
@@ -10160,17 +10161,36 @@
           "primaryKey": false,
           "notNull": true
         },
-        "category": {
-          "name": "category",
-          "type": "text",
+        "book_id": {
+          "name": "book_id",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
+        "provider_id": {
+          "name": "provider_id",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "voice_id": {
+          "name": "voice_id",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "speed": {
+          "name": "speed",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "updated_at": {
           "name": "updated_at",
@@ -10181,8 +10201,8 @@
         }
       },
       "indexes": {
-        "up_user_category_idx": {
-          "name": "up_user_category_idx",
+        "tts_book_prefs_user_book_uidx": {
+          "name": "tts_book_prefs_user_book_uidx",
           "columns": [
             {
               "expression": "user_id",
@@ -10191,7 +10211,7 @@
               "nulls": "last"
             },
             {
-              "expression": "category",
+              "expression": "book_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -10204,13 +10224,305 @@
         }
       },
       "foreignKeys": {
-        "user_preferences_user_id_users_id_fk": {
-          "name": "user_preferences_user_id_users_id_fk",
-          "tableFrom": "user_preferences",
+        "tts_book_preferences_user_id_users_id_fk": {
+          "name": "tts_book_preferences_user_id_users_id_fk",
+          "tableFrom": "tts_book_preferences",
           "tableTo": "users",
           "columnsFrom": ["user_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tts_book_preferences_book_id_books_id_fk": {
+          "name": "tts_book_preferences_book_id_books_id_fk",
+          "tableFrom": "tts_book_preferences",
+          "tableTo": "books",
+          "columnsFrom": ["book_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tts_book_preferences_provider_id_tts_providers_id_fk": {
+          "name": "tts_book_preferences_provider_id_tts_providers_id_fk",
+          "tableFrom": "tts_book_preferences",
+          "tableTo": "tts_providers",
+          "columnsFrom": ["provider_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tts_providers": {
+      "name": "tts_providers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "base_url": {
+          "name": "base_url",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "api_key": {
+          "name": "api_key",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_model": {
+          "name": "default_model",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "static_voices": {
+          "name": "static_voices",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supports_voice_discovery": {
+          "name": "supports_voice_discovery",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "display_order": {
+          "name": "display_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tts_reading_position": {
+      "name": "tts_reading_position",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "book_file_id": {
+          "name": "book_file_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cfi": {
+          "name": "cfi",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chapter_index": {
+          "name": "chapter_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tts_reading_pos_user_file_uidx": {
+          "name": "tts_reading_pos_user_file_uidx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "book_file_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tts_reading_position_user_id_users_id_fk": {
+          "name": "tts_reading_position_user_id_users_id_fk",
+          "tableFrom": "tts_reading_position",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tts_reading_position_book_file_id_book_files_id_fk": {
+          "name": "tts_reading_position_book_file_id_book_files_id_fk",
+          "tableFrom": "tts_reading_position",
+          "tableTo": "book_files",
+          "columnsFrom": ["book_file_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tts_user_preferences": {
+      "name": "tts_user_preferences",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voice_id": {
+          "name": "voice_id",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "speed": {
+          "name": "speed",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tts_user_prefs_user_uidx": {
+          "name": "tts_user_prefs_user_uidx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tts_user_preferences_user_id_users_id_fk": {
+          "name": "tts_user_preferences_user_id_users_id_fk",
+          "tableFrom": "tts_user_preferences",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tts_user_preferences_provider_id_tts_providers_id_fk": {
+          "name": "tts_user_preferences_provider_id_tts_providers_id_fk",
+          "tableFrom": "tts_user_preferences",
+          "tableTo": "tts_providers",
+          "columnsFrom": ["provider_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

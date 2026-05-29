@@ -20,6 +20,7 @@ export interface TtsDbProvider {
   defaultModel: string | null
   displayOrder: number
   staticVoices: StaticVoiceConfig[] | null
+  supportsVoiceDiscovery: boolean
 }
 
 export interface TtsEdgeConfig {
@@ -163,6 +164,7 @@ export async function addProvider(data: {
   apiKey?: string
   defaultModel?: string
   staticVoices?: StaticVoiceConfig[] | null
+  supportsVoiceDiscovery?: boolean
 }): Promise<TtsDbProvider> {
   const res = await api('/api/v1/tts/admin/providers', {
     method: 'POST',
@@ -175,7 +177,15 @@ export async function addProvider(data: {
 
 export async function updateProvider(
   id: number,
-  data: Partial<{ name: string; baseUrl: string; apiKey: string; enabled: boolean; defaultModel: string; staticVoices: StaticVoiceConfig[] | null }>,
+  data: Partial<{
+    name: string
+    baseUrl: string
+    apiKey: string
+    enabled: boolean
+    defaultModel: string
+    staticVoices: StaticVoiceConfig[] | null
+    supportsVoiceDiscovery: boolean
+  }>,
 ): Promise<TtsDbProvider> {
   const res = await api(`/api/v1/tts/admin/providers/${id}`, {
     method: 'PUT',

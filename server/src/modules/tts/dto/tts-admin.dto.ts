@@ -53,6 +53,10 @@ export class AddTtsProviderDto {
   @ValidateNested({ each: true })
   @Type(() => StaticVoiceDto)
   staticVoices?: StaticVoiceDto[] | null;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsVoiceDiscovery?: boolean;
 }
 
 export class UpdateTtsProviderDto {
@@ -85,6 +89,10 @@ export class UpdateTtsProviderDto {
   @ValidateNested({ each: true })
   @Type(() => StaticVoiceDto)
   staticVoices?: StaticVoiceDto[] | null;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsVoiceDiscovery?: boolean;
 }
 
 export class UpdateEdgeTtsConfigDto {

@@ -20,11 +20,11 @@ const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
 const deletingId = ref<number | null>(null)
 
 const showAddForm = ref(false)
-const addForm = ref({ name: '', baseUrl: '', apiKey: '', defaultModel: '' })
+const addForm = ref({ name: '', baseUrl: '', apiKey: '', defaultModel: '', supportsVoiceDiscovery: true })
 const addingProvider = ref(false)
 
 const editingId = ref<number | null>(null)
-const editForm = ref({ name: '', baseUrl: '', apiKey: '', defaultModel: '', enabled: true })
+const editForm = ref({ name: '', baseUrl: '', apiKey: '', defaultModel: '', enabled: true, supportsVoiceDiscovery: true })
 
 onMounted(async () => {
   await load()
@@ -141,6 +141,7 @@ function handleStartEdit(provider: TtsDbProvider) {
     apiKey: provider.apiKey ?? '',
     defaultModel: provider.defaultModel ?? '',
     enabled: provider.enabled,
+    supportsVoiceDiscovery: provider.supportsVoiceDiscovery,
   }
 }
 
@@ -162,7 +163,7 @@ async function handleSaveEdit(id: number) {
 
 function handleShowAddForm() {
   showAddForm.value = true
-  addForm.value = { name: '', baseUrl: '', apiKey: '', defaultModel: '' }
+  addForm.value = { name: '', baseUrl: '', apiKey: '', defaultModel: '', supportsVoiceDiscovery: true }
 }
 
 function handleHideAddForm() {
@@ -307,6 +308,10 @@ async function toggleProviderEnabled(provider: TtsDbProvider) {
               />
             </div>
           </div>
+          <label class="flex items-center gap-2 text-xs text-foreground cursor-pointer select-none pt-1">
+            <input v-model="addForm.supportsVoiceDiscovery" type="checkbox" class="rounded border-border accent-primary" />
+            Supports voice discovery
+          </label>
           <div class="flex items-center gap-2 pt-1">
             <button
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
@@ -366,6 +371,10 @@ async function toggleProviderEnabled(provider: TtsDbProvider) {
                 />
               </div>
             </div>
+            <label class="flex items-center gap-2 text-xs text-foreground cursor-pointer select-none pt-1">
+              <input v-model="editForm.supportsVoiceDiscovery" type="checkbox" class="rounded border-border accent-primary" />
+              Supports voice discovery
+            </label>
             <div class="flex items-center gap-2 pt-1">
               <button
                 class="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90"

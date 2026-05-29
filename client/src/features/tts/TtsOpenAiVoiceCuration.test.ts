@@ -14,6 +14,7 @@ const BASE_PROVIDER: TtsDbProvider = {
   defaultModel: 'kokoro',
   displayOrder: 0,
   staticVoices: null,
+  supportsVoiceDiscovery: true,
 }
 
 const SAVED_VOICES: StaticVoiceConfig[] = [
@@ -24,7 +25,14 @@ const SAVED_VOICES: StaticVoiceConfig[] = [
 function mountCuration(provider: TtsDbProvider = BASE_PROVIDER) {
   return mount(TtsOpenAiVoiceCuration, {
     props: { provider },
-    global: { stubs: { teleport: true } },
+    global: {
+      stubs: {
+        teleport: true,
+        Tooltip: { template: '<div><slot /></div>' },
+        TooltipTrigger: { template: '<div><slot /></div>' },
+        TooltipContent: { template: '<div><slot /></div>' },
+      },
+    },
   })
 }
 
@@ -65,6 +73,26 @@ describe('TtsOpenAiVoiceCuration', () => {
       expect(wrapper.text()).not.toContain('Load Kokoro preset')
       expect(wrapper.text()).not.toContain('Load OpenAI preset')
     })
+
+    it('empty state hint mentions import and preset when both are available', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: true, defaultModel: 'kokoro', staticVoices: null })
+      expect(wrapper.text()).toContain('Import from provider or load a preset.')
+    })
+
+    it('empty state hint mentions only import when no preset available', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: true, defaultModel: null, staticVoices: null })
+      expect(wrapper.text()).toContain('Import from provider.')
+    })
+
+    it('empty state hint mentions only preset when import is disabled', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: false, defaultModel: 'kokoro', staticVoices: null })
+      expect(wrapper.text()).toContain('Load a preset to get started.')
+    })
+
+    it('empty state hint mentions manual add when neither available', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: false, defaultModel: null, staticVoices: null })
+      expect(wrapper.text()).toContain('Add voices manually.')
+    })
   })
 
   describe('Import from provider', () => {
@@ -77,7 +105,7 @@ describe('TtsOpenAiVoiceCuration', () => {
         ],
       })
       const wrapper = mountCuration()
-      await wrapper.find('button[class*="border-border"]').trigger('click')
+      await wrapper.find('[data-testid="import-from-provider"]').trigger('click')
       await vi.waitFor(() => expect(ttsApi.discoverVoices).toHaveBeenCalledWith(1))
       await wrapper.vm.$nextTick()
       expect(wrapper.text()).toContain('Heart')
@@ -87,7 +115,7 @@ describe('TtsOpenAiVoiceCuration', () => {
     it('shows error when provider returns unsupported', async () => {
       vi.spyOn(ttsApi, 'discoverVoices').mockResolvedValue({ supported: false, voices: [] })
       const wrapper = mountCuration()
-      await wrapper.find('button[class*="border-border"]').trigger('click')
+      await wrapper.find('[data-testid="import-from-provider"]').trigger('click')
       await vi.waitFor(() => expect(ttsApi.discoverVoices).toHaveBeenCalled())
       await wrapper.vm.$nextTick()
       expect(wrapper.text()).toContain('does not expose a voice list endpoint')
@@ -96,7 +124,7 @@ describe('TtsOpenAiVoiceCuration', () => {
     it('shows error on network failure', async () => {
       vi.spyOn(ttsApi, 'discoverVoices').mockRejectedValue(new Error('ECONNREFUSED'))
       const wrapper = mountCuration()
-      await wrapper.find('button[class*="border-border"]').trigger('click')
+      await wrapper.find('[data-testid="import-from-provider"]').trigger('click')
       await vi.waitFor(() => expect(ttsApi.discoverVoices).toHaveBeenCalled())
       await wrapper.vm.$nextTick()
       expect(wrapper.text()).toContain('ECONNREFUSED')
@@ -108,13 +136,60 @@ describe('TtsOpenAiVoiceCuration', () => {
         voices: [{ id: 'af_heart', name: 'Heart', shortName: 'af_heart', language: 'English', locale: 'en-US', gender: 'Female' }],
       })
       const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
-      await wrapper.find('button[class*="border-border"]').trigger('click')
+      await wrapper.find('[data-testid="import-from-provider"]').trigger('click')
       await vi.waitFor(() => expect(ttsApi.discoverVoices).toHaveBeenCalled())
       await wrapper.vm.$nextTick()
       const cells = wrapper.findAll('span.font-mono')
       const ids = cells.map((c) => c.text())
       const heartCount = ids.filter((id) => id === 'af_heart').length
       expect(heartCount).toBe(1)
+    })
+
+    it('button is disabled when supportsVoiceDiscovery is false', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: false })
+      const btn = wrapper.find<HTMLButtonElement>('[data-testid="import-from-provider"]')
+      expect(btn.element.disabled).toBe(true)
+    })
+
+    it('button is enabled when supportsVoiceDiscovery is true', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: true })
+      const btn = wrapper.find<HTMLButtonElement>('[data-testid="import-from-provider"]')
+      expect(btn.element.disabled).toBe(false)
+    })
+
+    it('does not call discoverVoices when supportsVoiceDiscovery is false', async () => {
+      const spy = vi.spyOn(ttsApi, 'discoverVoices').mockResolvedValue({ supported: true, voices: [] })
+      const wrapper = mountCuration({ ...BASE_PROVIDER, supportsVoiceDiscovery: false })
+      const btn = wrapper.find('[data-testid="import-from-provider"]')
+      await btn.trigger('click')
+      expect(spy).not.toHaveBeenCalled()
+    })
+
+    it('shows generic tooltip reason when supportsVoiceDiscovery is false and no preset', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, defaultModel: null, supportsVoiceDiscovery: false })
+      expect(wrapper.text()).toContain('This provider does not support voice discovery.')
+    })
+
+    it('shows preset-specific tooltip reason when supportsVoiceDiscovery is false and kokoro preset detected', () => {
+      const wrapper = mountCuration({ ...BASE_PROVIDER, defaultModel: 'kokoro', supportsVoiceDiscovery: false })
+      expect(wrapper.text()).toContain('Load Kokoro preset')
+    })
+  })
+
+  describe('Preview voice', () => {
+    it('calls previewVoice with provider id and voice id', async () => {
+      const mockBlob = new Blob(['audio'], { type: 'audio/mpeg' })
+      const spy = vi.spyOn(ttsApi, 'previewVoice').mockResolvedValue(new Response(mockBlob, { status: 200 }))
+      const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
+      await wrapper.find('button[aria-label="Preview Heart"]').trigger('click')
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('1', 'af_heart'))
+    })
+
+    it('shows error icon when preview fails', async () => {
+      vi.spyOn(ttsApi, 'previewVoice').mockResolvedValue(new Response(null, { status: 500 }))
+      const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
+      await wrapper.find('button[aria-label="Preview Heart"]').trigger('click')
+      await vi.waitFor(() => expect(wrapper.find('button[aria-label="Preview Heart"] .text-destructive').exists()).toBe(true))
     })
   })
 
@@ -150,15 +225,13 @@ describe('TtsOpenAiVoiceCuration', () => {
   describe('Edit voice', () => {
     it('enters edit mode on pencil click', async () => {
       const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
-      const editBtns = wrapper.findAll('button[class*="hover:text-foreground"]')
-      await editBtns[0]!.trigger('click')
+      await wrapper.find('button[aria-label="Edit Heart"]').trigger('click')
       expect(wrapper.find('input').exists()).toBe(true)
     })
 
     it('cancels edit mode without saving', async () => {
       const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
-      const editBtns = wrapper.findAll('button[class*="hover:text-foreground"]')
-      await editBtns[0]!.trigger('click')
+      await wrapper.find('button[aria-label="Edit Heart"]').trigger('click')
       const cancelBtn = wrapper.find('button[aria-label="Cancel edit"]')
       await cancelBtn.trigger('click')
       expect(wrapper.find('input').exists()).toBe(false)
@@ -178,8 +251,7 @@ describe('TtsOpenAiVoiceCuration', () => {
   describe('Save', () => {
     it('emits save with current voices', async () => {
       const wrapper = mountCuration({ ...BASE_PROVIDER, staticVoices: SAVED_VOICES })
-      const editBtns = wrapper.findAll('button[class*="hover:text-foreground"]')
-      await editBtns[0]!.trigger('click')
+      await wrapper.find('button[aria-label="Edit Heart"]').trigger('click')
       await wrapper.find('input').setValue('af_heart_v2')
       const saveRowBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'Save' && !b.classes().includes('bg-primary'))
       await saveRowBtn!.trigger('click')

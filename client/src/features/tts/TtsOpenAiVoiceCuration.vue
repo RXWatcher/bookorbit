@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Loader2, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next'
+import { computed, onUnmounted, ref } from 'vue'
+import { AlertCircle, Loader2, Pencil, Plus, RefreshCw, Square, Trash2, Volume2, X } from 'lucide-vue-next'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import * as ttsApi from './api/tts.api'
 import type { TtsDbProvider, StaticVoiceConfig } from './api/tts.api'
 import { detectPreset, mergeVoices, PRESET_VOICES } from './lib/voice-presets'
@@ -27,7 +28,30 @@ const editForm = ref<StaticVoiceConfig>({ id: '', name: '', shortName: '', langu
 
 const saving = ref(false)
 
+const previewingVoiceId = ref<string | null>(null)
+const playingVoiceId = ref<string | null>(null)
+const previewErrorVoiceId = ref<string | null>(null)
+let previewAudio: HTMLAudioElement | null = null
+let previewAudioUrl: string | null = null
+
 const presetKey = computed(() => detectPreset(props.provider.defaultModel))
+
+const importDisabledReason = computed<string | null>(() => {
+  if (props.provider.supportsVoiceDiscovery) return null
+  const presetLabel = presetKey.value === 'kokoro' ? 'Kokoro' : presetKey.value === 'openai' ? 'OpenAI' : null
+  return presetLabel
+    ? `This provider does not support voice discovery. Use the "Load ${presetLabel} preset" button instead.`
+    : 'This provider does not support voice discovery.'
+})
+
+const emptyStateHint = computed(() => {
+  const canImport = props.provider.supportsVoiceDiscovery
+  const hasPreset = !!presetKey.value
+  if (canImport && hasPreset) return 'Import from provider or load a preset.'
+  if (canImport) return 'Import from provider.'
+  if (hasPreset) return 'Load a preset to get started.'
+  return 'Add voices manually.'
+})
 
 const hasUnsavedChanges = computed(() => {
   if (voices.value.length !== savedVoices.value.length) return true
@@ -46,6 +70,7 @@ const hasUnsavedChanges = computed(() => {
 })
 
 async function handleDiscover() {
+  if (importDisabledReason.value) return
   discovering.value = true
   discoverError.value = null
   try {
@@ -108,7 +133,56 @@ async function handleSave() {
   }
 }
 
+async function handlePreview(voice: StaticVoiceConfig) {
+  if (previewingVoiceId.value === voice.id) return
+  if (playingVoiceId.value === voice.id) {
+    stopPreview()
+    return
+  }
+  stopPreview()
+  previewErrorVoiceId.value = null
+  previewingVoiceId.value = voice.id
+  try {
+    const response = await ttsApi.previewVoice(String(props.provider.id), voice.id)
+    if (!response.ok) throw new Error('Preview failed')
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    previewAudio = audio
+    previewAudioUrl = url
+    playingVoiceId.value = voice.id
+    audio.onended = () => clearPreviewAudio()
+    audio.onpause = () => clearPreviewAudio()
+    await audio.play()
+  } catch {
+    previewErrorVoiceId.value = voice.id
+    clearPreviewAudio()
+    setTimeout(() => {
+      if (previewErrorVoiceId.value === voice.id) previewErrorVoiceId.value = null
+    }, 3000)
+  } finally {
+    previewingVoiceId.value = null
+  }
+}
+
+function stopPreview() {
+  if (previewAudio) previewAudio.pause()
+  clearPreviewAudio()
+  previewingVoiceId.value = null
+  previewErrorVoiceId.value = null
+}
+
+function clearPreviewAudio() {
+  if (previewAudioUrl) URL.revokeObjectURL(previewAudioUrl)
+  previewAudio = null
+  previewAudioUrl = null
+  playingVoiceId.value = null
+}
+
+onUnmounted(() => stopPreview())
+
 function handleClose() {
+  stopPreview()
   if (hasUnsavedChanges.value && typeof window !== 'undefined') {
     if (!window.confirm('Discard unsaved voice changes?')) return
   }
@@ -136,15 +210,23 @@ function handleClose() {
       <!-- Import / preset toolbar -->
       <div class="p-4 border-b border-border flex-shrink-0 space-y-2">
         <div class="flex flex-wrap items-center gap-2">
-          <button
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
-            :disabled="discovering"
-            @click="handleDiscover"
-          >
-            <Loader2 v-if="discovering" class="w-3.5 h-3.5 animate-spin" />
-            <RefreshCw v-else class="w-3.5 h-3.5" />
-            Import from provider
-          </button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span :class="importDisabledReason ? 'cursor-not-allowed' : ''">
+                <button
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
+                  data-testid="import-from-provider"
+                  :disabled="discovering || !!importDisabledReason"
+                  @click="handleDiscover"
+                >
+                  <Loader2 v-if="discovering" class="w-3.5 h-3.5 animate-spin" />
+                  <RefreshCw v-else class="w-3.5 h-3.5" />
+                  Import from provider
+                </button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent v-if="importDisabledReason">{{ importDisabledReason }}</TooltipContent>
+          </Tooltip>
           <button
             v-if="presetKey"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-accent"
@@ -159,12 +241,10 @@ function handleClose() {
 
       <!-- Voice table -->
       <div class="flex-1 overflow-y-auto min-h-0">
-        <div v-if="voices.length === 0" class="text-sm text-muted-foreground text-center py-10">
-          No voices configured. Import from provider or load a preset.
-        </div>
+        <div v-if="voices.length === 0" class="text-sm text-muted-foreground text-center py-10">No voices configured. {{ emptyStateHint }}</div>
         <template v-else>
           <div class="text-xs border-b border-border bg-muted/50">
-            <div class="grid grid-cols-[1fr_1fr_80px_80px_56px] gap-2 px-4 py-2 font-medium text-muted-foreground">
+            <div class="grid grid-cols-[1fr_1fr_80px_80px_80px] gap-2 px-4 py-2 font-medium text-muted-foreground">
               <div>ID</div>
               <div>Name</div>
               <div>Locale</div>
@@ -176,7 +256,7 @@ function handleClose() {
             <div v-for="(voice, idx) in voices" :key="voice.id">
               <!-- Edit row -->
               <template v-if="editingIdx === idx">
-                <div class="grid grid-cols-[1fr_1fr_80px_80px_56px] gap-2 px-4 py-2 items-center">
+                <div class="grid grid-cols-[1fr_1fr_80px_80px_80px] gap-2 px-4 py-2 items-center">
                   <input
                     v-model="editForm.id"
                     class="px-2 py-1 text-xs bg-background border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -206,13 +286,28 @@ function handleClose() {
               </template>
               <!-- Display row -->
               <template v-else>
-                <div class="grid grid-cols-[1fr_1fr_80px_80px_56px] gap-2 px-4 py-2 items-center hover:bg-accent/20">
+                <div class="grid grid-cols-[1fr_1fr_80px_80px_80px] gap-2 px-4 py-2 items-center hover:bg-accent/20">
                   <span class="text-xs text-muted-foreground font-mono truncate" :title="voice.id">{{ voice.id }}</span>
                   <span class="text-xs text-foreground truncate" :title="voice.name">{{ voice.name }}</span>
                   <span class="text-xs text-muted-foreground">{{ voice.locale || '-' }}</span>
                   <span class="text-xs text-muted-foreground">{{ voice.gender || '-' }}</span>
                   <div class="flex items-center gap-1">
-                    <button class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent" @click="handleStartEdit(idx)">
+                    <button
+                      type="button"
+                      class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                      :aria-label="playingVoiceId === voice.id ? `Stop preview for ${voice.name}` : `Preview ${voice.name}`"
+                      @click="handlePreview(voice)"
+                    >
+                      <Loader2 v-if="previewingVoiceId === voice.id" class="w-3.5 h-3.5 animate-spin" />
+                      <Square v-else-if="playingVoiceId === voice.id" class="w-3.5 h-3.5" />
+                      <AlertCircle v-else-if="previewErrorVoiceId === voice.id" class="w-3.5 h-3.5 text-destructive" />
+                      <Volume2 v-else class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                      :aria-label="`Edit ${voice.name}`"
+                      @click="handleStartEdit(idx)"
+                    >
                       <Pencil class="w-3.5 h-3.5" />
                     </button>
                     <button class="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10" @click="handleDeleteVoice(idx)">

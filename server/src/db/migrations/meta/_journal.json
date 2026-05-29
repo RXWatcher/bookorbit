@@ -78,6 +78,13 @@
       "when": 1780035048997,
       "tag": "0010_add_tts_static_voices",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780074757047,
+      "tag": "0011_add_supports_voice_discovery",
+      "breakpoints": true
     }
   ]
 }
