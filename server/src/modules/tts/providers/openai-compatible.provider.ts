@@ -19,12 +19,22 @@ interface OpenAiSpeechRequest {
   response_format: string;
 }
 
+export interface StaticVoiceConfig {
+  id: string;
+  name: string;
+  shortName: string;
+  language: string;
+  locale: string;
+  gender: string;
+}
+
 export interface OpenAiCompatibleConfig {
   providerId: string;
   providerName: string;
   baseUrl: string;
   apiKey: string;
   defaultModel?: string | null;
+  staticVoices?: StaticVoiceConfig[] | null;
 }
 
 @Injectable()
@@ -35,6 +45,7 @@ export class OpenAiCompatibleProvider implements ITtsProvider {
   private readonly providerId: string;
   private readonly providerName: string;
   private readonly defaultModel: string;
+  private readonly staticVoices: StaticVoiceConfig[] | null;
 
   constructor(config: OpenAiCompatibleConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, '');
@@ -42,6 +53,7 @@ export class OpenAiCompatibleProvider implements ITtsProvider {
     this.providerId = config.providerId;
     this.providerName = config.providerName;
     this.defaultModel = config.defaultModel || 'tts-1';
+    this.staticVoices = config.staticVoices ?? null;
   }
 
   async synthesize(text: string, voiceId: string, speed: number, format: string): Promise<Buffer> {
@@ -93,6 +105,13 @@ export class OpenAiCompatibleProvider implements ITtsProvider {
       });
       if (!response.ok) {
         if (response.status === 404) {
+          if (this.staticVoices && this.staticVoices.length > 0) {
+            const voices = this.mapStaticVoices();
+            this.logger.log(
+              `[${event}] [end] providerId=${this.providerId} durationMs=${Date.now() - startMs} count=${voices.length} source=static - using configured static voices`,
+            );
+            return voices;
+          }
           this.logger.warn(`[${event}] provider ${this.providerId} does not expose /audio/voices - returning empty list`);
           return [];
         }
@@ -119,6 +138,12 @@ export class OpenAiCompatibleProvider implements ITtsProvider {
     } catch (err) {
       const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
       const error = err instanceof Error ? sanitizeLogValue(err.message) : 'unknown';
+      if (this.staticVoices && this.staticVoices.length > 0) {
+        this.logger.warn(
+          `[${event}] providerId=${this.providerId} durationMs=${Date.now() - startMs} errorClass=${errorClass} error="${error}" - voice list fetch failed, using static voices`,
+        );
+        return this.mapStaticVoices();
+      }
       this.logger.error(
         `[${event}] [fail] providerId=${this.providerId} durationMs=${Date.now() - startMs} errorClass=${errorClass} error="${error}" - voice list failed`,
       );
@@ -139,6 +164,19 @@ export class OpenAiCompatibleProvider implements ITtsProvider {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return { connected: false, error: message };
     }
+  }
+
+  private mapStaticVoices(): TtsVoice[] {
+    return (this.staticVoices ?? []).map((v) => ({
+      id: v.id,
+      name: v.name,
+      shortName: v.shortName,
+      language: v.language,
+      locale: v.locale,
+      gender: v.gender,
+      providerId: this.providerId,
+      providerName: this.providerName,
+    }));
   }
 
   private buildHeaders(): Record<string, string> {

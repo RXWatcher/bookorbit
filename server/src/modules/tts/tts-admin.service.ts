@@ -64,6 +64,7 @@ export class TtsAdminService {
       baseUrl: dto.baseUrl,
       apiKey: dto.apiKey ?? null,
       defaultModel: dto.defaultModel ?? null,
+      staticVoices: dto.staticVoices ?? null,
       enabled: true,
     });
   }
@@ -78,6 +79,7 @@ export class TtsAdminService {
       ...(dto.apiKey !== undefined && { apiKey: dto.apiKey }),
       ...(dto.enabled !== undefined && { enabled: dto.enabled }),
       ...(dto.defaultModel !== undefined && { defaultModel: dto.defaultModel }),
+      ...(dto.staticVoices !== undefined && { staticVoices: dto.staticVoices }),
     });
   }
 

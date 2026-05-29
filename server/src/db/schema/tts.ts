@@ -1,7 +1,16 @@
-import { boolean, integer, pgTable, real, serial, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import { boolean, integer, jsonb, pgTable, real, serial, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import { bookFiles, books } from './books';
 import { users } from './auth';
+
+export interface StaticVoice {
+  id: string;
+  name: string;
+  shortName: string;
+  language: string;
+  locale: string;
+  gender: string;
+}
 
 export const ttsProviders = pgTable('tts_providers', {
   id: serial('id').primaryKey(),
@@ -11,6 +20,7 @@ export const ttsProviders = pgTable('tts_providers', {
   baseUrl: varchar('base_url', { length: 500 }),
   apiKey: varchar('api_key', { length: 500 }),
   defaultModel: varchar('default_model', { length: 100 }),
+  staticVoices: jsonb('static_voices').$type<StaticVoice[]>(),
   displayOrder: integer('display_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true })

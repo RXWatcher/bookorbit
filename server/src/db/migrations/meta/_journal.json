@@ -71,6 +71,13 @@
       "when": 1779941161093,
       "tag": "0009_tts-reading-pos-and-session-type",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780035048997,
+      "tag": "0010_add_tts_static_voices",
+      "breakpoints": true
     }
   ]
 }

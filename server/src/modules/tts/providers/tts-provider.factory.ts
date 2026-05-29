@@ -26,6 +26,7 @@ export class TtsProviderFactory {
       baseUrl: dbProvider.baseUrl ?? '',
       apiKey: dbProvider.apiKey ?? '',
       defaultModel: dbProvider.defaultModel,
+      staticVoices: dbProvider.staticVoices ?? null,
     });
     this.openAiCache.set(dbProvider.id, provider);
     return provider;
