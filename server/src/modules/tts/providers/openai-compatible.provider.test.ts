@@ -1,13 +1,22 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { OpenAiCompatibleProvider } from './openai-compatible.provider';
+import type { StaticVoiceConfig } from './openai-compatible.provider';
 
-function makeProvider(overrides: Partial<{ defaultModel: string | null; apiKey: string; baseUrl: string }> = {}) {
+const STATIC_VOICES: StaticVoiceConfig[] = [
+  { id: 'af_heart', name: 'Heart', shortName: 'af_heart', language: 'English', locale: 'en-US', gender: 'Female' },
+  { id: 'am_adam', name: 'Adam', shortName: 'am_adam', language: 'English', locale: 'en-US', gender: 'Male' },
+];
+
+function makeProvider(
+  overrides: Partial<{ defaultModel: string | null; apiKey: string; baseUrl: string; staticVoices: StaticVoiceConfig[] | null }> = {},
+) {
   return new OpenAiCompatibleProvider({
     providerId: '1',
     providerName: 'Test Provider',
     baseUrl: overrides.baseUrl ?? 'http://localhost:8880/v1',
     apiKey: overrides.apiKey ?? '',
     defaultModel: overrides.defaultModel,
+    staticVoices: overrides.staticVoices,
   });
 }
 
@@ -108,6 +117,40 @@ describe('OpenAiCompatibleProvider', () => {
   });
 
   describe('listVoices', () => {
+    it('returns empty array when API returns 404 without static voices', async () => {
+      const provider = makeProvider();
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('', false, 404));
+
+      const voices = await provider.listVoices();
+      expect(voices).toEqual([]);
+    });
+
+    it('returns static voices when API returns 404 and static voices are configured', async () => {
+      const provider = makeProvider({ staticVoices: STATIC_VOICES });
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('', false, 404));
+
+      const voices = await provider.listVoices();
+      expect(voices).toHaveLength(2);
+      expect(voices[0]!.id).toBe('af_heart');
+      expect(voices[0]!.providerId).toBe('1');
+      expect(voices[0]!.providerName).toBe('Test Provider');
+    });
+
+    it('returns static voices on network error when static voices are configured', async () => {
+      const provider = makeProvider({ staticVoices: STATIC_VOICES });
+      vi.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
+
+      const voices = await provider.listVoices();
+      expect(voices).toHaveLength(2);
+    });
+
+    it('throws on network error when no static voices configured', async () => {
+      const provider = makeProvider();
+      vi.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
+
+      await expect(provider.listVoices()).rejects.toThrow('ECONNREFUSED');
+    });
+
     it('returns empty array when API returns 404', async () => {
       const provider = makeProvider();
       vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('', false, 404));
@@ -151,6 +194,69 @@ describe('OpenAiCompatibleProvider', () => {
       vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('Server error', false, 500));
 
       await expect(provider.listVoices()).rejects.toThrow('Voice list API error 500');
+    });
+  });
+
+  describe('discoverVoicesLive', () => {
+    it('returns TtsVoice[] when API returns voices array', async () => {
+      const provider = makeProvider();
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse([{ id: 'alloy', name: 'Alloy' }]));
+
+      const voices = await provider.discoverVoicesLive();
+      expect(voices).not.toBeNull();
+      expect(voices).toHaveLength(1);
+      expect(voices![0]!.id).toBe('alloy');
+      expect(voices![0]!.providerId).toBe('1');
+    });
+
+    it('returns TtsVoice[] when API returns nested voices object', async () => {
+      const provider = makeProvider();
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse({ voices: [{ voice_id: 'af_sky', display_name: 'Sky' }] }));
+
+      const voices = await provider.discoverVoicesLive();
+      expect(voices).toHaveLength(1);
+      expect(voices![0]!.id).toBe('af_sky');
+      expect(voices![0]!.name).toBe('Sky');
+    });
+
+    it('returns null when API returns 404', async () => {
+      const provider = makeProvider();
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('', false, 404));
+
+      const result = await provider.discoverVoicesLive();
+      expect(result).toBeNull();
+    });
+
+    it('does NOT fall back to static voices (returns null on 404 even when static voices configured)', async () => {
+      const provider = makeProvider({ staticVoices: STATIC_VOICES });
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('', false, 404));
+
+      const result = await provider.discoverVoicesLive();
+      expect(result).toBeNull();
+    });
+
+    it('throws when API returns non-ok non-404 response', async () => {
+      const provider = makeProvider();
+      vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse('Server error', false, 500));
+
+      await expect(provider.discoverVoicesLive()).rejects.toThrow('Voice discovery API error 500');
+    });
+
+    it('throws on network error (does not silently return static voices)', async () => {
+      const provider = makeProvider({ staticVoices: STATIC_VOICES });
+      vi.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
+
+      await expect(provider.discoverVoicesLive()).rejects.toThrow('ECONNREFUSED');
+    });
+
+    it('includes auth header when apiKey is set', async () => {
+      const provider = makeProvider({ apiKey: 'sk-test' });
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(mockFetchResponse([]));
+
+      await provider.discoverVoicesLive();
+
+      const headers = (fetchSpy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      expect(headers['Authorization']).toBe('Bearer sk-test');
     });
   });
 

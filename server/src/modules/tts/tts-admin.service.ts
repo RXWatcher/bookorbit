@@ -1,12 +1,13 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 
-import type { TtsEdgeTtsConfig, TtsProviderStatus } from '@bookorbit/types';
+import type { TtsEdgeTtsConfig, TtsProviderStatus, TtsVoice } from '@bookorbit/types';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { APP_SETTING_KEYS } from '../../common/constants/app-settings.constants';
 import { AppSettingsRepository } from '../app-settings/app-settings.repository';
 import type { AddTtsProviderDto, UpdateEdgeTtsConfigDto, UpdateTtsProviderDto } from './dto/tts-admin.dto';
 import { EdgeTtsProvider } from './providers/edge-tts.provider';
+import { OpenAiCompatibleProvider } from './providers/openai-compatible.provider';
 import { TtsProviderFactory } from './providers/tts-provider.factory';
 import { TtsRepository } from './tts.repository';
 
@@ -88,6 +89,37 @@ export class TtsAdminService {
     if (!existing) throw new NotFoundException(`TTS provider ${id} not found`);
     this.providerFactory.invalidateCache(id);
     await this.ttsRepo.deleteProvider(id);
+  }
+
+  async discoverProviderVoices(id: number): Promise<{ voices: TtsVoice[]; supported: boolean }> {
+    const event = 'tts.admin.discover_voices';
+    const startMs = Date.now();
+    this.logger.log(`[${event}] [start] providerId=${id} - discovering provider voices`);
+    const dbProvider = await this.ttsRepo.findProviderById(id);
+    if (!dbProvider) throw new NotFoundException(`TTS provider ${id} not found`);
+    const provider = new OpenAiCompatibleProvider({
+      providerId: String(dbProvider.id),
+      providerName: dbProvider.name,
+      baseUrl: dbProvider.baseUrl ?? '',
+      apiKey: dbProvider.apiKey ?? '',
+      defaultModel: dbProvider.defaultModel,
+      staticVoices: null,
+    });
+    try {
+      const voices = await provider.discoverVoicesLive();
+      const supported = voices !== null;
+      this.logger.log(
+        `[${event}] [end] providerId=${id} durationMs=${Date.now() - startMs} supported=${supported} count=${voices?.length ?? 0} - voice discovery completed`,
+      );
+      return { voices: voices ?? [], supported };
+    } catch (err) {
+      const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+      const error = err instanceof Error ? sanitizeLogValue(err.message) : 'unknown';
+      this.logger.error(
+        `[${event}] [fail] providerId=${id} durationMs=${Date.now() - startMs} errorClass=${errorClass} error="${error}" - voice discovery failed`,
+      );
+      throw new BadGatewayException('Failed to reach TTS provider');
+    }
   }
 
   async testProvider(id: number): Promise<TtsProviderStatus> {

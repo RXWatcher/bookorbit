@@ -166,6 +166,32 @@ export class OpenAiCompatibleProvider implements ITtsProvider {
     }
   }
 
+  async discoverVoicesLive(): Promise<TtsVoice[] | null> {
+    const response = await fetch(`${this.baseUrl}/audio/voices`, {
+      headers: this.buildHeaders(),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`Voice discovery API error ${response.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = (await response.json()) as { voices?: OpenAiVoiceRaw[] } | OpenAiVoiceRaw[];
+    const rawVoices = Array.isArray(data) ? data : ((data as { voices?: OpenAiVoiceRaw[] }).voices ?? []);
+    return rawVoices.map((v) => {
+      const id = v.voice_id ?? v.id ?? '';
+      return {
+        id,
+        name: v.display_name ?? v.name ?? id,
+        shortName: id,
+        language: '',
+        locale: '',
+        gender: 'Unknown',
+        providerId: this.providerId,
+        providerName: this.providerName,
+      };
+    });
+  }
+
   private mapStaticVoices(): TtsVoice[] {
     return (this.staticVoices ?? []).map((v) => ({
       id: v.id,

@@ -1,5 +1,8 @@
 import { api } from '@/lib/api'
 import type { TtsChapterText, TtsEffectivePreferences, TtsProviderStatus, TtsSynthesisRequest, TtsUserPreferences, TtsVoice } from '@bookorbit/types'
+import type { StaticVoiceConfig } from '../lib/voice-presets'
+
+export type { StaticVoiceConfig }
 
 export interface TtsProviderInfo {
   id: string
@@ -16,6 +19,7 @@ export interface TtsDbProvider {
   apiKey: string | null
   defaultModel: string | null
   displayOrder: number
+  staticVoices: StaticVoiceConfig[] | null
 }
 
 export interface TtsEdgeConfig {
@@ -153,7 +157,13 @@ export async function getAdminProviders(): Promise<TtsDbProvider[]> {
   return res.json() as Promise<TtsDbProvider[]>
 }
 
-export async function addProvider(data: { name: string; baseUrl: string; apiKey?: string; defaultModel?: string }): Promise<TtsDbProvider> {
+export async function addProvider(data: {
+  name: string
+  baseUrl: string
+  apiKey?: string
+  defaultModel?: string
+  staticVoices?: StaticVoiceConfig[] | null
+}): Promise<TtsDbProvider> {
   const res = await api('/api/v1/tts/admin/providers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -165,7 +175,7 @@ export async function addProvider(data: { name: string; baseUrl: string; apiKey?
 
 export async function updateProvider(
   id: number,
-  data: Partial<{ name: string; baseUrl: string; apiKey: string; enabled: boolean; defaultModel: string }>,
+  data: Partial<{ name: string; baseUrl: string; apiKey: string; enabled: boolean; defaultModel: string; staticVoices: StaticVoiceConfig[] | null }>,
 ): Promise<TtsDbProvider> {
   const res = await api(`/api/v1/tts/admin/providers/${id}`, {
     method: 'PUT',
@@ -179,6 +189,12 @@ export async function updateProvider(
 export async function deleteProvider(id: number): Promise<void> {
   const res = await api(`/api/v1/tts/admin/providers/${id}`, { method: 'DELETE' })
   if (!res.ok && res.status !== 204) await assertOk(res)
+}
+
+export async function discoverVoices(id: number): Promise<{ voices: StaticVoiceConfig[]; supported: boolean }> {
+  const res = await api(`/api/v1/tts/admin/providers/${id}/voices/discover`)
+  await assertOk(res)
+  return res.json() as Promise<{ voices: StaticVoiceConfig[]; supported: boolean }>
 }
 
 export async function testProvider(id: number): Promise<TtsProviderStatus> {

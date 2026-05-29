@@ -32,6 +32,11 @@ export class TtsAdminController {
     await this.adminService.deleteProvider(id);
   }
 
+  @Get('providers/:id/voices/discover')
+  discoverVoices(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.discoverProviderVoices(id);
+  }
+
   @Post('providers/:id/test')
   testProvider(@Param('id', ParseIntPipe) id: number) {
     return this.adminService.testProvider(id);

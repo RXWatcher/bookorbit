@@ -4,8 +4,9 @@ import { toast } from 'vue-sonner'
 import { CheckCircle2, Loader2, Plus, TestTube, Trash2, WifiOff } from 'lucide-vue-next'
 import * as ttsApi from './api/tts.api'
 import TtsEdgeVoiceCuration from './TtsEdgeVoiceCuration.vue'
+import TtsOpenAiVoiceCuration from './TtsOpenAiVoiceCuration.vue'
 import { formatVoiceDisplayName, formatVoiceLocaleLabel, parseVoiceLanguageCountry } from './lib/voice-display'
-import type { TtsDbProvider, TtsEdgeConfig } from './api/tts.api'
+import type { TtsDbProvider, TtsEdgeConfig, StaticVoiceConfig } from './api/tts.api'
 import type { TtsVoice } from '@bookorbit/types'
 
 const loading = ref(true)
@@ -13,6 +14,7 @@ const providers = ref<TtsDbProvider[]>([])
 const edgeConfig = ref<TtsEdgeConfig>({ enabled: true, enabledVoices: [] })
 const allEdgeVoices = ref<TtsVoice[]>([])
 const showEdgeCuration = ref(false)
+const managingVoicesForProvider = ref<TtsDbProvider | null>(null)
 const testingId = ref<number | null>(null)
 const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
 const deletingId = ref<number | null>(null)
@@ -58,6 +60,28 @@ function handleOpenEdgeCuration() {
 
 function handleCloseEdgeCuration() {
   showEdgeCuration.value = false
+}
+
+function handleManageVoices(provider: TtsDbProvider) {
+  managingVoicesForProvider.value = provider
+}
+
+function handleCloseOpenAiCuration() {
+  managingVoicesForProvider.value = null
+}
+
+async function handleOpenAiCurationSave(voices: StaticVoiceConfig[]) {
+  const provider = managingVoicesForProvider.value
+  if (!provider) return
+  try {
+    const updated = await ttsApi.updateProvider(provider.id, { staticVoices: voices })
+    const idx = providers.value.findIndex((p) => p.id === provider.id)
+    if (idx !== -1) providers.value[idx] = updated
+    managingVoicesForProvider.value = updated
+    toast.success(`Voice list updated - ${voices.length} voice${voices.length === 1 ? '' : 's'}`)
+  } catch {
+    toast.error('Failed to save voices')
+  }
 }
 
 const curatedVoicesList = computed(() => {
@@ -407,11 +431,54 @@ async function toggleProviderEnabled(provider: TtsDbProvider) {
                 </button>
               </div>
             </div>
+            <!-- Voice summary row -->
+            <div class="border-t border-border pt-3 flex items-center justify-between gap-4">
+              <div class="text-sm text-muted-foreground">
+                <template v-if="!provider.staticVoices || provider.staticVoices.length === 0">No voices configured</template>
+                <template v-else>
+                  <div class="mb-2">{{ provider.staticVoices.length }} voice{{ provider.staticVoices.length === 1 ? '' : 's' }} curated:</div>
+                  <div class="mt-2 text-xs border border-border rounded-md overflow-hidden bg-card">
+                    <div
+                      class="grid grid-cols-[1fr_1fr_80px_80px] gap-2 px-3 py-1.5 bg-muted/50 border-b border-border font-medium text-muted-foreground"
+                    >
+                      <div>ID</div>
+                      <div>Name</div>
+                      <div>Locale</div>
+                      <div>Gender</div>
+                    </div>
+                    <div class="divide-y divide-border max-h-38.75 overflow-y-auto">
+                      <div
+                        v-for="v in provider.staticVoices"
+                        :key="v.id"
+                        class="grid grid-cols-[1fr_1fr_80px_80px] gap-2 px-3 py-1.5 items-center hover:bg-accent/30"
+                      >
+                        <span class="font-mono text-muted-foreground truncate" :title="v.id">{{ v.id }}</span>
+                        <span class="font-medium text-foreground truncate" :title="v.name">{{ v.name }}</span>
+                        <span class="truncate text-muted-foreground">{{ v.locale || '-' }}</span>
+                        <span class="truncate text-muted-foreground">{{ v.gender || '-' }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <button
+                class="text-sm font-medium text-primary hover:text-primary/80 underline whitespace-nowrap pt-0.5"
+                @click="handleManageVoices(provider)"
+              >
+                Manage voices
+              </button>
+            </div>
           </template>
         </div>
       </div>
     </template>
 
     <TtsEdgeVoiceCuration v-if="showEdgeCuration" :initial-config="edgeConfig" @save="handleEdgeConfigSaved" @close="handleCloseEdgeCuration" />
+    <TtsOpenAiVoiceCuration
+      v-if="managingVoicesForProvider"
+      :provider="managingVoicesForProvider"
+      @save="handleOpenAiCurationSave"
+      @close="handleCloseOpenAiCuration"
+    />
   </div>
 </template>
