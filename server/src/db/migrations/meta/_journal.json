@@ -134,6 +134,13 @@
       "when": 1781155643115,
       "tag": "0018_consolidated-koreader-annotations",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781162143195,
+      "tag": "0019_kobo-annotation-spoke",
+      "breakpoints": true
     }
   ]
 }
