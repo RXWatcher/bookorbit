@@ -23,6 +23,26 @@ function mergeSubObject(incoming: JsonObj | null | undefined, existing: JsonObj 
   return a >= b ? incoming : existing;
 }
 
+/**
+ * Returns the chronologically latest of the given timestamps, preserving the original
+ * string. The Kobo device resolves reading-state conflicts on the envelope LastModified/
+ * PriorityTimestamp, so these must never regress below the bookmark they wrap: a device
+ * re-push of its older state must not lower an envelope that already carries a newer
+ * hub-refreshed bookmark, or the device keeps rejecting the hub progress forever.
+ */
+function maxIsoTimestamp(...values: (string | null | undefined)[]): string | null {
+  let best: string | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!value) continue;
+    const ms = new Date(value).getTime();
+    if (Number.isNaN(ms) || ms <= bestMs) continue;
+    bestMs = ms;
+    best = value;
+  }
+  return best;
+}
+
 @Injectable()
 export class KoboReadingStateService {
   constructor(
@@ -84,6 +104,10 @@ export class KoboReadingStateService {
     const mergedStats = mergeSubObject(incomingStats, existing?.statistics as JsonObj | null);
     const mergedStatus = mergeSubObject(incomingStatus, existing?.statusInfo as JsonObj | null);
 
+    const bookmarkModified = typeof mergedBookmark?.LastModified === 'string' ? mergedBookmark.LastModified : undefined;
+    const effectiveLastModified = maxIsoTimestamp(lastModified, existing?.lastModifiedKobo, bookmarkModified) ?? lastModified;
+    const effectivePriority = maxIsoTimestamp(priorityTimestamp, existing?.priorityTimestamp, bookmarkModified) ?? priorityTimestamp;
+
     await this.db
       .insert(schema.koboReadingStates)
       .values({
@@ -91,8 +115,8 @@ export class KoboReadingStateService {
         bookId,
         entitlementId,
         createdAtKobo: created,
-        lastModifiedKobo: lastModified,
-        priorityTimestamp,
+        lastModifiedKobo: effectiveLastModified,
+        priorityTimestamp: effectivePriority,
         currentBookmark: mergedBookmark,
         statistics: mergedStats,
         statusInfo: mergedStatus,
@@ -101,8 +125,8 @@ export class KoboReadingStateService {
       .onConflictDoUpdate({
         target: [schema.koboReadingStates.userId, schema.koboReadingStates.bookId],
         set: {
-          lastModifiedKobo: lastModified,
-          priorityTimestamp,
+          lastModifiedKobo: effectiveLastModified,
+          priorityTimestamp: effectivePriority,
           currentBookmark: sql`excluded.current_bookmark`,
           statistics: sql`excluded.statistics`,
           statusInfo: sql`excluded.status_info`,
