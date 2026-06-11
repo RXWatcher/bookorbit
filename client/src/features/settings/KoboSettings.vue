@@ -38,6 +38,7 @@ const convertToKepub = ref(true)
 const forceEnableHyphenation = ref(false)
 const kepubConversionLimitMb = ref(100)
 const twoWayProgressSync = ref(false)
+const syncBookOrbitAnnotationsToKobo = ref(false)
 const savingSettings = ref(false)
 const settingsError = ref<string | null>(null)
 
@@ -48,6 +49,7 @@ function applySettingsToLocal() {
   forceEnableHyphenation.value = settings.value.forceEnableHyphenation
   kepubConversionLimitMb.value = settings.value.kepubConversionLimitMb
   twoWayProgressSync.value = settings.value.twoWayProgressSync
+  syncBookOrbitAnnotationsToKobo.value = settings.value.syncBookOrbitAnnotationsToKobo
 }
 
 function formatLastSeen(date: string | null): string {
@@ -76,6 +78,10 @@ onMounted(async () => {
 })
 
 watch(twoWayProgressSync, (enabled) => {
+  if (enabled) convertToKepub.value = true
+})
+
+watch(syncBookOrbitAnnotationsToKobo, (enabled) => {
   if (enabled) convertToKepub.value = true
 })
 
@@ -165,6 +171,7 @@ async function saveSettings() {
       forceEnableHyphenation: forceEnableHyphenation.value,
       kepubConversionLimitMb: kepubConversionLimitMb.value,
       twoWayProgressSync: twoWayProgressSync.value,
+      syncBookOrbitAnnotationsToKobo: syncBookOrbitAnnotationsToKobo.value,
     })
     applySettingsToLocal()
     toast.success('Kobo sync settings saved')
@@ -303,7 +310,7 @@ async function saveSettings() {
           <div class="pr-8">
             <p class="settings-label">Two-way progress sync</p>
             <p class="settings-hint">
-              Syncs reading position between BookOrbit and Kobo. For reliable page restore on Kobo, books must be sent as KEPUB.
+              Sync reading position between BookOrbit and Kobo. Requires KEPUB delivery for precise locations and reliable page restore.
             </p>
           </div>
           <ToggleSwitch v-model="twoWayProgressSync" />
@@ -311,13 +318,24 @@ async function saveSettings() {
 
         <div class="flex items-center justify-between px-5 py-4 bg-card">
           <div class="pr-8">
-            <p class="settings-label">Convert to KEPUB</p>
+            <p class="settings-label">Sync BookOrbit highlights to Kobo</p>
             <p class="settings-hint">
-              Required when two-way progress sync is enabled. On the next Kobo sync, affected books are offered again as KEPUB downloads. If Kobo
-              keeps opening an old EPUB copy, remove that book from Kobo and sync again.
+              Send highlights made in BookOrbit or KOReader to your Kobo. Kobo highlights are imported into BookOrbit even when this is off. Linked
+              annotations sync edits and deletes both ways. Requires KEPUB delivery; the book on Kobo must be the KEPUB downloaded from BookOrbit.
             </p>
           </div>
-          <ToggleSwitch v-model="convertToKepub" :disabled="twoWayProgressSync" />
+          <ToggleSwitch v-model="syncBookOrbitAnnotationsToKobo" />
+        </div>
+
+        <div class="flex items-center justify-between px-5 py-4 bg-card">
+          <div class="pr-8">
+            <p class="settings-label">Convert to KEPUB</p>
+            <p class="settings-hint">
+              Send eligible EPUBs as KEPUB. This stays on when progress sync or BookOrbit-to-Kobo highlights are enabled. On the next Kobo sync,
+              affected books are offered again as KEPUB downloads; remove any old EPUB copy if Kobo keeps opening it.
+            </p>
+          </div>
+          <ToggleSwitch v-model="convertToKepub" :disabled="twoWayProgressSync || syncBookOrbitAnnotationsToKobo" />
         </div>
 
         <div v-if="convertToKepub" class="flex items-center justify-between px-5 py-4 bg-card">
