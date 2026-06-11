@@ -136,10 +136,10 @@
       "breakpoints": true
     },
     {
-      "idx": 20,
+      "idx": 19,
       "version": "7",
-      "when": 1781495568135,
-      "tag": "0020_achievements_devices_and_session_source",
+      "when": 1781162143195,
+      "tag": "0019_kobo-annotation-spoke",
       "breakpoints": true
     }
   ]
