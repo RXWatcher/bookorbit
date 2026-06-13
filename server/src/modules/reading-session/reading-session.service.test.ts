@@ -5,7 +5,7 @@ import type { RequestUser } from '../../common/types/request-user';
 import { BookService } from '../book/book.service';
 import { ReadingSessionRepository, type SaveReadingSessionResult } from './reading-session.repository';
 import { ReadingSessionService } from './reading-session.service';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { EMPTY_CONTENT_FILTER_RULES, type ReadingSessionSource } from '@bookorbit/types';
 
 function makeUser(overrides?: Partial<RequestUser>): RequestUser {
   return {
@@ -28,7 +28,10 @@ function makeUser(overrides?: Partial<RequestUser>): RequestUser {
 }
 
 const mockRepo = {
-  saveSession: vi.fn<(...args: [number, number, string, Date, Date, number, number | null, number | null]) => Promise<SaveReadingSessionResult>>(),
+  saveSession:
+    vi.fn<
+      (...args: [number, number, string, Date, Date, number, number | null, number | null, ReadingSessionSource]) => Promise<SaveReadingSessionResult>
+    >(),
 };
 
 const mockBookService = {
@@ -75,6 +78,7 @@ describe('ReadingSessionService', () => {
       120,
       2.5,
       10,
+      'web',
     );
   });
 
@@ -101,6 +105,35 @@ describe('ReadingSessionService', () => {
       30,
       null,
       null,
+      'web',
+    );
+  });
+
+  it('forwards an explicit source to the repository', async () => {
+    await service.save(
+      42,
+      {
+        sessionId: 'kobo-session',
+        startedAt: '2026-04-15T10:00:00.000Z',
+        endedAt: '2026-04-15T10:01:00.000Z',
+        durationSeconds: 60,
+        progressDelta: null,
+        endProgress: null,
+      },
+      makeUser({ id: 33 }),
+      'kobo',
+    );
+
+    expect(mockRepo.saveSession).toHaveBeenCalledWith(
+      33,
+      42,
+      'kobo-session',
+      new Date('2026-04-15T10:00:00.000Z'),
+      new Date('2026-04-15T10:01:00.000Z'),
+      60,
+      null,
+      null,
+      'kobo',
     );
   });
 

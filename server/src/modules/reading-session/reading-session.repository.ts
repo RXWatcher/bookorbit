@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, count, desc, eq, gte, isNotNull, lt, lte, max, min, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import type { BookReadingSession, BookReadingSessionListResponse, BookReadingSessionStats } from '@bookorbit/types';
+import type { BookReadingSession, BookReadingSessionListResponse, BookReadingSessionStats, ReadingSessionSource } from '@bookorbit/types';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
 import { bookFiles, books, readingSessions, userReadingDailyStats } from '../../db/schema';
@@ -45,6 +45,7 @@ export class ReadingSessionRepository {
     durationSeconds: number,
     progressDelta: number | null,
     endProgress: number | null,
+    source: ReadingSessionSource = 'web',
   ): Promise<SaveReadingSessionResult> {
     if (durationSeconds < MIN_READING_SESSION_SECONDS) {
       return { kind: 'skipped', reason: 'duration_below_minimum' };
@@ -66,7 +67,7 @@ export class ReadingSessionRepository {
     return this.db.transaction(async (tx): Promise<SaveReadingSessionResult> => {
       const inserted = await tx
         .insert(readingSessions)
-        .values({ userId, bookFileId, bookId, sessionId, source: 'web', startedAt, endedAt, durationSeconds, progressDelta, endProgress })
+        .values({ userId, bookFileId, bookId, sessionId, source, startedAt, endedAt, durationSeconds, progressDelta, endProgress })
         .onConflictDoNothing({ target: [readingSessions.userId, readingSessions.sessionId] })
         .returning({ id: readingSessions.id });
 

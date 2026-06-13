@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 
-import type { BookReadingSession, BookReadingSessionListResponse, UserSettings } from '@bookorbit/types';
+import type { BookReadingSession, BookReadingSessionListResponse, ReadingSessionSource, UserSettings } from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { BookService } from '../book/book.service';
@@ -22,7 +22,7 @@ export class ReadingSessionService {
     private readonly achievementEvents: AchievementEventsService,
   ) {}
 
-  async save(fileId: number, dto: SaveReadingSessionDto, user: RequestUser): Promise<void> {
+  async save(fileId: number, dto: SaveReadingSessionDto, user: RequestUser, source: ReadingSessionSource = 'web'): Promise<void> {
     const event = 'reading_session.save';
     const startedAtMs = Date.now();
     this.logger.log(
@@ -56,6 +56,7 @@ export class ReadingSessionService {
         durationSeconds,
         dto.progressDelta ?? null,
         dto.endProgress ?? null,
+        source,
       );
 
       this.logger.log(
