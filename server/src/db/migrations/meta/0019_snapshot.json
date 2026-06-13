@@ -1,6 +1,6 @@
 {
-  "id": "ae965fcc-0970-44af-b1c9-2e7ea74893e5",
-  "prevId": "d20a77d2-02c8-4790-973c-50845a9eab26",
+  "id": "d20a77d2-02c8-4790-973c-50845a9eab26",
+  "prevId": "834a29e8-b029-4ecc-ac94-a247b506168e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7453,12 +7453,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "client_device_id": {
-          "name": "client_device_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "last_seen_at": {
           "name": "last_seen_at",
           "type": "timestamp with time zone",
@@ -7507,11 +7501,6 @@
           "name": "kobo_devices_token_unique",
           "nullsNotDistinct": false,
           "columns": ["token"]
-        },
-        "kobo_devices_client_device_id_unique": {
-          "name": "kobo_devices_client_device_id_unique",
-          "nullsNotDistinct": false,
-          "columns": ["client_device_id"]
         }
       },
       "policies": {},
@@ -7854,13 +7843,6 @@
         },
         "two_way_progress_sync": {
           "name": "two_way_progress_sync",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "sync_bookorbit_annotations_to_kobo": {
-          "name": "sync_bookorbit_annotations_to_kobo",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
