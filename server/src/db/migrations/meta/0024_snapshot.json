@@ -1,6 +1,6 @@
 {
-  "id": "46499b98-ef74-447e-8013-4dab6d018ede",
-  "prevId": "ae965fcc-0970-44af-b1c9-2e7ea74893e5",
+  "id": "139350a5-21b2-4334-b46b-6884119c7964",
+  "prevId": "1ad09390-1ed7-4667-b97c-e93645001b9b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2678,6 +2678,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "primary_author_sort_name": {
+          "name": "primary_author_sort_name",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "folder_path": {
           "name": "folder_path",
           "type": "varchar(4096)",
@@ -2781,6 +2787,90 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "books_library_visible_added_id_idx": {
+          "name": "books_library_visible_added_id_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "\"added_at\" desc",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"books\".\"status\" <> 'processing'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "books_library_author_sort_id_idx": {
+          "name": "books_library_author_sort_id_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "\"primary_author_sort_name\" asc nulls last",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"books\".\"status\" <> 'processing'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "books_library_author_sort_desc_id_idx": {
+          "name": "books_library_author_sort_desc_id_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "\"primary_author_sort_name\" desc nulls last",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"books\".\"status\" <> 'processing'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3523,6 +3613,33 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "book_authors_book_display_author_idx": {
+          "name": "book_authors_book_display_author_idx",
+          "columns": [
+            {
+              "expression": "book_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "display_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "author_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3871,6 +3988,27 @@
           "method": "btree",
           "with": {}
         },
+        "bm_title_book_id_idx": {
+          "name": "bm_title_book_id_idx",
+          "columns": [
+            {
+              "expression": "title",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "book_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "bm_series_trgm_idx": {
           "name": "bm_series_trgm_idx",
           "columns": [
@@ -3892,6 +4030,33 @@
           "columns": [
             {
               "expression": "series_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bm_series_id_index_book_id_idx": {
+          "name": "bm_series_id_index_book_id_idx",
+          "columns": [
+            {
+              "expression": "series_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "series_index",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "book_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5961,7 +6126,7 @@
           "name": "book_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "session_id": {
           "name": "session_id",
