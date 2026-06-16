@@ -33,7 +33,7 @@ export class ReadingSessionRepository {
     progressDelta: number | null,
     endProgress: number | null,
     source: ReadingSessionSource,
-    sessionType: 'read' | 'tts' = 'read',
+    sessionType: 'read' | 'tts' | 'listen' = 'read',
   ): Promise<SaveReadingSessionResult> {
     if (durationSeconds < MIN_READING_SESSION_SECONDS) {
       return { kind: 'skipped', reason: 'duration_below_minimum' };

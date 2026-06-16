@@ -31,6 +31,6 @@ export class SaveReadingSessionDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['read', 'tts'])
-  sessionType?: 'read' | 'tts';
+  @IsIn(['read', 'tts', 'listen'])
+  sessionType?: 'read' | 'tts' | 'listen';
 }
