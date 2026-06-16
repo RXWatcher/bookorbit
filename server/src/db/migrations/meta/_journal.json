@@ -68,22 +68,106 @@
     {
       "idx": 9,
       "version": "7",
-      "when": 1779941161093,
-      "tag": "0009_tts-reading-pos-and-session-type",
+      "when": 1780159365997,
+      "tag": "0009_user-preferences-theme-sync",
       "breakpoints": true
     },
     {
       "idx": 10,
       "version": "7",
-      "when": 1780035048997,
-      "tag": "0010_add_tts_static_voices",
+      "when": 1780190394625,
+      "tag": "0010_fix_reading_threshold",
       "breakpoints": true
     },
     {
       "idx": 11,
       "version": "7",
-      "when": 1780074757047,
-      "tag": "0011_add_supports_voice_discovery",
+      "when": 1780269274384,
+      "tag": "0011_add_ranobedb_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780359421901,
+      "tag": "0012_add_audio_file_write_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780425838875,
+      "tag": "0013_add_series_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780622112610,
+      "tag": "0014_kobo-two-way-progress-sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780678523024,
+      "tag": "0015_add_kobo_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780768608213,
+      "tag": "0016_widen_hardcover_match_method",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780952658578,
+      "tag": "0017_fix-series-backfill-timeout",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781214276180,
+      "tag": "0018_author_sort_key_and_listing_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781330635947,
+      "tag": "0019_add_lubimyczytac_provider_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781495568135,
+      "tag": "0020_achievements_devices_and_session_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781495568136,
+      "tag": "0021_tts-reading-pos-and-session-type",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781495568137,
+      "tag": "0022_add_tts_static_voices",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781495568138,
+      "tag": "0023_add_supports_voice_discovery",
       "breakpoints": true
     }
   ]
