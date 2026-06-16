@@ -21,7 +21,9 @@ import { useTtsPlayer } from '@/features/tts/composables/useTtsPlayer'
 import { useTtsMiniPlayerUi } from '@/features/tts/composables/useTtsMiniPlayerUi'
 import { useTtsPreferences } from '@/features/tts/composables/useTtsPreferences'
 import { useTtsPosition } from '@/features/tts/composables/useTtsPosition'
+import { useTtsKeyboard } from '@/features/tts/composables/useTtsKeyboard'
 import { getVoices } from '@/features/tts/api/tts.api'
+import { useMediaOverlay } from './media-overlay/composables/useMediaOverlay'
 import TtsResumePrompt from '@/features/tts/components/TtsResumePrompt.vue'
 import ReaderHeader from './epub/components/ReaderHeader.vue'
 import ReaderFooter from './epub/components/ReaderFooter.vue'
@@ -232,9 +234,21 @@ const { startPlayback, isActive, currentBook, currentBlockIndex, currentChapterI
 const { setExpanded: setMiniPlayerExpanded, setReaderFooterVisible } = useTtsMiniPlayerUi()
 const { loadBookPreferences, loadUserPreferences, defaultProviderId, defaultVoiceId, defaultSpeed } = useTtsPreferences()
 const ttsPosition = useTtsPosition()
+const mediaOverlay = useMediaOverlay()
 
+const isMediaOverlayAvailable = computed(() => isTtsAvailable && hasMediaOverlay.value)
 const isTtsActive = computed(() => isActive.value && currentBook.value?.bookFileId === fileId)
-const isNavigationLocked = computed(() => isTtsActive.value && playbackState.value === 'playing')
+const isNavigationLocked = computed(
+  () => (isTtsActive.value && playbackState.value === 'playing') || (mediaOverlay.isActive.value && mediaOverlay.isPlaying.value),
+)
+
+useTtsKeyboard(() => mediaOverlay.isActive.value, {
+  togglePlayPause: mediaOverlay.toggle,
+  prevBlock: mediaOverlay.prevSentence,
+  nextBlock: mediaOverlay.nextSentence,
+  increaseSpeed: mediaOverlay.increaseRate,
+  decreaseSpeed: mediaOverlay.decreaseRate,
+})
 const isOverlayFooterVisible = computed(() => footerVisible.value && !showTapZones.value)
 const showTtsResumePrompt = ref(false)
 const clearingSavedTtsPosition = ref(false)
@@ -282,8 +296,59 @@ function applySavedTtsResumeHighlight() {
   void showResumeHighlightFromBlock(savedChapterIdx, savedBlockIdx, sectionIndex.value)
 }
 
+const MEDIA_OVERLAY_STYLE_ID = 'bo-media-overlay-highlight'
+
+// Foliate's media-overlay engine only toggles the book's active class on the
+// current element; styling that class is the host app's job. Inject a themed
+// highlight rule (matching the TTS highlight colour) into each chapter document
+// so narration highlighting is visible even when the EPUB ships no CSS for it.
+function injectMediaOverlayHighlightCss(doc: Document) {
+  if (!doc?.head || doc.getElementById(MEDIA_OVERLAY_STYLE_ID)) return
+  const activeClass = getMediaActiveClass() ?? '-epub-media-overlay-active'
+  const style = doc.createElement('style')
+  style.id = MEDIA_OVERLAY_STYLE_ID
+  style.textContent = `.${CSS.escape(activeClass)} { background-color: rgba(79, 195, 247, 0.3); border-radius: 0.15em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }`
+  doc.head.appendChild(style)
+}
+
+// The most recently loaded chapter document, used to re-mark the resume sentence
+// after narration stops (foliate clears its own highlight on stop).
+let currentChapterDoc: Document | null = null
+
+// The sentence statically highlighted to show where narration will resume from.
+// Tracked so it can be cleared once foliate takes over highlighting on play.
+let resumeNarrationHighlight: { el: Element; cls: string } | null = null
+
+function clearResumeNarrationHighlight() {
+  if (resumeNarrationHighlight) {
+    resumeNarrationHighlight.el.classList.remove(resumeNarrationHighlight.cls)
+    resumeNarrationHighlight = null
+  }
+}
+
+// On (re)load, mark the saved resume sentence in the freshly loaded chapter so the
+// user can see where playback will pick up. No-op while narration is active -
+// foliate owns the highlight then.
+function showResumeNarrationHighlight(doc: Document) {
+  clearResumeNarrationHighlight()
+  if (mediaOverlay.isActive.value) return
+  const saved = loadSavedNarrationPos()
+  const id = saved?.fragment.split('#')[1]
+  if (!id) return
+  const el = doc.getElementById(id)
+  if (!el) return
+  const cls = getMediaActiveClass() ?? '-epub-media-overlay-active'
+  el.classList.add(cls)
+  resumeNarrationHighlight = { el, cls }
+}
+
 function onChapterLoadHandler(doc: Document, viewEl: HTMLElement) {
+  currentChapterDoc = doc
   setFoliateSource(doc, viewEl)
+  if (getMediaOverlay()) {
+    injectMediaOverlayHighlightCss(doc)
+    showResumeNarrationHighlight(doc)
+  }
 }
 
 function syncFoliateHighlightToCurrentBlock() {
@@ -396,10 +461,137 @@ async function handleStartTts() {
   await handlePlayFromCurrentPage()
 }
 
+// The headphones button drives embedded narration when the book has media
+// overlays, otherwise it falls back to synthesized TTS.
+function handleStartListen() {
+  if (isMediaOverlayAvailable.value) {
+    void handleStartMediaOverlay()
+    return
+  }
+  void handleStartTts()
+}
+
+const narrationPosKey = `bo:mo-pos:${fileId}`
+
+function saveNarrationPos(section: number, fragment: string) {
+  try {
+    localStorage.setItem(narrationPosKey, JSON.stringify({ section, fragment }))
+  } catch {
+    // localStorage may be unavailable (private mode); resume is best-effort.
+  }
+}
+
+function loadSavedNarrationPos(): { section: number; fragment: string } | null {
+  try {
+    const raw = localStorage.getItem(narrationPosKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.section === 'number' && typeof parsed?.fragment === 'string') return parsed
+  } catch {
+    // Ignore malformed/blocked storage.
+  }
+  return null
+}
+
+// Walk up to the nearest ancestor with an id - the sentence <span id="..."> that
+// SMIL media-overlay fragments point at.
+function nearestSentenceId(node: Node | null): string | null {
+  let el: Element | null = node instanceof Element ? node : (node?.parentElement ?? null)
+  while (el && !el.id) el = el.parentElement
+  return el?.id || null
+}
+
+// Persist the exact narrated sentence so playback can resume there after reload.
+watch(
+  () => mediaOverlay.currentFragment.value,
+  (fragment) => {
+    if (!mediaOverlay.isActive.value || !fragment) return
+    saveNarrationPos(sectionIndex.value, fragment)
+  },
+)
+
+// When narration is stopped (mini player closed), foliate clears its highlight.
+// Re-mark the last sentence so the resume point stays visible.
+watch(
+  () => mediaOverlay.isActive.value,
+  (active, wasActive) => {
+    if (wasActive && !active && currentChapterDoc) showResumeNarrationHighlight(currentChapterDoc)
+  },
+)
+
+// Starts media-overlay narration in `sectionIdx`. When `target` is given it
+// begins at that sentence (matched by full SMIL fragment when byId=false, or by
+// element id when byId=true); if no matching <par> plays, it falls back to the
+// start of the section instead of staying silent.
+async function beginNarration(sectionIdx: number, target: string | null, byId: boolean) {
+  const mo = getMediaOverlay()
+  if (!mo) {
+    toast.error('This book has no embedded narration')
+    return
+  }
+  const book = await buildTtsBook()
+  if (!book) return
+
+  clearResumeNarrationHighlight()
+
+  const matches = target
+    ? byId
+      ? (item: { text: string }) => item.text.split('#')[1] === target
+      : (item: { text: string }) => item.text === target
+    : null
+
+  mediaOverlay.start(
+    mo,
+    () => {
+      mo.start(sectionIdx, matches ?? undefined)
+      if (matches) {
+        window.setTimeout(() => {
+          if (mediaOverlay.isActive.value && !mediaOverlay.currentFragment.value) mo.start(sectionIdx)
+        }, 700)
+      }
+    },
+    book,
+  )
+}
+
+async function handleStartMediaOverlay() {
+  showSettings.value = false
+  showTapZones.value = false
+  hideOverlays(true)
+
+  if (mediaOverlay.isActive.value) {
+    mediaOverlay.toggle()
+    return
+  }
+
+  const saved = loadSavedNarrationPos()
+  if (saved) {
+    await beginNarration(saved.section, saved.fragment, false)
+    return
+  }
+
+  // No saved sentence: start from the first narrated sentence on the current page.
+  const visibleId = nearestSentenceId(getVisibleRange()?.startContainer ?? null)
+  await beginNarration(sectionIndex.value, visibleId, true)
+}
+
 async function handleReadFromHere() {
   if (!ensureTtsAvailable()) return
-  primeAudioContext()
   const range = selection.selectionRange.value
+
+  // Embedded narration takes precedence: play the pre-recorded audio from the
+  // selected sentence rather than synthesizing TTS.
+  if (isMediaOverlayAvailable.value) {
+    selection.dismiss()
+    showSettings.value = false
+    showTapZones.value = false
+    hideOverlays(true)
+    const id = nearestSentenceId(range?.startContainer ?? null)
+    await beginNarration(sectionIndex.value, id, true)
+    return
+  }
+
+  primeAudioContext()
   selection.dismiss()
   const book = await buildTtsBook()
   if (!book) return
@@ -519,7 +711,7 @@ function canRunManualNavigation(): boolean {
   const now = Date.now()
   if (now - lastNavigationBlockedToastAt.value >= 1200) {
     lastNavigationBlockedToastAt.value = now
-    toast.info('Pause TTS playback to navigate pages.')
+    toast.info(mediaOverlay.isActive.value ? 'Pause narration to navigate pages.' : 'Pause TTS playback to navigate pages.')
   }
 
   return false
@@ -546,6 +738,9 @@ const {
   setTextSelectedHandler,
   view: foliateView,
   bookLanguage,
+  hasMediaOverlay,
+  getMediaOverlay,
+  getMediaActiveClass,
 } = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler, onChapterLoadHandler, canRunManualNavigation)
 
 setTextSelectedHandler(selection.show)
@@ -872,6 +1067,7 @@ watch(
 
 onUnmounted(() => {
   setReaderFooterVisible(false)
+  mediaOverlay.stop()
 })
 </script>
 
@@ -892,8 +1088,9 @@ onUnmounted(() => {
       :settings-open="showSettings"
       :footerMode="footerMode"
       :peek-mode="isPeekMode"
-      :isTtsActive="isTtsActive"
+      :isTtsActive="isTtsActive || (mediaOverlay.isActive.value && mediaOverlay.isPlaying.value)"
       :isTtsAvailable="isTtsAvailable"
+      :isMediaOverlay="isMediaOverlayAvailable"
       :isPinned="isPinned"
       :showTapZones="showTapZones"
       class="transition-all duration-300"
@@ -907,7 +1104,7 @@ onUnmounted(() => {
       @toggleHelp="toggleHelpModal"
       @cycleFooterMode="cycleFooterMode"
       @startReading="startTrackedReading"
-      @startTts="handleStartTts"
+      @startTts="handleStartListen"
       @togglePin="handleMiddleTap"
       @toggleTapZones="showTapZones = !showTapZones"
     >

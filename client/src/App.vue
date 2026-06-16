@@ -6,6 +6,7 @@ import { useThemeStore } from '@/stores/theme'
 import { getBookorbitThemeName, initChartThemes } from '@/lib/echarts'
 import ChangePasswordDialog from '@/features/auth/ChangePasswordDialog.vue'
 import TtsMiniPlayer from '@/features/tts/components/TtsMiniPlayer.vue'
+import MediaOverlayMiniPlayer from '@/features/reader/media-overlay/components/MediaOverlayMiniPlayer.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -33,6 +34,7 @@ provide(
     </router-view>
     <ChangePasswordDialog v-if="isOpen" />
     <TtsMiniPlayer />
+    <MediaOverlayMiniPlayer />
     <Toaster rich-colors position="bottom-right" :visible-toasts="5" :gap="8" :offset="toasterOffset" :mobile-offset="toasterMobileOffset" />
   </TooltipProvider>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   ArrowLeft,
   BookOpen,
@@ -29,6 +29,7 @@ const props = defineProps<{
   peekMode?: boolean
   isTtsActive?: boolean
   isTtsAvailable?: boolean
+  isMediaOverlay?: boolean
   isPinned?: boolean
   showTapZones?: boolean
 }>()
@@ -49,6 +50,11 @@ const emit = defineEmits<{
 }>()
 
 const isFullscreen = ref(false)
+
+const ttsTooltip = computed(() => {
+  if (props.isTtsActive) return props.isMediaOverlay ? 'Narration playing' : 'TTS playing'
+  return props.isMediaOverlay ? 'Listen (narration)' : 'Listen'
+})
 
 function onFullscreenChange() {
   isFullscreen.value = !!document.fullscreenElement
@@ -130,11 +136,16 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
 
       <Tooltip v-if="props.isTtsAvailable !== false">
         <TooltipTrigger as-child>
-          <button class="viewer-btn" :class="props.isTtsActive ? '!text-primary' : ''" aria-label="Listen with TTS" @click="emit('startTts')">
+          <button
+            class="viewer-btn"
+            :class="props.isTtsActive ? '!text-primary' : ''"
+            :aria-label="props.isMediaOverlay ? 'Listen with narration' : 'Listen with TTS'"
+            @click="emit('startTts')"
+          >
             <Headphones :size="18" :class="{ 'animate-pulse': props.isTtsActive }" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>{{ props.isTtsActive ? 'TTS playing' : 'Listen' }}</TooltipContent>
+        <TooltipContent>{{ ttsTooltip }}</TooltipContent>
       </Tooltip>
 
       <Tooltip>

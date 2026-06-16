@@ -35,6 +35,17 @@ export interface FoliateLocationContext {
   fraction: number | null
 }
 
+export interface FoliateMediaOverlay extends EventTarget {
+  start: (index?: number, filter?: (item: { text: string }, i: number, items: { text: string }[]) => boolean) => unknown
+  pause: () => void
+  resume: () => void
+  stop: () => void
+  next: () => void
+  prev: () => void
+  setRate: (rate: number) => void
+  setVolume: (volume: number) => void
+}
+
 export function useFoliate(
   container: () => HTMLElement | null,
   onRelocate?: (detail: RelocateDetail) => void,
@@ -48,6 +59,7 @@ export function useFoliate(
   const fraction = ref(0)
   const viewRef = ref<unknown>(null)
   const bookLanguage = ref<string>('en')
+  const hasMediaOverlay = ref(false)
 
   const annotations = useFoliateAnnotations()
   const selection = useFoliateSelection(() => viewRef.value)
@@ -84,7 +96,7 @@ export function useFoliate(
         open: (file: File) => Promise<void>
         goTo: (target: string | number) => Promise<void>
         goToFraction?: (f: number) => void
-        book?: { toc?: unknown[] }
+        book?: { toc?: unknown[]; media?: { activeClass?: string } }
         getSectionFractions?: () => number[]
         prev?: () => void
         next?: () => void
@@ -94,6 +106,8 @@ export function useFoliate(
         deleteAnnotation?: (ann: { value: string }) => void
         search?: (opts: { query: string }) => AsyncIterable<unknown>
         clearSearch?: () => void
+        mediaOverlay?: FoliateMediaOverlay | null
+        startMediaOverlay?: () => unknown
       }
       view.style.cssText = 'width:100%;height:100%;display:block;'
       el.innerHTML = ''
@@ -179,6 +193,7 @@ export function useFoliate(
         const file = new File([blob], `book-file-${fileId}.${ext}`, { type: mimeType })
         await view.open(file)
       }
+      hasMediaOverlay.value = !!view.mediaOverlay
       if (onApplyStyles) onApplyStyles(view.renderer)
       let didNavigate = false
       if (cfi) {
@@ -220,9 +235,11 @@ export function useFoliate(
           getSectionFractions?: () => number[]
           resolveNavigation?: (target: string | number) => { index?: number } | Promise<{ index?: number }>
           getTOCItemOf?: (target: string | number) => Promise<{ label?: string } | null>
-          book?: { toc?: unknown[] }
+          book?: { toc?: unknown[]; media?: { activeClass?: string } }
           renderer?: FoliateRenderer
           destroy?: () => void
+          mediaOverlay?: FoliateMediaOverlay | null
+          startMediaOverlay?: () => unknown
         })
       | null
   }
@@ -270,6 +287,10 @@ export function useFoliate(
     error,
     fraction,
     bookLanguage,
+    hasMediaOverlay,
+    getMediaOverlay: (): FoliateMediaOverlay | null => getViewEl()?.mediaOverlay ?? null,
+    startMediaOverlay: (): unknown => getViewEl()?.startMediaOverlay?.(),
+    getMediaActiveClass: (): string | null => getViewEl()?.book?.media?.activeClass ?? null,
     view: viewRef,
     open: (bookId: number, fileId: number, format: string, cfi?: string | null, fallbackFraction?: number) =>
       open(bookId, fileId, format, cfi, fallbackFraction),

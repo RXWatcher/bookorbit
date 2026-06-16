@@ -33,6 +33,10 @@ const CONTENT_TYPES: Record<string, string> = {
   '.opf': 'application/oebps-package+xml',
   '.smil': 'application/smil+xml',
   '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.opus': 'audio/ogg',
+  '.ogg': 'audio/ogg',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
 };
