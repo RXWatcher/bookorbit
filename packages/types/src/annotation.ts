@@ -8,6 +8,7 @@ export interface AnnotationItem {
   note: string | null;
   chapterTitle: string | null;
   createdAt: string;
+  updatedAt?: string | null;
 }
 
 export interface AnnotationStats {

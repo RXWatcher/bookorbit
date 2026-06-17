@@ -10,6 +10,7 @@ export class AnnotationResponseDto {
   note!: string | null;
   chapterTitle!: string | null;
   createdAt!: Date;
+  updatedAt!: Date | null;
 
   static from(row: AnnotationRow): AnnotationResponseDto {
     const dto = new AnnotationResponseDto();
@@ -22,6 +23,7 @@ export class AnnotationResponseDto {
     dto.note = row.note ?? null;
     dto.chapterTitle = row.chapterTitle ?? null;
     dto.createdAt = row.createdAt;
+    dto.updatedAt = row.updatedAt ?? null;
     return dto;
   }
 }
