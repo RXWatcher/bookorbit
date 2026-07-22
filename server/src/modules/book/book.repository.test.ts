@@ -301,8 +301,8 @@ describe('BookRepository', () => {
 
   it('maps hasCover from coverSource and aggregates authors per book in recommendation rows', async () => {
     const bookRows = [
-      { id: 10, title: 'Dune', coverSource: 'extracted', primaryFormat: 'm4b' },
-      { id: 11, title: 'Foundation', coverSource: null, primaryFormat: 'epub' },
+      { id: 10, title: 'Dune', coverAspectRatio: '2/3', coverSource: 'extracted', primaryFormat: 'm4b' },
+      { id: 11, title: 'Foundation', coverAspectRatio: '1/1', coverSource: null, primaryFormat: 'epub' },
     ];
     const authorRows = [
       { bookId: 10, name: 'Frank Herbert' },
@@ -317,10 +317,20 @@ describe('BookRepository', () => {
     const result = await repo.findRecommendationTitlesByBookIds([10, 11]);
 
     expect(result).toEqual([
-      { id: 10, title: 'Dune', updatedAt: null, hasCover: true, authors: ['Frank Herbert'], isAudiobook: true, isComic: false },
+      {
+        id: 10,
+        title: 'Dune',
+        coverAspectRatio: '2/3',
+        updatedAt: null,
+        hasCover: true,
+        authors: ['Frank Herbert'],
+        isAudiobook: true,
+        isComic: false,
+      },
       {
         id: 11,
         title: 'Foundation',
+        coverAspectRatio: '1/1',
         updatedAt: null,
         hasCover: false,
         authors: ['Isaac Asimov', 'Robert Heinlein'],
@@ -331,7 +341,7 @@ describe('BookRepository', () => {
   });
 
   it('returns hasCover false when coverSource is null in recommendation rows', async () => {
-    const bookRows = [{ id: 5, title: 'No Cover', coverSource: null, primaryFormat: null }];
+    const bookRows = [{ id: 5, title: 'No Cover', coverAspectRatio: '2/3', coverSource: null, primaryFormat: null }];
     const db = {
       select: vi.fn().mockReturnValueOnce(makeSelectChain('where', bookRows)).mockReturnValueOnce(makeSelectChain('where', [])),
     };
@@ -339,11 +349,13 @@ describe('BookRepository', () => {
 
     const result = await repo.findRecommendationTitlesByBookIds([5]);
 
-    expect(result).toEqual([{ id: 5, title: 'No Cover', updatedAt: null, hasCover: false, authors: [], isAudiobook: false, isComic: false }]);
+    expect(result).toEqual([
+      { id: 5, title: 'No Cover', coverAspectRatio: '2/3', updatedAt: null, hasCover: false, authors: [], isAudiobook: false, isComic: false },
+    ]);
   });
 
   it('treats primary format checks as case-insensitive in recommendation rows', async () => {
-    const bookRows = [{ id: 6, title: 'Audio Case', coverSource: 'custom', primaryFormat: 'MP3' }];
+    const bookRows = [{ id: 6, title: 'Audio Case', coverAspectRatio: '2/3', coverSource: 'custom', primaryFormat: 'MP3' }];
     const db = {
       select: vi.fn().mockReturnValueOnce(makeSelectChain('where', bookRows)).mockReturnValueOnce(makeSelectChain('where', [])),
     };
@@ -351,11 +363,13 @@ describe('BookRepository', () => {
 
     const result = await repo.findRecommendationTitlesByBookIds([6]);
 
-    expect(result).toEqual([{ id: 6, title: 'Audio Case', updatedAt: null, hasCover: true, authors: [], isAudiobook: true, isComic: false }]);
+    expect(result).toEqual([
+      { id: 6, title: 'Audio Case', coverAspectRatio: '2/3', updatedAt: null, hasCover: true, authors: [], isAudiobook: true, isComic: false },
+    ]);
   });
 
   it('flags comic primary formats as isComic in recommendation rows', async () => {
-    const bookRows = [{ id: 8, title: 'Comic Case', coverSource: 'custom', primaryFormat: 'CBR' }];
+    const bookRows = [{ id: 8, title: 'Comic Case', coverAspectRatio: '1/1', coverSource: 'custom', primaryFormat: 'CBR' }];
     const db = {
       select: vi.fn().mockReturnValueOnce(makeSelectChain('where', bookRows)).mockReturnValueOnce(makeSelectChain('where', [])),
     };
@@ -363,12 +377,14 @@ describe('BookRepository', () => {
 
     const result = await repo.findRecommendationTitlesByBookIds([8]);
 
-    expect(result).toEqual([{ id: 8, title: 'Comic Case', updatedAt: null, hasCover: true, authors: [], isAudiobook: false, isComic: true }]);
+    expect(result).toEqual([
+      { id: 8, title: 'Comic Case', coverAspectRatio: '1/1', updatedAt: null, hasCover: true, authors: [], isAudiobook: false, isComic: true },
+    ]);
   });
 
   it('maps id-list helper rows and primary-file lookups', async () => {
     const libraryRows = [{ id: 1, libraryId: 7 }];
-    const recommendationBookRows = [{ id: 1, title: 'Dune', coverSource: 'extracted', primaryFormat: 'm4b' }];
+    const recommendationBookRows = [{ id: 1, title: 'Dune', coverAspectRatio: '2/3', coverSource: 'extracted', primaryFormat: 'm4b' }];
     const recommendationAuthorRows = [{ bookId: 1, name: 'Frank Herbert' }];
     const allIdsRows = [{ id: 3 }, { id: 4 }];
     const primaryFileRows = [{ absolutePath: '/books/a.epub', format: 'epub' }];
@@ -394,7 +410,16 @@ describe('BookRepository', () => {
 
     await expect(repo.findLibraryIdsByBookIds([1])).resolves.toEqual(libraryRows);
     await expect(repo.findRecommendationTitlesByBookIds([1])).resolves.toEqual([
-      { id: 1, title: 'Dune', updatedAt: null, hasCover: true, authors: ['Frank Herbert'], isAudiobook: true, isComic: false },
+      {
+        id: 1,
+        title: 'Dune',
+        coverAspectRatio: '2/3',
+        updatedAt: null,
+        hasCover: true,
+        authors: ['Frank Herbert'],
+        isAudiobook: true,
+        isComic: false,
+      },
     ]);
     await expect(repo.findPrimaryFilesByBookIds([1])).resolves.toEqual(primaryFilesByIds);
     await expect(repo.findAllFilesByBookIds([1])).resolves.toEqual(allFilesByIds);
