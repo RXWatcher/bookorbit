@@ -1729,7 +1729,11 @@ export class BookRepository {
   }
 
   async findIdsByWhere(where: SQL | undefined): Promise<number[]> {
-    const rows = await this.db.select({ id: books.id }).from(books).where(this.visibleWhere(where));
+    const rows = await this.db
+      .select({ id: books.id })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(this.visibleWhere(where));
     return rows.map((r) => r.id);
   }
 

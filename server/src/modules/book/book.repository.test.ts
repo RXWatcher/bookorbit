@@ -1,6 +1,7 @@
 import { BookRepository } from './book.repository';
 import { sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
+import { bookMetadata, books } from '../../db/schema';
 
 function makeSelectChain<T>(terminalMethod: string, terminalResult: T) {
   const chain: Record<string, vi.Mock> = {
@@ -208,6 +209,26 @@ describe('BookRepository', () => {
       seriesMembershipRows,
       communityRatingRows,
     });
+  });
+
+  it('findIdsByWhere joins metadata before applying selection predicates', async () => {
+    const rows = [{ id: 10 }, { id: 11 }];
+    const chain = makeSelectChain('where', rows);
+    const db = { select: vi.fn().mockReturnValue(chain) };
+    const repo = new BookRepository(db as never);
+
+    const result = await repo.findIdsByWhere(sql`${bookMetadata.title} is not null`);
+
+    expect(chain.from).toHaveBeenCalledWith(books);
+    expect(chain.leftJoin).toHaveBeenCalledWith(bookMetadata, expect.anything());
+
+    const dialect = new PgDialect();
+    const joinSql = dialect.sqlToQuery(chain.leftJoin.mock.calls[0]![1]).sql;
+    const whereSql = dialect.sqlToQuery(chain.where.mock.calls[0]![0]).sql;
+    expect(joinSql).toBe('"book_metadata"."book_id" = "books"."id"');
+    expect(whereSql).toContain('"book_metadata"."title" is not null');
+    expect(whereSql).toContain('"books"."status" <>');
+    expect(result).toEqual([10, 11]);
   });
 
   it('fetches per-book and per-file progress helpers with null-safe fallbacks', async () => {
