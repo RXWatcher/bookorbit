@@ -179,6 +179,12 @@ describe('buildCspDirectives', () => {
       expect(connectSrc).toContain('https://api.dictionaryapi.dev');
       expect(connectSrc).toContain('https://*.wiktionary.org');
     });
+
+    it('includes the Google Translate endpoint used by the epub reader regardless of Cloudflare Insights setting', () => {
+      expect(buildCspDirectives({ allowCloudflareInsights: false }).connectSrc).toContain('https://translate.googleapis.com');
+      expect(buildCspDirectives({ allowCloudflareInsights: true }).connectSrc).toContain('https://translate.googleapis.com');
+      expect(buildCspDirectives().connectSrc).toContain('https://translate.googleapis.com');
+    });
   });
 
   describe('scriptSrc with Cloudflare Insights', () => {
@@ -247,6 +253,24 @@ describe('buildCspDirectives', () => {
     it('upgradeInsecureRequests is null', () => {
       const { upgradeInsecureRequests } = buildCspDirectives();
       expect(upgradeInsecureRequests).toBeNull();
+    });
+  });
+
+  describe('buildHelmetOptions (integration)', () => {
+    it('emits a Content-Security-Policy header whose connect-src allows the Google Translate endpoint', async () => {
+      await withCspApp(async (app) => {
+        const response = await app.inject({ method: 'GET', url: '/ping' });
+
+        const csp = response.headers['content-security-policy'];
+        expect(csp).toBeDefined();
+
+        const connectSrcDirective = String(csp)
+          .split(';')
+          .map((directive) => directive.trim())
+          .find((directive) => directive.startsWith('connect-src'));
+
+        expect(connectSrcDirective).toContain('https://translate.googleapis.com');
+      });
     });
   });
 });
@@ -453,6 +477,19 @@ async function withHstsApp(options: { trustProxy: boolean }, run: (app: FastifyI
   const app = Fastify({ logger: false, trustProxy: options.trustProxy });
   await app.register(fastifyHelmet, buildHelmetOptions());
   registerConditionalHsts(app);
+  app.get('/ping', () => ({ ok: true }));
+
+  try {
+    await app.ready();
+    await run(app);
+  } finally {
+    await app.close();
+  }
+}
+
+async function withCspApp(run: (app: FastifyInstance) => Promise<void>): Promise<void> {
+  const app = Fastify({ logger: false });
+  await app.register(fastifyHelmet, buildHelmetOptions());
   app.get('/ping', () => ({ ok: true }));
 
   try {

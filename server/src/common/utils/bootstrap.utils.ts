@@ -41,6 +41,7 @@ export interface CspOptions {
 const CLOUDFLARE_INSIGHTS_SCRIPT_SRC = 'https://static.cloudflareinsights.com';
 const CLOUDFLARE_INSIGHTS_CONNECT_SRC = 'https://cloudflareinsights.com';
 const DICTIONARY_CONNECT_SRC = ['https://api.dictionaryapi.dev', 'https://*.wiktionary.org'];
+const TRANSLATE_CONNECT_SRC = 'https://translate.googleapis.com';
 
 export function buildCspDirectives(options: CspOptions = {}) {
   const { allowCloudflareInsights = false } = options;
@@ -52,6 +53,7 @@ export function buildCspDirectives(options: CspOptions = {}) {
     'wss:',
     'https://cdn.jsdelivr.net',
     ...DICTIONARY_CONNECT_SRC,
+    TRANSLATE_CONNECT_SRC,
     ...(allowCloudflareInsights ? [CLOUDFLARE_INSIGHTS_CONNECT_SRC] : []),
   ];
 
