@@ -129,6 +129,73 @@ describe('SmartScopeService', () => {
     ]);
   });
 
+  it('findAll marks a single broken scope count unavailable instead of failing the whole list (issue #787 regression)', async () => {
+    const { service, smartScopeRepo, libraryService, queryBuilder, bookReadService } = makeService();
+    const logger = (service as unknown as { logger: Logger }).logger;
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const user = makeUser({ id: 8 });
+    const brokenScope = makeSmartScope({
+      id: 1,
+      name: 'Broken Scope',
+      filter: { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'finishedAt', operator: 'after', value: '21-12-31' }] },
+    });
+    const healthyScope = makeSmartScope({
+      id: 2,
+      name: 'Healthy Scope',
+      filter: { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'title', operator: 'contains', value: 'space' }] },
+    });
+
+    smartScopeRepo.findAllForUser.mockResolvedValue([brokenScope, healthyScope]);
+    libraryService.findAccessibleLibraryIds.mockResolvedValue([2, 3]);
+    queryBuilder.buildWhere.mockReturnValueOnce('where-2');
+    bookReadService.countWhere.mockResolvedValueOnce(7);
+
+    const result = await service.findAll(user);
+
+    expect(result).toEqual([
+      { ...brokenScope, bookCount: null },
+      { ...healthyScope, bookCount: 7 },
+    ]);
+    expect(queryBuilder.buildWhere).toHaveBeenCalledTimes(1);
+    expect(queryBuilder.buildWhere).toHaveBeenCalledWith(healthyScope.filter, { accessibleLibraryIds: [2, 3], userId: 8, timeZone: 'UTC' });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[smart_scope.count] [fail] scopeId=1 userId=8'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('durationMs='));
+  });
+
+  it('findAll propagates unexpected count query failures', async () => {
+    const { service, smartScopeRepo, libraryService, queryBuilder, bookReadService } = makeService();
+    const user = makeUser({ id: 8 });
+    const brokenScope = makeSmartScope({
+      id: 3,
+      filter: { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'title', operator: 'contains', value: 'space' }] },
+    });
+
+    smartScopeRepo.findAllForUser.mockResolvedValue([brokenScope]);
+    libraryService.findAccessibleLibraryIds.mockResolvedValue([2, 3]);
+    queryBuilder.buildWhere.mockReturnValueOnce('where-3');
+    bookReadService.countWhere.mockRejectedValueOnce(new Error('date/time field value out of range: "21-12-31"'));
+
+    await expect(service.findAll(user)).rejects.toThrow('date/time field value out of range');
+  });
+
+  it('findAll propagates unexpected filter builder failures', async () => {
+    const { service, smartScopeRepo, libraryService, queryBuilder } = makeService();
+    const user = makeUser({ id: 8 });
+    const brokenScope = makeSmartScope({
+      id: 3,
+      filter: { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'title', operator: 'contains', value: 'space' }] },
+    });
+
+    smartScopeRepo.findAllForUser.mockResolvedValue([brokenScope]);
+    libraryService.findAccessibleLibraryIds.mockResolvedValue([2, 3]);
+    queryBuilder.buildWhere.mockImplementationOnce(() => {
+      throw new TypeError('unexpected builder failure');
+    });
+
+    await expect(service.findAll(user)).rejects.toThrow('unexpected builder failure');
+  });
+
   it('create sets defaults and persists validated values', async () => {
     const { service, smartScopeRepo } = makeService();
     const created = makeSmartScope({ id: 7, isPublic: false, defaultSort: [{ field: 'title', dir: 'asc' }] });
