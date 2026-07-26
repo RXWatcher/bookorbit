@@ -324,11 +324,16 @@ describe('SmartScopeService', () => {
       timeZone: 'UTC',
       contentFilters: EMPTY_CONTENT_FILTER_RULES,
     });
-    expect(bookService.executeBooksQuery).toHaveBeenCalledWith(12, 'where', {
-      filter: smartScope.filter,
-      sort: [{ field: 'title', dir: 'asc' }],
-      pagination: { page: 1, size: 25 },
-    });
+    expect(bookService.executeBooksQuery).toHaveBeenCalledWith(
+      12,
+      'where',
+      {
+        filter: smartScope.filter,
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 1, size: 25 },
+      },
+      { seriesSelectionFilter: undefined },
+    );
     expect(result).toEqual({ items: [], total: 0, page: 1, size: 25 });
   });
 
@@ -365,17 +370,22 @@ describe('SmartScopeService', () => {
       },
       { accessibleLibraryIds: [9], userId: 12, q: 'needle', timeZone: 'UTC', contentFilters: EMPTY_CONTENT_FILTER_RULES },
     );
-    expect(bookService.executeBooksQuery).toHaveBeenCalledWith(12, 'combined-where', {
-      filter: {
-        type: 'group',
-        join: 'AND',
-        rules: [smartScope.filter, requestFilter],
+    expect(bookService.executeBooksQuery).toHaveBeenCalledWith(
+      12,
+      'combined-where',
+      {
+        filter: {
+          type: 'group',
+          join: 'AND',
+          rules: [smartScope.filter, requestFilter],
+        },
+        sort: [{ field: 'author', dir: 'desc' }],
+        pagination: { page: 0, size: 50 },
+        q: 'needle',
+        collapseSeries: true,
       },
-      sort: [{ field: 'author', dir: 'desc' }],
-      pagination: { page: 0, size: 50 },
-      q: 'needle',
-      collapseSeries: true,
-    });
+      { seriesSelectionFilter: requestFilter },
+    );
   });
 
   describe('queryJumpBuckets', () => {
@@ -420,8 +430,46 @@ describe('SmartScopeService', () => {
         'where',
         expect.objectContaining({ sort: [{ field: 'author', dir: 'desc' }] }),
         'UTC',
+        { seriesSelectionFilter: undefined },
       );
       expect(result).toEqual({ buckets: [{ key: 'A', label: 'A', index: 0 }], total: 3, kind: 'letter', granularity: null });
+    });
+
+    it('keeps a saved series rule out of collapse eligibility while retaining it in the jump-bucket query', async () => {
+      const { service, smartScopeRepo, libraryService, queryBuilder, bookService } = makeService();
+      const smartScope = makeSmartScope({
+        filter: {
+          type: 'group',
+          join: 'OR',
+          rules: [{ type: 'rule', field: 'series', operator: 'contains', value: 'Batman' }],
+        },
+      });
+      smartScopeRepo.findById.mockResolvedValue([smartScope]);
+      libraryService.findAccessibleLibraryIds.mockResolvedValue([9]);
+      queryBuilder.buildWhere.mockReturnValue('series-scope-where');
+      bookService.executeJumpBucketsQuery.mockResolvedValue({
+        buckets: [],
+        total: 0,
+        kind: 'letter',
+        granularity: null,
+      });
+
+      await service.queryJumpBuckets(5, makeUser(), {
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 0, size: 50 },
+        collapseSeries: true,
+      });
+
+      expect(bookService.executeJumpBucketsQuery).toHaveBeenCalledWith(
+        12,
+        'series-scope-where',
+        expect.objectContaining({
+          filter: smartScope.filter,
+          collapseSeries: true,
+        }),
+        'UTC',
+        { seriesSelectionFilter: undefined },
+      );
     });
 
     it('denies access to private scopes of other users', async () => {
@@ -488,14 +536,53 @@ describe('SmartScopeService', () => {
         },
         { accessibleLibraryIds: [9], userId: 12, q: 'needle', timeZone: 'UTC', contentFilters: EMPTY_CONTENT_FILTER_RULES },
       );
-      expect(bookService.executeBooksQuery).toHaveBeenCalledWith(12, 'combined-where', {
-        ...query,
+      expect(bookService.executeBooksQuery).toHaveBeenCalledWith(
+        12,
+        'combined-where',
+        {
+          ...query,
+          filter: {
+            type: 'group',
+            join: 'AND',
+            rules: [smartScope.filter, requestFilter],
+          },
+        },
+        { seriesSelectionFilter: requestFilter },
+      );
+    });
+
+    it('keeps a saved series rule out of collapse eligibility while retaining it in the books query', async () => {
+      const { service, smartScopeRepo, libraryService, queryBuilder, bookService } = makeService();
+      const smartScope = makeSmartScope({
         filter: {
           type: 'group',
-          join: 'AND',
-          rules: [smartScope.filter, requestFilter],
+          join: 'OR',
+          rules: [
+            { type: 'rule', field: 'series', operator: 'contains', value: 'Batman' },
+            { type: 'rule', field: 'series', operator: 'contains', value: 'Detective Comics' },
+          ],
         },
       });
+      smartScopeRepo.findById.mockResolvedValue([smartScope]);
+      libraryService.findAccessibleLibraryIds.mockResolvedValue([9]);
+      queryBuilder.buildWhere.mockReturnValue('series-scope-where');
+      bookService.executeBooksQuery.mockResolvedValue({ items: [], total: 0, page: 0, size: 50 });
+
+      await service.queryBooks(5, makeUser(), {
+        sort: [{ field: 'series', dir: 'asc' }],
+        pagination: { page: 0, size: 50 },
+        collapseSeries: true,
+      });
+
+      expect(bookService.executeBooksQuery).toHaveBeenCalledWith(
+        12,
+        'series-scope-where',
+        expect.objectContaining({
+          filter: smartScope.filter,
+          collapseSeries: true,
+        }),
+        { seriesSelectionFilter: undefined },
+      );
     });
 
     it('uses the smartScope defaultSort when the query has no sort', async () => {
@@ -517,11 +604,16 @@ describe('SmartScopeService', () => {
 
       await service.queryBooks(5, makeUser({ id: 12 }), query);
 
-      expect(bookService.executeBooksQuery).toHaveBeenCalledWith(12, 'scope-where', {
-        ...query,
-        filter: smartScope.filter,
-        sort: [{ field: 'title', dir: 'asc' }],
-      });
+      expect(bookService.executeBooksQuery).toHaveBeenCalledWith(
+        12,
+        'scope-where',
+        {
+          ...query,
+          filter: smartScope.filter,
+          sort: [{ field: 'title', dir: 'asc' }],
+        },
+        { seriesSelectionFilter: undefined },
+      );
     });
 
     it('logs a warning when queryBooks takes at least 500ms', async () => {

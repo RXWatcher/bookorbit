@@ -165,7 +165,9 @@ export class SmartScopeService {
     const { where, effectiveQuery } = prepared;
 
     try {
-      const result = await this.bookService.executeBooksQuery(user.id, where, effectiveQuery);
+      const result = await this.bookService.executeBooksQuery(user.id, where, effectiveQuery, {
+        seriesSelectionFilter: query.filter,
+      });
       const durationMs = Date.now() - start;
       if (durationMs >= 500) {
         this.logger.warn(
@@ -190,7 +192,9 @@ export class SmartScopeService {
     // Eligibility is validated by the book service against effectiveQuery.sort,
     // i.e. after the scope's defaultSort has been resolved.
     const timeZone = resolveTimeZone((user.settings as { timezone?: unknown } | undefined)?.timezone, 'UTC');
-    return this.bookService.executeJumpBucketsQuery(user.id, prepared.where, prepared.effectiveQuery, timeZone);
+    return this.bookService.executeJumpBucketsQuery(user.id, prepared.where, prepared.effectiveQuery, timeZone, {
+      seriesSelectionFilter: query.filter,
+    });
   }
 
   private async prepareBooksQuery<T extends BookQuery>(
