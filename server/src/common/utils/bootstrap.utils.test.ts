@@ -1,14 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import fastifyHelmet from '@fastify/helmet';
 import { request } from 'http';
 import type { AddressInfo } from 'net';
 import {
   parseBooleanEnv,
   parseTrustProxy,
   buildCspDirectives,
+  buildHelmetOptions,
   buildEmptyJsonBodyStream,
   registerEmptyBodyContentTypeParser,
   shouldInjectEmptyJsonBody,
+  isSecureProtocol,
+  applyConditionalHsts,
+  registerConditionalHsts,
 } from './bootstrap.utils';
 
 describe('parseBooleanEnv', () => {
@@ -370,6 +375,93 @@ describe('empty request body bootstrap handling', () => {
     });
   });
 });
+
+describe('isSecureProtocol', () => {
+  it('returns true only for https', () => {
+    expect(isSecureProtocol('https')).toBe(true);
+  });
+
+  it('returns false for http', () => {
+    expect(isSecureProtocol('http')).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(isSecureProtocol(undefined)).toBe(false);
+  });
+
+  it('returns false for unexpected values', () => {
+    expect(isSecureProtocol('HTTPS')).toBe(false);
+    expect(isSecureProtocol('')).toBe(false);
+    expect(isSecureProtocol('ftp')).toBe(false);
+  });
+});
+
+describe('applyConditionalHsts', () => {
+  it('sets the Strict-Transport-Security header for secure requests', () => {
+    const reply = { header: vi.fn() };
+
+    applyConditionalHsts({ protocol: 'https' }, reply);
+
+    expect(reply.header).toHaveBeenCalledTimes(1);
+    expect(reply.header).toHaveBeenCalledWith('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  });
+
+  it('does not set the header for plain HTTP requests', () => {
+    const reply = { header: vi.fn() };
+
+    applyConditionalHsts({ protocol: 'http' }, reply);
+
+    expect(reply.header).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerConditionalHsts (integration)', () => {
+  it('sends HSTS when a trusted proxy forwards a secure request', async () => {
+    await withHstsApp({ trustProxy: true }, async (app) => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/ping',
+        headers: { 'x-forwarded-proto': 'https' },
+      });
+
+      expect(response.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains');
+    });
+  });
+
+  it('does not send HSTS for a plain HTTP request with no proxy involved', async () => {
+    await withHstsApp({ trustProxy: true }, async (app) => {
+      const response = await app.inject({ method: 'GET', url: '/ping' });
+
+      expect(response.headers['strict-transport-security']).toBeUndefined();
+    });
+  });
+
+  it('does not trust a forwarded-proto header when the proxy is not configured as trusted', async () => {
+    await withHstsApp({ trustProxy: false }, async (app) => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/ping',
+        headers: { 'x-forwarded-proto': 'https' },
+      });
+
+      expect(response.headers['strict-transport-security']).toBeUndefined();
+    });
+  });
+});
+
+async function withHstsApp(options: { trustProxy: boolean }, run: (app: FastifyInstance) => Promise<void>): Promise<void> {
+  const app = Fastify({ logger: false, trustProxy: options.trustProxy });
+  await app.register(fastifyHelmet, buildHelmetOptions());
+  registerConditionalHsts(app);
+  app.get('/ping', () => ({ ok: true }));
+
+  try {
+    await app.ready();
+    await run(app);
+  } finally {
+    await app.close();
+  }
+}
 
 async function withParserApp(run: (app: FastifyInstance) => Promise<void>): Promise<void> {
   const app = Fastify({ logger: false });
