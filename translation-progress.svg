@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="282" viewBox="0 0 680 282" fill="none" role="img" aria-label="BookOrbit translation progress">
+  <title>BookOrbit translation progress</title>
+  <style>
+    .card { fill: #0d1117; stroke: #30363d; stroke-width: 1px; rx: 12px; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; fill: #f0f6fc; }
+    .subtitle { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; font-weight: 400; fill: #8b949e; }
+    .lang-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 500; fill: #c9d1d9; }
+    .lang-label-small { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11.5px; font-weight: 500; fill: #c9d1d9; }
+    .pct-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 600; fill: #58a6ff; }
+    .pct-label-small { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 10.5px; font-weight: 600; fill: #8b949e; }
+    .axis-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 10px; font-weight: 400; fill: #6e7681; }
+    .grid { stroke: #21262d; stroke-width: 1; }
+    .bar-bg { fill: #21262d; }
+    .bar-source { fill: #58a6ff; }
+    .bar-high { fill: #2ea44f; }
+    .bar-medium { fill: #d29922; }
+    .bar-low { fill: #db6d28; }
+  </style>
+  <rect width="678" height="280" x="1" y="1" class="card" />
+
+  <text x="24" y="36" class="title">Translation Progress</text>
+  <text x="656" y="36" text-anchor="end" class="subtitle">Crowdin · 4 target languages · 96% average</text>
+
+  <line x1="24" y1="48" x2="656" y2="48" class="grid" />
+
+  <text x="24" y="78" class="lang-label">🇺🇸  English</text>
+  <rect x="214" y="66" width="392" height="16" rx="4" class="bar-bg" />
+  <rect x="214" y="66" width="392" height="16" rx="4" class="bar-source" />
+  <text x="618" y="78" class="pct-label">100%</text>
+  <text x="24" y="120" class="lang-label">🇧🇷  Portuguese</text>
+  <rect x="214" y="108" width="392" height="16" rx="4" class="bar-bg" />
+  <rect x="214" y="108" width="380" height="16" rx="4" class="bar-high" />
+  <text x="618" y="120" class="pct-label">97%</text>
+  <text x="24" y="162" class="lang-label">🇩🇪  German</text>
+  <rect x="214" y="150" width="392" height="16" rx="4" class="bar-bg" />
+  <rect x="214" y="150" width="376" height="16" rx="4" class="bar-high" />
+  <text x="618" y="162" class="pct-label">96%</text>
+  <text x="24" y="204" class="lang-label">🇳🇱  Dutch</text>
+  <rect x="214" y="192" width="392" height="16" rx="4" class="bar-bg" />
+  <rect x="214" y="192" width="372" height="16" rx="4" class="bar-high" />
+  <text x="618" y="204" class="pct-label">95%</text>
+  <text x="24" y="246" class="lang-label">🇸🇮  Slovenian</text>
+  <rect x="214" y="234" width="392" height="16" rx="4" class="bar-bg" />
+  <rect x="214" y="234" width="372" height="16" rx="4" class="bar-high" />
+  <text x="618" y="246" class="pct-label">95%</text>
+</svg>
