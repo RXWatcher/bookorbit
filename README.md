@@ -135,20 +135,21 @@ For local development, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). To contri
 
 ## Translations
 
-BookOrbit is available in English, German, Dutch, Brazilian Portuguese, and Slovenian. Translations are managed through [Crowdin](https://crowdin.com/project/bookorbit).
+BookOrbit is translated by the community on [Crowdin](https://crowdin.com/project/bookorbit). English is the source language; every other catalog is exported from Crowdin and merged through automated pull requests.
 
-[![German translation](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbadges.awesome-crowdin.com%2Fstats-17791545-912891.json&query=%24.progress.0.data.translationProgress&label=German&logo=crowdin&color=blue&style=flat-square)](https://crowdin.com/project/bookorbit)
-[![Dutch translation](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbadges.awesome-crowdin.com%2Fstats-17791545-912891.json&query=%24.progress.2.data.translationProgress&label=Dutch&logo=crowdin&color=blue&style=flat-square)](https://crowdin.com/project/bookorbit)
-[![Brazilian Portuguese translation](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbadges.awesome-crowdin.com%2Fstats-17791545-912891.json&query=%24.progress.3.data.translationProgress&label=Portuguese%20%28Brazil%29&logo=crowdin&color=blue&style=flat-square)](https://crowdin.com/project/bookorbit)
-[![Slovenian translation](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbadges.awesome-crowdin.com%2Fstats-17791545-912891.json&query=%24.progress.4.data.translationProgress&label=Slovenian&logo=crowdin&color=blue&style=flat-square)](https://crowdin.com/project/bookorbit)
+[![BookOrbit translation progress](https://raw.githubusercontent.com/bookorbit/bookorbit/generated-charts/translation-progress.svg)](https://crowdin.com/project/bookorbit)
 
-[Help improve BookOrbit translations on Crowdin](https://crowdin.com/project/bookorbit).
+The chart refreshes daily from Crowdin.
+
+- **Improve an existing language:** translate or review strings on **[Crowdin](https://crowdin.com/project/bookorbit)**. No local setup or Git knowledge needed.
+- **Request a new language:** open a [Discussion](https://github.com/bookorbit/bookorbit/discussions) and it will be enabled on Crowdin.
+- **Found wrong English wording?** That one belongs in the code, so open an [issue](https://github.com/bookorbit/bookorbit/issues/new?template=bug_report.yml) instead of translating around it.
 
 ---
 
 ## Community Growth
 
-[![BookOrbit GitHub star history](https://raw.githubusercontent.com/bookorbit/bookorbit/star-history/star-history.svg)](https://github.com/bookorbit/bookorbit/stargazers)
+[![BookOrbit GitHub star history](https://raw.githubusercontent.com/bookorbit/bookorbit/generated-charts/star-history.svg)](https://github.com/bookorbit/bookorbit/stargazers)
 
 ---
 

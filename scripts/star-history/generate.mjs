@@ -13,6 +13,7 @@ const MAX_RESPONSE_BYTES = 2_000_000;
 
 const WIDTH = 680;
 const HEIGHT = 380;
+const RENDERED_WIDTH = 580;
 const PANEL_X = 18;
 const PANEL_Y = 58;
 const PANEL_WIDTH = 644;
@@ -559,7 +560,7 @@ export function renderSvg(series) {
   const repositoryLabel = xmlEscape(repository);
   const updatedAt = xmlEscape(series.updatedAt || latest.date);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-labelledby="title description">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RENDERED_WIDTH}" height="${Math.round((HEIGHT * RENDERED_WIDTH) / WIDTH)}" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-labelledby="title description">
   <title id="title">${repositoryLabel} GitHub stars over time</title>
   <desc id="description">${repositoryLabel} reached ${formatCount(latest.stars)} GitHub stars on ${updatedAt}.</desc>
   <defs>
