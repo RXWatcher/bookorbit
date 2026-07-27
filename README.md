@@ -26,7 +26,7 @@ A self-hosted library management and reading platform for ebooks, PDFs, audioboo
 
 ---
 
-![BookOrbit dashboard showing reading stats, widgets, and book shelves](https://bookorbit.app/images/home/dashboard-overview.webp)
+![BookOrbit dashboard showing reading stats, widgets, and book shelves](docs/images/dashboard-overview.png)
 
 ## What is BookOrbit?
 
@@ -141,6 +141,12 @@ BookOrbit is available in English, German, Dutch, Brazilian Portuguese, and Slov
 [![Slovenian translation](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbadges.awesome-crowdin.com%2Fstats-17791545-912891.json&query=%24.progress.4.data.translationProgress&label=Slovenian&logo=crowdin&color=blue&style=flat-square)](https://crowdin.com/project/bookorbit)
 
 [Help improve BookOrbit translations on Crowdin](https://crowdin.com/project/bookorbit).
+
+---
+
+## Community Growth
+
+[![BookOrbit GitHub star history](https://raw.githubusercontent.com/bookorbit/bookorbit/star-history/star-history.svg)](https://github.com/bookorbit/bookorbit/stargazers)
 
 ---
 
