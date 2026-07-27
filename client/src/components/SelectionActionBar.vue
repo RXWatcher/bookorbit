@@ -541,7 +541,7 @@ watch(
           <!-- Delete confirmation -->
           <template v-else>
             <span class="px-3 text-sm font-semibold text-destructive whitespace-nowrap">
-              {{ t('components.selectionActionBar.deleteConfirm', { count }, count) }}
+              {{ t('components.selectionActionBar.deleteConfirm', { count }) }}
             </span>
             <template v-if="count > 50">
               <input

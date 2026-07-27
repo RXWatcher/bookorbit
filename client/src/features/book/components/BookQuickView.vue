@@ -400,7 +400,7 @@ function handleDelete() {
                   {{ fmt }}
                 </span>
                 <span v-if="detail.pageCount" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                  {{ t('book.quickView.pages', { count: detail.pageCount }, detail.pageCount) }}
+                  {{ t('book.quickView.pages', { count: detail.pageCount }) }}
                 </span>
                 <span v-if="publishedDisplay" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground">
                   {{ publishedDisplay }}

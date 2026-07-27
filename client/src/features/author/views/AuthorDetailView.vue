@@ -570,9 +570,7 @@ defineOptions({ name: 'AuthorDetailView' })
               <label v-for="candidate in mergeCandidates" :key="candidate.id" class="flex items-center gap-2 text-sm">
                 <input type="checkbox" :checked="selectedMergeIds.includes(candidate.id)" @change="onMergeCandidateToggle(candidate.id, $event)" />
                 <span class="min-w-0 flex-1 truncate">{{ candidate.name }}</span>
-                <span class="text-xs text-muted-foreground">{{
-                  t('author.detail.merge.bookCount', { count: candidate.bookCount }, candidate.bookCount)
-                }}</span>
+                <span class="text-xs text-muted-foreground">{{ t('author.detail.merge.bookCount', { count: candidate.bookCount }) }}</span>
               </label>
             </div>
 

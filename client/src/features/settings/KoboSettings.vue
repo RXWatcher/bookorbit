@@ -98,9 +98,7 @@ const latestSuccessLabel = computed(() =>
 const latestFailureLabel = computed(() =>
   latestFailedActivity.value ? formatLastSeen(latestFailedActivity.value.createdAt) : t('settings.reader.kobo.activity.none'),
 )
-const recentFailureLabel = computed(() =>
-  t('settings.reader.kobo.activity.failureCount', { count: recentFailureCount.value }, recentFailureCount.value),
-)
+const recentFailureLabel = computed(() => t('settings.reader.kobo.activity.failureCount', { count: recentFailureCount.value }))
 const historyHeaderDetail = computed(() => {
   if (!latestHistoryEntry.value) return t('settings.reader.kobo.activity.noActivityRecorded')
   const parts = [syncHealthLabel.value, t('settings.reader.kobo.activity.lastSuccess', { time: latestSuccessLabel.value })]
@@ -288,7 +286,7 @@ function historyDetailChips(entry: KoboSyncHistoryEntry): string[] {
     }
     case 'book_download': {
       const count = historyCountNumber(entry, 'downloads') || 1
-      return [t('settings.reader.kobo.activity.chip.bookCount', { count }, count)]
+      return [t('settings.reader.kobo.activity.chip.bookCount', { count })]
     }
     case 'progress_update':
       return [progressSyncModeText(entry)]
@@ -340,7 +338,7 @@ function historyItemTitle(item: HistoryDisplayItem): string {
 
 function historyItemOutcomeText(item: HistoryDisplayItem): string {
   return isGroupedHistoryItem(item)
-    ? t('settings.reader.kobo.activity.updateCount', { count: item.entries.length }, item.entries.length)
+    ? t('settings.reader.kobo.activity.updateCount', { count: item.entries.length })
     : historyOutcomeText(item.primary)
 }
 
@@ -371,20 +369,16 @@ function historyItemSummary(item: HistoryDisplayItem): string {
     case 'library_sync': {
       const updates = historyCountNumber(entry, 'entitlements')
       if (updates === 0) return t('settings.reader.kobo.activity.summary.noLibraryUpdatesPending')
-      return t('settings.reader.kobo.activity.summary.libraryUpdatesPrepared', { count: updates }, updates)
+      return t('settings.reader.kobo.activity.summary.libraryUpdatesPrepared', { count: updates })
     }
     case 'book_download':
       if (title) return t('settings.reader.kobo.activity.summary.bookDownloadedBy', { title, device: historyDeviceName(entry) })
-      return t(
-        'settings.reader.kobo.activity.summary.booksDownloaded',
-        { count: historyCountNumber(entry, 'downloads') || 1 },
-        historyCountNumber(entry, 'downloads') || 1,
-      )
+      return t('settings.reader.kobo.activity.summary.booksDownloaded', { count: historyCountNumber(entry, 'downloads') || 1 })
     case 'progress_update':
       if (isGroupedHistoryItem(item)) {
         return title
-          ? t('settings.reader.kobo.activity.summary.progressUpdatesSyncedFor', { count: item.entries.length, title }, item.entries.length)
-          : t('settings.reader.kobo.activity.summary.progressUpdatesSynced', { count: item.entries.length }, item.entries.length)
+          ? t('settings.reader.kobo.activity.summary.progressUpdatesSyncedFor', { count: item.entries.length, title })
+          : t('settings.reader.kobo.activity.summary.progressUpdatesSynced', { count: item.entries.length })
       }
       return title
         ? t('settings.reader.kobo.activity.summary.newReadingPositionFor', { title })
@@ -396,8 +390,8 @@ function historyItemSummary(item: HistoryDisplayItem): string {
           ? t('settings.reader.kobo.activity.summary.noHighlightChangesNeededFor', { title })
           : t('settings.reader.kobo.activity.summary.noHighlightChangesNeeded')
       return title
-        ? t('settings.reader.kobo.activity.summary.highlightsSentToKoboFor', { count: served, title }, served)
-        : t('settings.reader.kobo.activity.summary.highlightsSentToKobo', { count: served }, served)
+        ? t('settings.reader.kobo.activity.summary.highlightsSentToKoboFor', { count: served, title })
+        : t('settings.reader.kobo.activity.summary.highlightsSentToKobo', { count: served })
     }
     case 'annotations_push': {
       const changed = historyCountNumber(entry, 'created') + historyCountNumber(entry, 'updated') + historyCountNumber(entry, 'deleted')
@@ -406,8 +400,8 @@ function historyItemSummary(item: HistoryDisplayItem): string {
           ? t('settings.reader.kobo.activity.summary.noKoboHighlightChangesFor', { title })
           : t('settings.reader.kobo.activity.summary.noKoboHighlightChanges')
       return title
-        ? t('settings.reader.kobo.activity.summary.highlightsImportedFromKoboFor', { count: changed, title }, changed)
-        : t('settings.reader.kobo.activity.summary.highlightsImportedFromKobo', { count: changed }, changed)
+        ? t('settings.reader.kobo.activity.summary.highlightsImportedFromKoboFor', { count: changed, title })
+        : t('settings.reader.kobo.activity.summary.highlightsImportedFromKobo', { count: changed })
     }
   }
 }
@@ -434,7 +428,7 @@ function historyItemTimeTitle(item: HistoryDisplayItem): string {
 }
 
 function historyItemGroupedLabel(item: HistoryDisplayItem): string {
-  return isGroupedHistoryItem(item) ? t('settings.reader.kobo.activity.eventsGrouped', { count: item.entries.length }, item.entries.length) : ''
+  return isGroupedHistoryItem(item) ? t('settings.reader.kobo.activity.eventsGrouped', { count: item.entries.length }) : ''
 }
 
 function historyDeviceName(entry: KoboSyncHistoryEntry): string {

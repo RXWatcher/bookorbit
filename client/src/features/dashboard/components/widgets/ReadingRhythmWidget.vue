@@ -29,7 +29,7 @@ function getDayLabel(dateStr: string): string {
 
 const consistencyLabel = computed(() => {
   if (!data.value) return ''
-  const activeDays = t('dashboard.widgets.readingRhythm.activeDays', { count: data.value.activeDays }, data.value.activeDays)
+  const activeDays = t('dashboard.widgets.readingRhythm.activeDays', { count: data.value.activeDays })
   return t('dashboard.widgets.readingRhythm.consistency', {
     activeDays,
     percent: data.value.consistencyPercent,

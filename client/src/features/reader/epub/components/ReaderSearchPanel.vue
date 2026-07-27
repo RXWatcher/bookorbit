@@ -124,7 +124,7 @@ function onClear() {
         </ul>
 
         <p v-if="results.length > 0 && !isSearching" class="px-4 py-2 text-xs text-muted-foreground text-center border-t border-border">
-          {{ t('reader.search.resultCount', { count: results.length }, results.length) }}
+          {{ t('reader.search.resultCount', { count: results.length }) }}
         </p>
       </div>
     </div>

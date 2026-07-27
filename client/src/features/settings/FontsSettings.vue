@@ -326,9 +326,7 @@ function dismissError(index: number) {
               @click.stop
             />
 
-            <span class="shrink-0 text-xs text-muted-foreground">{{
-              t('settings.reader.fonts.fileCount', { count: family.variants.length }, family.variants.length)
-            }}</span>
+            <span class="shrink-0 text-xs text-muted-foreground">{{ t('settings.reader.fonts.fileCount', { count: family.variants.length }) }}</span>
 
             <div class="flex items-center gap-1 shrink-0">
               <button

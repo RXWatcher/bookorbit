@@ -69,7 +69,7 @@ function handleNextHistoryPage() {
 
 function durationLabel(seconds: number): string {
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return t('settings.privacySharing.durationMinutes', { count: minutes }, minutes)
+  if (minutes < 60) return t('settings.privacySharing.durationMinutes', { count: minutes })
   const hours = Math.round((minutes / 60) * 10) / 10
   return t('settings.privacySharing.durationHours', { count: formatNumber(hours) })
 }

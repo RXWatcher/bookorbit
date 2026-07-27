@@ -66,7 +66,7 @@ function toggleExpanded(): void {
         <span class="text-sm font-medium truncate">
           {{ primaryEntityName }}
           <span v-if="otherCount > 0" class="text-muted-foreground font-normal">
-            {{ t('tools.entityManager.duplicates.plusOthers', { count: otherCount }, otherCount) }}</span
+            {{ t('tools.entityManager.duplicates.plusOthers', { count: otherCount }) }}</span
           >
         </span>
         <span class="text-xs px-2 py-0.5 rounded-full shrink-0 transition-colors" :class="getSimilarityColorClass(cluster.averageSimilarity)">
@@ -92,9 +92,7 @@ function toggleExpanded(): void {
               <Check v-if="selectedTargetId === entity.id" class="h-4 w-4 text-primary shrink-0" />
             </div>
             <div class="flex items-center gap-2 mt-0.5">
-              <span class="text-xs text-muted-foreground">{{
-                t('tools.entityManager.bookCount', { count: entity.bookCount }, entity.bookCount)
-              }}</span>
+              <span class="text-xs text-muted-foreground">{{ t('tools.entityManager.bookCount', { count: entity.bookCount }) }}</span>
               <span v-if="entity.sortName" class="text-xs text-muted-foreground">{{
                 t('tools.entityManager.sortPrefix', { sortName: entity.sortName })
               }}</span>

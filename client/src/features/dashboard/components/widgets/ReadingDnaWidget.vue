@@ -67,7 +67,7 @@ const traitColors: Record<string, string> = {
       </div>
 
       <p class="text-center text-[10px] text-muted-foreground">
-        {{ t('dashboard.widgets.readingDna.basedOn', { count: data.booksAnalyzed }, data.booksAnalyzed) }}
+        {{ t('dashboard.widgets.readingDna.basedOn', { count: data.booksAnalyzed }) }}
       </p>
     </div>
   </div>

@@ -195,9 +195,7 @@ function formatPillClass(filename: string): string {
           <div v-if="hasFiles" class="flex flex-col gap-2">
             <!-- Summary line -->
             <div v-if="fileSummary" class="flex items-center gap-1.5 flex-wrap text-xs text-muted-foreground">
-              <span class="font-medium text-foreground tabular-nums">{{
-                t('book.detail.addFile.fileCount', { count: fileSummary.total }, fileSummary.total)
-              }}</span>
+              <span class="font-medium text-foreground tabular-nums">{{ t('book.detail.addFile.fileCount', { count: fileSummary.total }) }}</span>
               <span>·</span>
               <span>{{ formatBytes(fileSummary.totalBytes) }}</span>
               <span>·</span>
@@ -271,7 +269,7 @@ function formatPillClass(filename: string): string {
         <div v-if="allSuccess" class="shrink-0 px-5 py-4 border-t border-border flex items-center justify-between gap-3">
           <div class="flex items-center gap-2">
             <CheckCircle2 class="size-4 text-emerald-500 shrink-0" />
-            <span class="text-sm font-medium text-foreground">{{ t('book.detail.addFile.filesAdded', { count: doneCount }, doneCount) }}</span>
+            <span class="text-sm font-medium text-foreground">{{ t('book.detail.addFile.filesAdded', { count: doneCount }) }}</span>
           </div>
           <button
             class="px-3 py-1.5 rounded-md border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

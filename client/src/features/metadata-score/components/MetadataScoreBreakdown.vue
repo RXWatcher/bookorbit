@@ -129,7 +129,7 @@ const missingCount = computed(() => groups.value.flatMap((g) => g.fields).filter
     </div>
     <div v-if="missingCount > 0" class="pt-1 border-t border-border/50">
       <button type="button" class="text-xs text-primary hover:underline" @click="handleEditMetadata">
-        {{ t('metadataScore.missingFields', { count: missingCount }, missingCount) }}
+        {{ t('metadataScore.missingFields', { count: missingCount }) }}
       </button>
     </div>
   </div>

@@ -319,7 +319,7 @@ function setsEqual(a: Set<number>, b: Set<number>) {
                       {{ t('adminFeature.usersPage.adminBadge') }}
                     </span>
                     <span v-else class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                      {{ t('adminFeature.usersPage.permissionCount', { count: user.permissions?.length ?? 0 }, user.permissions?.length ?? 0) }}
+                      {{ t('adminFeature.usersPage.permissionCount', { count: user.permissions?.length ?? 0 }) }}
                     </span>
                     <Tooltip v-if="user.hasContentFilters">
                       <TooltipTrigger as-child>
@@ -421,7 +421,7 @@ function setsEqual(a: Set<number>, b: Set<number>) {
                 {{ t('adminFeature.usersPage.adminBadge') }}
               </span>
               <span v-else class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                {{ t('adminFeature.usersPage.permissionCount', { count: user.permissions?.length ?? 0 }, user.permissions?.length ?? 0) }}
+                {{ t('adminFeature.usersPage.permissionCount', { count: user.permissions?.length ?? 0 }) }}
               </span>
             </div>
             <div v-if="isSuperuser || !user.isSuperuser" class="mt-3 flex items-center gap-2">

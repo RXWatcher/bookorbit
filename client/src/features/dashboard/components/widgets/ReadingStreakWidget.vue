@@ -42,15 +42,13 @@ const { t } = useI18n()
           <Flame :size="20" class="text-orange-500" />
           <span class="text-3xl font-bold tabular-nums">{{ data.currentStreak }}</span>
         </div>
-        <span class="text-xs text-muted-foreground">{{
-          t('dashboard.widgets.readingStreak.streakLabel', { count: data.currentStreak }, data.currentStreak)
-        }}</span>
+        <span class="text-xs text-muted-foreground">{{ t('dashboard.widgets.readingStreak.streakLabel', { count: data.currentStreak }) }}</span>
       </div>
 
       <!-- Best streak -->
       <div class="flex items-center gap-1 text-xs text-muted-foreground">
         <Trophy :size="12" />
-        <span>{{ t('dashboard.widgets.readingStreak.best', { count: data.longestStreak }, data.longestStreak) }}</span>
+        <span>{{ t('dashboard.widgets.readingStreak.best', { count: data.longestStreak }) }}</span>
       </div>
 
       <!-- Last 7 days dots -->

@@ -344,14 +344,10 @@ async function confirmDeleteAuthors() {
     if (ids.length > 1) exitSelectionMode()
 
     toast.success(
-      t(
-        'author.list.toast.deleteSuccess',
-        {
-          count: result.deletedAuthorIds.length,
-          books: result.affectedBookCount,
-        },
-        result.deletedAuthorIds.length,
-      ),
+      t('author.list.toast.deleteSuccess', {
+        count: result.deletedAuthorIds.length,
+        books: result.affectedBookCount,
+      }),
     )
   } catch (actionError) {
     toast.error(actionError instanceof Error ? actionError.message : t('author.list.toast.deleteFailed'))
@@ -794,7 +790,7 @@ defineOptions({ name: 'AuthorsView' })
 
         <template v-else>
           <span class="px-3 text-sm font-semibold text-destructive whitespace-nowrap">{{
-            t('author.list.selection.confirmDeleteCount', { count: selectedCount }, selectedCount)
+            t('author.list.selection.confirmDeleteCount', { count: selectedCount })
           }}</span>
 
           <div class="w-px h-5 bg-border mx-1 shrink-0" />

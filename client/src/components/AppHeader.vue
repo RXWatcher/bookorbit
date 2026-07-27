@@ -24,7 +24,6 @@ import {
 } from '@lucide/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { formatNumber } from '@/i18n/formatters'
 import { toast } from 'vue-sonner'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
@@ -165,9 +164,7 @@ const globalSearchLoadMoreLabel = computed(() =>
     ? t('components.appHeader.loadingMore')
     : t('components.appHeader.loadMore', { loaded: globalResults.value.length, total: globalSearchTotal.value }),
 )
-const globalSearchAllLoadedLabel = computed(() =>
-  t('components.appHeader.allMatchesShown', { count: formatNumber(globalSearchTotal.value) }, globalSearchTotal.value),
-)
+const globalSearchAllLoadedLabel = computed(() => t('components.appHeader.allMatchesShown', { count: globalSearchTotal.value }))
 const globalSearchVirtualHeightStyle = computed(() => ({
   height: `${globalResults.value.length * GLOBAL_SEARCH_ROW_HEIGHT}px`,
 }))
@@ -301,8 +298,8 @@ onMounted(() => {
 const stopLibraryUploadListener = onLibraryUploadCompleted((event) => {
   if (event.uploadedCount === 0 && event.failedCount === 0) return
 
-  const uploadedLabel = t('components.appHeader.bookCount', { count: event.uploadedCount }, event.uploadedCount)
-  const failedLabel = t('components.appHeader.fileCount', { count: event.failedCount }, event.failedCount)
+  const uploadedLabel = t('components.appHeader.bookCount', { count: event.uploadedCount })
+  const failedLabel = t('components.appHeader.fileCount', { count: event.failedCount })
 
   if (event.failedCount === 0) {
     toast.success(t('components.appHeader.uploadedToast', { uploaded: uploadedLabel }))

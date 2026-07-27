@@ -63,7 +63,7 @@ const subScores = computed(
       </div>
 
       <p class="text-[10px] text-muted-foreground">
-        {{ t('dashboard.widgets.diversityScore.booksAnalyzed', { count: data.booksAnalyzed }, data.booksAnalyzed) }}
+        {{ t('dashboard.widgets.diversityScore.booksAnalyzed', { count: data.booksAnalyzed }) }}
       </p>
     </div>
   </div>

@@ -97,7 +97,7 @@ function startReading() {
           <p class="text-[11px] text-muted-foreground">{{ t('dashboard.widgets.longWait.daysWaiting') }}</p>
 
           <div class="mt-2 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-            <span v-if="data.pageCount" class="shrink-0">{{ t('dashboard.widgets.longWait.pages', { count: data.pageCount }, data.pageCount) }}</span>
+            <span v-if="data.pageCount" class="shrink-0">{{ t('dashboard.widgets.longWait.pages', { count: data.pageCount }) }}</span>
             <span v-if="data.pageCount && data.genre" class="shrink-0">&middot;</span>
             <span v-if="data.genre" class="truncate">{{ data.genre }}</span>
           </div>

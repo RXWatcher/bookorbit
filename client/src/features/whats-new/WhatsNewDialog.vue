@@ -71,7 +71,7 @@ useModal({
                 <h2 id="whats-new-title" class="text-lg font-semibold tracking-tight text-foreground">{{ t('whatsNew.title') }}</h2>
                 <p class="text-sm text-muted-foreground">
                   <template v-if="version">{{ t('whatsNew.versionPrefix', { version }) }} · </template
-                  >{{ t('whatsNew.newUpdates', { count: releases.length }, releases.length) }}
+                  >{{ t('whatsNew.newUpdates', { count: releases.length }) }}
                 </p>
               </div>
             </div>

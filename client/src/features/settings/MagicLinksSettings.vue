@@ -390,7 +390,7 @@ function isExpired(expiresAt: string | null | undefined): boolean {
               </div>
             </div>
             <div class="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-              <span>{{ t('settings.magicLinks.usesCount', { count: token.useCount }, token.useCount) }}</span>
+              <span>{{ t('settings.magicLinks.usesCount', { count: token.useCount }) }}</span>
               <span v-if="token.expiresAt" :class="isExpired(token.expiresAt) ? 'text-destructive' : ''">
                 {{
                   isExpired(token.expiresAt)

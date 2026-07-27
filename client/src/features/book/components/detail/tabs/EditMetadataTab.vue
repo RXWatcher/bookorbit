@@ -102,9 +102,7 @@ const fileWriteEnabledForBook = computed(() => fileWriteStatus.value?.enabled ==
 const fileWriteWritableFormats = computed(() => fileWriteStatus.value?.writableFormats ?? [])
 const fileWriteFormatLabels = computed(() => fileWriteWritableFormats.value.map((format) => format.toUpperCase()))
 const fileWriteFieldLabels = computed(() => (fileWriteStatus.value?.writableFields ?? []).map((field) => BOOK_FILE_WRITE_FIELD_LABELS[field]))
-const fileWriteFieldCountLabel = computed(() =>
-  t('book.detail.editMetadata.fieldCount', { count: fileWriteFieldLabels.value.length }, fileWriteFieldLabels.value.length),
-)
+const fileWriteFieldCountLabel = computed(() => t('book.detail.editMetadata.fieldCount', { count: fileWriteFieldLabels.value.length }))
 const fileWriteTargetSummary = computed(() => {
   const formats = fileWriteWritableFormats.value
   if (formats.length === 0) return t('book.detail.editMetadata.bookFilesTarget')
@@ -518,8 +516,8 @@ function applyPatchToForm(formPatch: MetadataPatch, coverUrl: string | undefined
 
 function showApplyResult(skippedFields: BookMetadataLockField[], updatedCount: number) {
   if (skippedFields.length === 0) return
-  const skippedPart = t('book.detail.editMetadata.skippedLockedFields', { count: skippedFields.length }, skippedFields.length)
-  const updatedPart = t('book.detail.editMetadata.updatedFields', { count: updatedCount }, updatedCount)
+  const skippedPart = t('book.detail.editMetadata.skippedLockedFields', { count: skippedFields.length })
+  const updatedPart = t('book.detail.editMetadata.updatedFields', { count: updatedCount })
   toast.info(t('book.detail.editMetadata.applyResult', { skipped: skippedPart, updated: updatedPart }))
 }
 
@@ -550,7 +548,7 @@ const submitDisabled = computed(() => formDisabled.value || !hasPendingChanges.v
 let dismissTimer: ReturnType<typeof setTimeout> | null = null
 
 function pluralizeField(count: number): string {
-  return t('book.detail.editMetadata.fieldCount', { count }, count)
+  return t('book.detail.editMetadata.fieldCount', { count })
 }
 
 function truncateReason(reason: string | null | undefined): string {
@@ -670,7 +668,7 @@ async function handleLoadFromFile() {
     return
   }
   const count = applyFileMetadataToForm(meta)
-  toast.info(count > 0 ? t('book.detail.editMetadata.loadedFieldsFromFile', { count }, count) : t('book.detail.editMetadata.noMetadataInFile'))
+  toast.info(count > 0 ? t('book.detail.editMetadata.loadedFieldsFromFile', { count }) : t('book.detail.editMetadata.noMetadataInFile'))
 }
 
 async function handleWriteAndRename() {

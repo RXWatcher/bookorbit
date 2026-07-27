@@ -73,7 +73,7 @@ function thumbnailUrl(bookId: number): string {
 
   <div v-else-if="colId === 'title'" class="flex items-center gap-2 min-w-0 h-full px-1">
     <span class="font-medium text-sm truncate block">{{ seriesName }}</span>
-    <span class="text-xs text-muted-foreground shrink-0 mt-0.5">{{ t('book.table.series.bookCount', { count: bookCount }, bookCount) }}</span>
+    <span class="text-xs text-muted-foreground shrink-0 mt-0.5">{{ t('book.table.series.bookCount', { count: bookCount }) }}</span>
     <span v-if="readCount > 0" class="text-xs text-muted-foreground shrink-0 mt-0.5"
       >&middot; {{ t('book.table.series.readOfCount', { read: readCount, total: bookCount }) }}</span
     >

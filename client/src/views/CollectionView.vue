@@ -239,7 +239,7 @@ async function handleRemoveFromCollection() {
     resetBooks()
     refreshBuckets()
     exitSelectionMode()
-    toast.success(t('views.collection.toast.removed', { count: ids.length }, ids.length))
+    toast.success(t('views.collection.toast.removed', { count: ids.length }))
   } catch {
     toast.error(t('views.collection.toast.removeFailed'))
   } finally {

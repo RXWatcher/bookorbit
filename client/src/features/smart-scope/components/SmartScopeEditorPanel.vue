@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatNumber } from '@/i18n/formatters'
 import { X, Zap } from '@lucide/vue'
 import { api } from '@/lib/api'
 import type { GroupRule, SmartScope, Rule, SortSpec } from '@bookorbit/types'
@@ -170,7 +169,7 @@ async function save() {
               :class="previewLoading ? 'border-border text-muted-foreground' : 'border-primary/30 bg-primary/8 text-primary'"
             >
               <span v-if="previewLoading" class="animate-pulse">{{ t('smartScope.editorPanel.counting') }}</span>
-              <template v-else>{{ t('smartScope.editorPanel.bookCount', { count: formatNumber(previewCount ?? 0) }, previewCount ?? 0) }}</template>
+              <template v-else>{{ t('smartScope.editorPanel.bookCount', { count: previewCount ?? 0 }) }}</template>
             </span>
             <button
               @click="emit('close')"

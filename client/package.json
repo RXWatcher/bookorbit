@@ -59,6 +59,7 @@
     "@embedpdf/plugin-zoom": "2.14.4",
     "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/inter": "^5.3.0",
+    "@formatjs/icu-messageformat-parser": "^3.5.15",
     "@lucide/vue": "1.24.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/vue-table": "^8.21.3",
@@ -77,6 +78,7 @@
     "driver.js": "^1.8.0",
     "echarts": "^6.1.0",
     "howler": "^2.2.4",
+    "intl-messageformat": "^11.2.12",
     "pinia": "^3.0.4",
     "reka-ui": "^2.10.1",
     "socket.io-client": "^4.8.3",
@@ -92,7 +94,7 @@
     "vue-virtual-scroller": "^3.0.4"
   },
   "devDependencies": {
-    "@intlify/unplugin-vue-i18n": "^11.2.4",
+    "@intlify/message-compiler": "^11.4.8",
     "@tsconfig/node24": "^24.0.4",
     "@types/canvas-confetti": "^1.9.0",
     "@types/jsdom": "^28.0.3",

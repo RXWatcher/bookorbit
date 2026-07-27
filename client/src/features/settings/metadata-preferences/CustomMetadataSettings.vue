@@ -106,7 +106,7 @@ function canSave(field: CustomMetadataFieldDefinition): boolean {
 }
 
 function usageLabel(field: CustomMetadataFieldDefinition): string {
-  return t('settings.metadata.customFields.usage', { count: field.usageCount }, field.usageCount)
+  return t('settings.metadata.customFields.usage', { count: field.usageCount })
 }
 
 function toggleCreate() {
@@ -395,7 +395,7 @@ onMounted(() => {
               t('settings.metadata.customFields.archivedFields')
             }}</span>
             <p class="settings-hint">
-              {{ t('settings.metadata.customFields.archivedSummary', { count: archivedFields.length }, archivedFields.length) }}
+              {{ t('settings.metadata.customFields.archivedSummary', { count: archivedFields.length }) }}
             </p>
           </div>
         </div>

@@ -1737,7 +1737,7 @@ const sourceTypeCompatibility = computed<SourceTypeCompatibility | null>(() => {
                         @click="onResolveDuplicates"
                       >
                         <Loader2 v-if="busy.resolvingDuplicates" class="size-3.5 animate-spin" />
-                        {{ t('migration.duplicates.resolveButton', { count: duplicateMatches.length }, duplicateMatches.length) }}
+                        {{ t('migration.duplicates.resolveButton', { count: duplicateMatches.length }) }}
                       </button>
                     </div>
                   </div>

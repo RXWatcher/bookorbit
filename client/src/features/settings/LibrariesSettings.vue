@@ -152,7 +152,7 @@ async function scanAll() {
       toast.success(t('settings.admin.libraries.scanStartedAll'))
       subscribeAll()
     } else {
-      toast.error(t('settings.admin.libraries.librariesFailedToStart', { count: failed }, failed))
+      toast.error(t('settings.admin.libraries.librariesFailedToStart', { count: failed }))
     }
   } catch {
     toast.error(t('settings.admin.libraries.scansStartFailed'))
@@ -311,9 +311,7 @@ function coverRefreshLabel(libraryId: number): string {
                 <!-- Col 1 -->
                 <span v-if="stats[lib.id]" class="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
                   <BookOpen :size="11" class="shrink-0" />
-                  <span class="truncate">{{
-                    t('settings.admin.libraries.bookCount', { count: stats[lib.id]?.totalBooks ?? 0 }, stats[lib.id]?.totalBooks ?? 0)
-                  }}</span>
+                  <span class="truncate">{{ t('settings.admin.libraries.bookCount', { count: stats[lib.id]?.totalBooks ?? 0 }) }}</span>
                 </span>
                 <span v-else class="text-xs text-muted-foreground truncate min-w-0">
                   {{
@@ -344,7 +342,7 @@ function coverRefreshLabel(libraryId: number): string {
                   <TooltipTrigger as-child>
                     <span class="flex items-center gap-1 text-xs text-muted-foreground cursor-default min-w-0">
                       <FolderOpen :size="11" class="shrink-0" />
-                      <span class="truncate">{{ t('settings.admin.libraries.folderCount', { count: lib.folders.length }, lib.folders.length) }}</span>
+                      <span class="truncate">{{ t('settings.admin.libraries.folderCount', { count: lib.folders.length }) }}</span>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent class="max-w-xs">

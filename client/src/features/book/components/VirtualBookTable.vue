@@ -675,7 +675,7 @@ defineExpose({
     <!-- Screen-reader live region for dynamic announcements -->
     <div aria-live="polite" aria-atomic="true" class="sr-only">
       <span v-if="selectionMode && selectedCount != null && selectedCount > 0">{{
-        t('book.tableView.booksSelected', { count: selectedCount }, selectedCount)
+        t('book.tableView.booksSelected', { count: selectedCount })
       }}</span>
       <span v-if="loading && initialized">{{ t('book.tableView.loadingMoreBooks') }}</span>
     </div>
@@ -987,7 +987,7 @@ defineExpose({
           {{ t('book.tableView.filtered') }}
         </span>
         <span v-if="hasMore">{{ t('book.tableView.loadedStatus', { loaded: formatNumber(books.length), total: formatNumber(total ?? 0) }) }}</span>
-        <span v-else>{{ t('book.tableView.bookCount', { count: formatNumber(total ?? books.length) }, total ?? books.length) }}</span>
+        <span v-else>{{ t('book.tableView.bookCount', { count: total ?? books.length }) }}</span>
       </div>
       <div class="flex items-center gap-3">
         <button

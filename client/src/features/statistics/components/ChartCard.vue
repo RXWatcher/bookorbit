@@ -71,7 +71,7 @@ const iconStyle = computed(() => {
       </div>
 
       <p v-if="!loading && !error && unknownCount && unknownCount > 0" class="text-muted-foreground mt-2 text-xs">
-        {{ t('statistics.card.unknownField', { count: unknownCount }, unknownCount) }}
+        {{ t('statistics.card.unknownField', { count: unknownCount }) }}
       </p>
     </div>
   </div>

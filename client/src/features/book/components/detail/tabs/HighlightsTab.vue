@@ -48,10 +48,10 @@ const hasChapterGroups = computed(() => {
 })
 
 const summaryTexts = computed(() => {
-  const texts = [t('book.detail.highlights.summary.highlights', { count: hl.total.value }, hl.total.value)]
+  const texts = [t('book.detail.highlights.summary.highlights', { count: hl.total.value })]
   if (hl.stats.value) {
-    texts.push(t('book.detail.highlights.summary.notes', { count: hl.stats.value.highlightsWithNotes }, hl.stats.value.highlightsWithNotes))
-    texts.push(t('book.detail.highlights.summary.chapters', { count: hl.stats.value.chaptersWithHighlights }, hl.stats.value.chaptersWithHighlights))
+    texts.push(t('book.detail.highlights.summary.notes', { count: hl.stats.value.highlightsWithNotes }))
+    texts.push(t('book.detail.highlights.summary.chapters', { count: hl.stats.value.chaptersWithHighlights }))
   }
   return texts
 })

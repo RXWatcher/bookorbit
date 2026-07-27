@@ -442,7 +442,7 @@ async function handleDismissAllUnmatchedBooks() {
   dismissingAll.value = true
   try {
     const result = await dismissAllUnmatchedBooks()
-    toast.success(t('settings.reader.koreader.hashLinks.toast.allDismissed', { count: result.count }, result.count))
+    toast.success(t('settings.reader.koreader.hashLinks.toast.allDismissed', { count: result.count }))
     dismissAllConfirmOpen.value = false
     unmatchedPage.value = 1
   } catch (e) {
@@ -724,11 +724,11 @@ async function handleDownloadPlugin() {
               </div>
               <div>
                 <p class="settings-label">{{ t('settings.reader.koreader.syncedBooks') }}</p>
-                <p class="settings-hint">{{ t('settings.reader.koreader.bookCount', { count: totalSyncedBooks }, totalSyncedBooks) }}</p>
+                <p class="settings-hint">{{ t('settings.reader.koreader.bookCount', { count: totalSyncedBooks }) }}</p>
               </div>
               <div>
                 <p class="settings-label">{{ t('settings.reader.koreader.devices') }}</p>
-                <p class="settings-hint">{{ t('settings.reader.koreader.deviceCount', { count: deviceCount }, deviceCount) }}</p>
+                <p class="settings-hint">{{ t('settings.reader.koreader.deviceCount', { count: deviceCount }) }}</p>
               </div>
               <div>
                 <p class="settings-label">{{ t('settings.reader.koreader.credentialsCreatedLabel') }}</p>
@@ -896,11 +896,11 @@ async function handleDownloadPlugin() {
               </div>
               <div v-if="pendingDeletes > 0" class="mt-3 flex gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground">
                 <AlertTriangle :size="14" class="mt-0.5 shrink-0 text-muted-foreground" />
-                <p>{{ t('settings.reader.koreader.pendingDeletes', { count: pendingDeletes }, pendingDeletes) }}</p>
+                <p>{{ t('settings.reader.koreader.pendingDeletes', { count: pendingDeletes }) }}</p>
               </div>
               <div v-if="failedPositions > 0" class="mt-3 flex gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground">
                 <AlertTriangle :size="14" class="mt-0.5 shrink-0 text-muted-foreground" />
-                <p>{{ t('settings.reader.koreader.failedPositions', { count: failedPositions }, failedPositions) }}</p>
+                <p>{{ t('settings.reader.koreader.failedPositions', { count: failedPositions }) }}</p>
               </div>
             </div>
           </div>
@@ -1288,7 +1288,7 @@ async function handleDownloadPlugin() {
         <button class="absolute inset-0 bg-black/45" @click="handleCloseDismissAll" />
         <div class="relative w-full rounded-t-lg border border-border bg-card p-4 shadow-xl md:max-w-md md:rounded-lg md:p-5">
           <p class="text-base font-semibold text-foreground">
-            {{ t('settings.reader.koreader.hashLinks.dismissAllConfirmTitle', { count: unmatchedBooks.length }, unmatchedBooks.length) }}
+            {{ t('settings.reader.koreader.hashLinks.dismissAllConfirmTitle', { count: unmatchedBooks.length }) }}
           </p>
           <div class="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle :size="14" class="mt-0.5 shrink-0" />

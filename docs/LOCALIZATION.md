@@ -29,15 +29,40 @@ When an English edit changes meaning rather than wording, prefer a new message k
 
 ## Plural Messages
 
-Vue I18n plural messages use pipe-separated branches:
+Plural messages use ICU MessageFormat:
 
 ```text
-No books | 1 book | {count} books
+{count, plural, =0 {No books} one {1 book} other {# books}}
 ```
 
-Crowdin's JSON parser treats this syntax as ordinary text. Translators must preserve the pipe-separated structure and placeholders manually. Locale branch counts can differ; Slovenian commonly needs more branches than English.
+Pass the raw numeric value through the interpolation object:
 
-Repository validation rejects missing plural structure, empty plural branches, placeholder mismatches, embedded HTML, and Unicode em dash characters. Human review is still required for locale-specific plural semantics.
+```ts
+t("library.bookCount", { count });
+```
+
+Do not use Vue I18n's positional plural argument, pre-format `count`, or add pipe-separated branches. ICU selects CLDR plural categories and formats `#` for the active locale. Every target message must preserve the source arguments and exact selectors such as `=0`, and must include every cardinal category required by its locale. Slovenian therefore includes `one`, `two`, `few`, and `other`; other locales use their own CLDR categories.
+
+Repository validation compiles ordinary Vue I18n messages and rejects malformed syntax. For ICU plurals, it rejects malformed syntax, empty options, changed argument types or styles, changed plural offsets, missing locale categories, mismatched arguments or exact selectors, and legacy pipe branches. It also rejects embedded HTML and Unicode em dash characters. Human review is still required for the wording of each locale's plural branches.
+
+Changing the plural structure of an existing English message, rather than only its wording, invalidates every translation of that key because the target branches no longer match the source. Clear or invalidate the affected translations in Crowdin before the next export so translators re-author them in the new structure.
+
+### Styled Counts
+
+When the count needs its own markup, use `IcuCountText` instead of `<i18n-t>`, because compiled ICU messages cannot bind Vue I18n slots:
+
+```vue
+<IcuCountText
+  keypath="tools.bulkRename.confirmDialog.body"
+  :count="renameCount"
+>
+  <template #count="{ value }">
+    <strong>{{ value }}</strong>
+  </template>
+</IcuCountText>
+```
+
+The component only supplies `count`, so its message must not require other arguments, and validation requires every branch of such a message to render exactly one `#`.
 
 ## Translation Delivery
 
@@ -91,7 +116,7 @@ The shared locale list automatically updates the language picker, server prefere
 
 Create `client/src/locales/<locale>.json` with the exact key structure from `en.json` and English fallback values. Do not add partial catalogs. Crowdin will replace fallback values as translations are completed.
 
-Review `client/src/stores/locale.ts` and add browser-locale matching coverage to `client/src/stores/__tests__/locale.spec.ts`, especially for regional variants. Vue I18n supplies standard locale pluralization; if the language needs a project-specific rule, register it in `client/src/i18n/index.ts` and add focused tests.
+Review `client/src/stores/locale.ts` and add browser-locale matching coverage to `client/src/stores/__tests__/locale.spec.ts`, especially for regional variants. Add every CLDR plural category reported for the locale to each ICU plural message and extend the exhaustive ICU runtime tests in `client/src/i18n/icu.spec.ts`.
 
 ### 4. Allow Crowdin export and PR delivery
 

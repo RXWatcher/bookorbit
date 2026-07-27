@@ -306,7 +306,7 @@ useModal({
           </div>
           <div class="flex items-center justify-between gap-3">
             <p class="text-sm text-muted-foreground">
-              {{ t('library.folderPicker.selectedCount', { count: selectedCount }, selectedCount) }}
+              {{ t('library.folderPicker.selectedCount', { count: selectedCount }) }}
             </p>
             <div class="flex shrink-0 items-center gap-2">
               <button
