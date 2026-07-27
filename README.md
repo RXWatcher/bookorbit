@@ -113,6 +113,8 @@ For the full installation guide including reverse proxy setup, file permissions 
 
 The BookOrbit plugin for KOReader adds progress sync, two-way annotation sync, and a native catalog browser: navigate, search, and download books from your library without leaving the device.
 
+![BookOrbit KOReader Plugin showing dashboard, catalog search, and book details](docs/images/koreader-plugin-preview.png)
+
 1. In BookOrbit, go to **Settings > Integrations > KOReader** and click **Download Plugin**.
 2. Unzip `bookorbit.koplugin.zip`.
 3. Copy `bookorbit.koplugin` to `koreader/plugins/` on the device.
