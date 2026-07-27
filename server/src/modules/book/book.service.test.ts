@@ -178,7 +178,11 @@ function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
   };
   const scoreService = {
     calculateAndSave: vi.fn().mockResolvedValue(undefined),
+    calculateAndSaveMany: vi.fn(),
   };
+  scoreService.calculateAndSaveMany.mockImplementation((bookIds: number[]) =>
+    Promise.all(bookIds.map((bookId) => scoreService.calculateAndSave(bookId))).then(() => undefined),
+  );
   const embedder = {
     embedBook: vi.fn().mockResolvedValue(undefined),
   };
@@ -3344,18 +3348,15 @@ describe('BookService', () => {
       expect(scoreService.calculateAndSave).toHaveBeenCalledWith(3);
     });
 
-    it('bulkSetRating logs score recalculation failures without interrupting the update', async () => {
+    it('bulkSetRating propagates score recalculation failures', async () => {
       const { service, bookRepo, scoreService } = makeService();
       const user = makeUser({ id: 42 });
-      const warnSpy = vi.spyOn((service as unknown as { logger: { warn: (message: string) => void } }).logger, 'warn').mockImplementation();
       vi.spyOn(service, 'verifyLibraryAccessForBookIds').mockResolvedValue(undefined);
       scoreService.calculateAndSave.mockRejectedValue(new Error('score exploded'));
 
-      await service.bulkSetRating([3], 4, user);
-      await Promise.resolve();
+      await expect(service.bulkSetRating([3], 4, user)).rejects.toThrow('score exploded');
 
       expect(bookRepo.bulkSetRating).toHaveBeenCalledWith([3], 4, 42);
-      expect(warnSpy).toHaveBeenCalledWith('Score calculation failed for book 3: score exploded');
     });
 
     it('bulkSetMetadata updates a single metadata field and queues follow-up work', async () => {

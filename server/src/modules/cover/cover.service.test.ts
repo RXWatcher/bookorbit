@@ -105,6 +105,7 @@ function createService(providerRegistry: CoverProviderRegistry, options?: { asse
     { verifyUserAccess: vi.fn().mockResolvedValue(undefined) } as never,
     { get: vi.fn().mockReturnValue('/tmp/books') } as never,
     providerRegistry,
+    { calculateAndSave: vi.fn().mockResolvedValue(undefined) } as never,
   );
 }
 
@@ -116,6 +117,9 @@ function createMutationService(options?: { assertFieldsUnlocked?: ReturnType<typ
   const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
   const update = vi.fn().mockReturnValue({ set: updateSet });
   const mockDb = { insert, update };
+  const scoreService = {
+    calculateAndSave: vi.fn().mockResolvedValue(undefined),
+  };
 
   const service = new CoverService(
     mockDb as never,
@@ -125,9 +129,10 @@ function createMutationService(options?: { assertFieldsUnlocked?: ReturnType<typ
     { verifyUserAccess: vi.fn().mockResolvedValue(undefined) } as never,
     { get: vi.fn().mockReturnValue('/tmp/books') } as never,
     { select: vi.fn().mockReturnValue([]) } as unknown as CoverProviderRegistry,
+    scoreService as never,
   );
 
-  return { service, mockDb, updateSet };
+  return { service, mockDb, updateSet, scoreService };
 }
 
 describe('CoverService', () => {
@@ -474,7 +479,7 @@ describe('CoverService', () => {
     });
 
     it('saves custom cover file and thumbnail when unlocked', async () => {
-      const { service, mockDb, updateSet } = createMutationService();
+      const { service, mockDb, updateSet, scoreService } = createMutationService();
       const source = Buffer.from('image-data');
       const normalized = Buffer.from('normalized-image');
 
@@ -510,6 +515,21 @@ describe('CoverService', () => {
       );
       expect(mockDb.update).toHaveBeenCalledWith(books);
       expect(updateSet).toHaveBeenCalledWith({ updatedAt: expect.any(Date) });
+      expect(scoreService.calculateAndSave).toHaveBeenCalledWith(12);
+    });
+
+    it('propagates score persistence failures after updating the cover source', async () => {
+      const { service, scoreService } = createMutationService();
+      scoreService.calculateAndSave.mockRejectedValue(new Error('score failed'));
+      vi.mocked(coverDirPath).mockReturnValue('/tmp/books/covers/12');
+      vi.mocked(imageExt).mockReturnValue('jpg');
+      vi.mocked(generateThumbnail).mockResolvedValue(Buffer.from('thumb'));
+      vi.mocked(readdir).mockResolvedValue([] as never);
+      vi.mocked(mkdir).mockResolvedValue(undefined as never);
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
+
+      await expect(service.uploadCover(12, Buffer.from('image-data'), 'image/jpeg', makeUser())).rejects.toThrow('score failed');
     });
 
     it('preserves the existing cover when image normalization fails', async () => {

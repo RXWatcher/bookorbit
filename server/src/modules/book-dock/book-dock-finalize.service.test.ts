@@ -48,6 +48,9 @@ function makeService() {
     replaceNarrators: vi.fn().mockResolvedValue(undefined),
     upsertComicMetadata: vi.fn().mockResolvedValue(undefined),
   };
+  const metadataScoreService = {
+    calculateAndSave: vi.fn().mockResolvedValue(undefined),
+  };
   const bookReadService = {
     replaceCommunityRatings: vi.fn().mockResolvedValue(undefined),
   };
@@ -82,6 +85,7 @@ function makeService() {
     libraryService as never,
     appSettings as never,
     metadataService as never,
+    metadataScoreService as never,
     bookReadService as never,
     validator as never,
     storage as never,
@@ -101,6 +105,7 @@ function makeService() {
     libraryService,
     appSettings,
     metadataService,
+    metadataScoreService,
     bookReadService,
     validator,
     storage,
@@ -1066,7 +1071,7 @@ describe('BookDockFinalizeService', () => {
   });
 
   it('applyMetadata updates scalar metadata fields and related author/genre rows', async () => {
-    const { service, db, metadataService } = makeService();
+    const { service, db, metadataService, metadataScoreService } = makeService();
     const updateChain = {
       set: vi.fn(),
       where: vi.fn().mockResolvedValue(undefined),
@@ -1109,6 +1114,20 @@ describe('BookDockFinalizeService', () => {
     );
     expect(metadataService.replaceAuthors).toHaveBeenCalledWith(15, [{ name: 'Author A', sortName: null }]);
     expect(metadataService.replaceGenres).toHaveBeenCalledWith(15, ['Fantasy']);
+    expect(metadataScoreService.calculateAndSave).toHaveBeenCalledWith(15);
+  });
+
+  it('applyMetadata propagates score persistence failures', async () => {
+    const { service, db, metadataScoreService } = makeService();
+    const updateChain = {
+      set: vi.fn(),
+      where: vi.fn().mockResolvedValue(undefined),
+    };
+    updateChain.set.mockReturnValue(updateChain);
+    db.update.mockReturnValue(updateChain);
+    metadataScoreService.calculateAndSave.mockRejectedValue(new Error('score failed'));
+
+    await expect((service as any).applyMetadata(15, makeRow())).rejects.toThrow('score failed');
   });
 
   it('applyMetadata nulls publishedYear when it is outside database bounds', async () => {

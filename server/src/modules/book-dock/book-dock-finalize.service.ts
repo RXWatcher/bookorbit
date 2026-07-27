@@ -42,6 +42,7 @@ import { bookMetadata, libraries, libraryFolders } from '../../db/schema';
 import { AppSettingsService } from '../app-settings/app-settings.service';
 import { LibraryService } from '../library/library.service';
 import { MetadataService } from '../metadata/metadata.service';
+import { MetadataScoreService } from '../metadata-score/metadata-score.service';
 import { UploadProcessorService } from '../upload/upload-processor.service';
 import { UploadStorageService } from '../upload/upload-storage.service';
 import { UploadValidatorService } from '../upload/upload-validator.service';
@@ -133,6 +134,7 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
     private readonly libraryService: LibraryService,
     private readonly appSettings: AppSettingsService,
     private readonly metadataService: MetadataService,
+    private readonly metadataScoreService: MetadataScoreService,
     private readonly bookReadService: BookReadService,
     private readonly validator: UploadValidatorService,
     private readonly storage: UploadStorageService,
@@ -855,6 +857,8 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
         audio.narrators.map((name) => ({ name, sortName: null })),
       );
     }
+
+    await this.metadataScoreService.calculateAndSave(bookId);
   }
 
   private async cleanupBookDockRecord(row: BookDockFileRow): Promise<void> {

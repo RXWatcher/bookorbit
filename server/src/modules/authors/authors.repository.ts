@@ -249,6 +249,12 @@ export class AuthorsRepository {
     return Number(total);
   }
 
+  async findBookIdsByAuthorIds(authorIds: number[]): Promise<number[]> {
+    if (authorIds.length === 0) return [];
+    const rows = await this.db.selectDistinct({ bookId: bookAuthors.bookId }).from(bookAuthors).where(inArray(bookAuthors.authorId, authorIds));
+    return rows.map((row) => row.bookId);
+  }
+
   async findRelatedLibraryIds(authorIds: number[]): Promise<number[]> {
     if (authorIds.length === 0) return [];
     const rows = await this.db

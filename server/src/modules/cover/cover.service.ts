@@ -19,6 +19,7 @@ import { BookMetadataLockService } from '../book-metadata-lock/book-metadata-loc
 import { FileWriteService } from '../file-write/file-write.service';
 import { LibraryService } from '../library/library.service';
 import { generateThumbnail, imageExt, normalizeProgressiveJpeg } from '../metadata/lib/cover';
+import { MetadataScoreService } from '../metadata-score/metadata-score.service';
 import {
   COVER_CUSTOM_FILE_PREFIX,
   COVER_PROXY_MAX_IMAGE_BYTES,
@@ -54,6 +55,7 @@ export class CoverService {
     private readonly libraryService: LibraryService,
     private readonly config: ConfigService,
     private readonly providerRegistry: CoverProviderRegistry,
+    private readonly metadataScoreService: MetadataScoreService,
   ) {
     this.appDataPath = this.config.get<string>('storage.appDataPath')!;
   }
@@ -299,6 +301,7 @@ export class CoverService {
       .values({ bookId, coverSource: source, updatedAt: now })
       .onConflictDoUpdate({ target: bookMetadata.bookId, set: { coverSource: source, updatedAt: now } });
     await this.db.update(books).set({ updatedAt: now }).where(eq(books.id, bookId));
+    await this.metadataScoreService.calculateAndSave(bookId);
   }
 
   private async fetchRemoteImage(rawUrl: string): Promise<{ buffer: Buffer; contentType: string }> {

@@ -1772,7 +1772,7 @@ export class BookService {
           this.fileRenameService?.scheduleRename(id, user.id);
         }
       }
-      this.scoreService.calculateAndSave(id).catch((err: Error) => this.logger.warn(`Score calculation failed for book ${id}: ${err.message}`));
+      await this.scoreService.calculateAndSave(id);
     }
 
     const detail = await this.getDetail(id, user);
@@ -2206,7 +2206,7 @@ export class BookService {
     const updatableIds = bookIds.filter((bookId) => !lockedIds.has(bookId));
     if (updatableIds.length > 0) {
       await this.bookRepo.bulkSetRating(updatableIds, rating, user.id);
-      this.triggerPostMetadataUpdateEffects(updatableIds, user.id);
+      await this.triggerPostMetadataUpdateEffects(updatableIds, user.id);
       this.achievementEvents?.emit(ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED, {
         userId: user.id,
         bookIds: updatableIds,
@@ -2273,7 +2273,7 @@ export class BookService {
           }
         });
       }
-      this.triggerPostMetadataUpdateEffects(updatableIds, user.id);
+      await this.triggerPostMetadataUpdateEffects(updatableIds, user.id);
     }
     this.logger.log(
       `[${event}] [end] userId=${user.id} count=${bookIds.length} field=${field} updated=${updatableIds.length} skippedLocked=${lockedIds.size} durationMs=${Date.now() - startedAt} - bulk set metadata completed`,
@@ -2300,7 +2300,7 @@ export class BookService {
         await this.metadataService.replaceTags(bookId, next, { executor: tx });
       }
     });
-    this.triggerPostMetadataUpdateEffects(bookIds, user.id);
+    await this.triggerPostMetadataUpdateEffects(bookIds, user.id);
 
     this.logger.log(
       `[${event}] [end] userId=${user.id} count=${bookIds.length} mode=${mode} tagCount=${tags.length} durationMs=${Date.now() - startedAt} - bulk update tags completed`,
@@ -2495,7 +2495,7 @@ export class BookService {
     }
 
     if (allUpdatedBookIds.size > 0) {
-      this.triggerPostMetadataUpdateEffects([...allUpdatedBookIds], user.id);
+      await this.triggerPostMetadataUpdateEffects([...allUpdatedBookIds], user.id);
     }
 
     const result: BulkEditMetadataResult = {
@@ -3285,14 +3285,13 @@ export class BookService {
     );
   }
 
-  private triggerPostMetadataUpdateEffects(bookIds: number[], userId: number): void {
+  private async triggerPostMetadataUpdateEffects(bookIds: number[], userId: number): Promise<void> {
     for (const bookId of bookIds) {
       this.fileWriteService?.scheduleWrite(bookId, 'auto', userId);
       this.fileRenameService?.scheduleRename(bookId, userId);
-      void this.scoreService
-        .calculateAndSave(bookId)
-        .catch((err: Error) => this.logger.warn(`Score calculation failed for book ${bookId}: ${err.message}`));
     }
+
+    await this.scoreService.calculateAndSaveMany(bookIds);
   }
 
   private resolveChapters(

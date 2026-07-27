@@ -133,6 +133,7 @@ describe('AuthorsRepository', () => {
     await expect(repo.findVisibleAuthorIds([], [1])).resolves.toEqual([]);
     await expect(repo.findVisibleAuthorIds([1], [])).resolves.toEqual([]);
     await expect(repo.countDistinctBooks([])).resolves.toBe(0);
+    await expect(repo.findBookIdsByAuthorIds([])).resolves.toEqual([]);
     await expect(repo.findRelatedLibraryIds([])).resolves.toEqual([]);
     await expect(repo.mergeAuthors(1, [])).resolves.toBeUndefined();
     await expect(repo.deleteAuthors([])).resolves.toBeUndefined();
@@ -144,10 +145,14 @@ describe('AuthorsRepository', () => {
 
   it('maps distinct ids for visibility and related-library lookup queries', async () => {
     const { db, selectDistinctBuilder } = makeDb();
-    selectDistinctBuilder.where.mockResolvedValueOnce([{ id: 5 }, { id: 8 }]).mockResolvedValueOnce([{ libraryId: 11 }, { libraryId: 12 }]);
+    selectDistinctBuilder.where
+      .mockResolvedValueOnce([{ id: 5 }, { id: 8 }])
+      .mockResolvedValueOnce([{ bookId: 21 }, { bookId: 34 }])
+      .mockResolvedValueOnce([{ libraryId: 11 }, { libraryId: 12 }]);
     const repo = new AuthorsRepository(db as never);
 
     await expect(repo.findVisibleAuthorIds([5, 8], [100])).resolves.toEqual([5, 8]);
+    await expect(repo.findBookIdsByAuthorIds([1, 2])).resolves.toEqual([21, 34]);
     await expect(repo.findRelatedLibraryIds([1, 2])).resolves.toEqual([11, 12]);
   });
 
