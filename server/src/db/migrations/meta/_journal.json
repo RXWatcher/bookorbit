@@ -386,6 +386,13 @@
       "when": 1784079674841,
       "tag": "0054_add_book_duplicate_scans",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1785128574339,
+      "tag": "0055_add_audit_search_indexes",
+      "breakpoints": true
     }
   ]
 }

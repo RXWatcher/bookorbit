@@ -58,6 +58,24 @@ describe('BookRepository', () => {
     expect(db.transaction).toHaveBeenCalledTimes(1);
   });
 
+  it('loads book titles for deletion audit details', async () => {
+    const rows = [
+      { id: 3, title: 'Dune' },
+      { id: 4, title: null },
+    ];
+    const selectChain = makeSelectChain('where', rows);
+    const db = {
+      select: vi.fn().mockReturnValue(selectChain),
+    };
+    const repo = new BookRepository(db as never);
+
+    await expect(repo.findDeletionAuditBooksByIds([3, 4])).resolves.toEqual(rows);
+    await expect(repo.findDeletionAuditBooksByIds([])).resolves.toEqual([]);
+
+    expect(db.select).toHaveBeenCalledTimes(1);
+    expect(selectChain.leftJoin).toHaveBeenCalledTimes(1);
+  });
+
   it('findCards loads card rows and related collections for the current user', async () => {
     const rows = [{ id: 10, primaryFileId: 1001, _total: 1 }];
     const authorRows = [{ bookId: 10, name: 'Frank Herbert' }];

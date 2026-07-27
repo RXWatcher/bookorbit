@@ -234,7 +234,7 @@ export const routes: RouteRecordRaw[] = [
             path: 'system',
             name: 'settings-system',
             component: () => import('@/features/settings/SystemAllSettings.vue'),
-            meta: { maxWidth: 'max-w-7xl', title: resolveSystemTitle },
+            meta: { maxWidth: 'max-w-[96rem]', title: resolveSystemTitle },
           },
           {
             path: 'admin/file-naming',

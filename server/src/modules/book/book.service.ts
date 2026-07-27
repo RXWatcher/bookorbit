@@ -45,6 +45,7 @@ import type {
   BookMetadataRefreshPreviewFields,
   BookMetadataRefreshPreviewResponse,
   BookMetadataLockField,
+  BookDeletionAuditMeta,
   BookQuery,
   BookWriteAndRenameResult,
   BooksPage,
@@ -137,6 +138,8 @@ const EXPORT_LIMITS = {
   MAX_PROJECTED_BYTES: 8 * 1024 * 1024 * 1024,
   MAX_CONCURRENT_PER_USER: 2,
 } as const;
+
+const MAX_DELETION_AUDIT_BOOKS = 25;
 
 type ExportCandidateFile = {
   bookId: number;
@@ -1471,16 +1474,25 @@ export class BookService {
     return this.bookRepo.searchAcrossLibraries(libraryIds, q, limit, contentFilters);
   }
 
-  async deleteBooks(bookIds: number[], user: RequestUser): Promise<void> {
+  async deleteBooks(bookIds: number[], user: RequestUser): Promise<BookDeletionAuditMeta> {
     const event = 'book.delete_books';
     const startedAt = Date.now();
     this.logger.log(`[${event}] [start] count=${bookIds.length} userId=${user.id} - delete books started`);
     try {
       if (bookIds.length === 0) {
         this.logger.log(`[${event}] [end] count=0 durationMs=${Date.now() - startedAt} deletedBooks=0 deletedFiles=0 - delete books completed`);
-        return;
+        return { total: 0, books: [], omitted: 0 };
       }
       const rows = await this.verifyLibraryAccessForBookIds(bookIds, user);
+      const rowIds = new Set(rows.map((row) => row.id));
+      const deletedBookIds = [...new Set(bookIds)].filter((bookId) => rowIds.has(bookId));
+      const auditedBookIds = deletedBookIds.slice(0, MAX_DELETION_AUDIT_BOOKS);
+      const auditRows = await this.bookRepo.findDeletionAuditBooksByIds(auditedBookIds);
+      const auditRowsById = new Map(auditRows.map((row) => [row.id, row]));
+      const auditBooks = auditedBookIds.flatMap((bookId) => {
+        const row = auditRowsById.get(bookId);
+        return row ? [row] : [];
+      });
       const files = await this.bookRepo.findAllFilesByBookIds(bookIds);
       await this.bookRepo.deleteByIds(bookIds);
       const deleteTargets = [
@@ -1509,6 +1521,11 @@ export class BookService {
       this.logger.log(
         `[${event}] [end] count=${bookIds.length} durationMs=${Date.now() - startedAt} deletedBooks=${rows.length} deletedFiles=${files.length} failedDeletes=${failedDeletes} - delete books completed`,
       );
+      return {
+        total: rows.length,
+        books: auditBooks,
+        omitted: Math.max(0, rows.length - auditBooks.length),
+      };
     } catch (err) {
       const errorClass = err instanceof Error ? err.name : 'Error';
       const errorMessage = sanitizeLogValue(err instanceof Error ? err.message : String(err));

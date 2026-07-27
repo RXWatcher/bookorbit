@@ -1640,6 +1640,15 @@ export class BookRepository {
     return this.db.select({ id: books.id, libraryId: books.libraryId }).from(books).where(inArray(books.id, bookIds));
   }
 
+  async findDeletionAuditBooksByIds(bookIds: number[]): Promise<{ id: number; title: string | null }[]> {
+    if (bookIds.length === 0) return [];
+    return this.db
+      .select({ id: books.id, title: bookMetadata.title })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(inArray(books.id, bookIds));
+  }
+
   async findRecommendationTitlesByBookIds(bookIds: number[]): Promise<BookRecommendation[]> {
     if (bookIds.length === 0) return [];
 

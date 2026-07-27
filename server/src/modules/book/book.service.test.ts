@@ -110,6 +110,7 @@ function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
     countWhere: vi.fn(),
     findPatternMetadataByBookIds: vi.fn(),
     findLibraryIdsByBookIds: vi.fn(),
+    findDeletionAuditBooksByIds: vi.fn(),
     findPrimaryFilesByBookIds: vi.fn(),
     findAllFilesByBookIds: vi.fn(),
     findTagsByBookIds: vi.fn(),
@@ -2147,10 +2148,14 @@ describe('BookService', () => {
         { bookId: 3, absolutePath: '/tmp/library/book3.epub', format: 'epub' },
         { bookId: 4, absolutePath: '/tmp/library/book4.pdf', format: 'pdf' },
       ]);
+      bookRepo.findDeletionAuditBooksByIds.mockResolvedValue([
+        { id: 3, title: 'Dune' },
+        { id: 4, title: null },
+      ]);
       bookRepo.deleteByIds.mockResolvedValue(undefined);
       mockRm.mockRejectedValue(new Error('cannot delete'));
 
-      await service.deleteBooks([3, 4], user);
+      const result = await service.deleteBooks([3, 4], user);
 
       expect(libraryService.verifyUserAccess).toHaveBeenCalledTimes(2);
       expect(bookRepo.deleteByIds).toHaveBeenCalledWith([3, 4]);
@@ -2159,6 +2164,36 @@ describe('BookService', () => {
       expect(mockRm).toHaveBeenCalledWith('/tmp/library/book3.epub', { force: true });
       expect(mockRm).toHaveBeenCalledWith('/tmp/library/book4.pdf', { force: true });
       expect(warnSpy).toHaveBeenCalled();
+      expect(result).toEqual({
+        total: 2,
+        books: [
+          { id: 3, title: 'Dune' },
+          { id: 4, title: null },
+        ],
+        omitted: 0,
+      });
+    });
+
+    it('caps deletion audit book details while preserving the deletion count', async () => {
+      const { service, bookRepo } = makeService();
+      const user = makeUser();
+      const bookIds = Array.from({ length: 30 }, (_, index) => index + 1);
+
+      bookRepo.findLibraryIdsByBookIds.mockResolvedValue(bookIds.map((id) => ({ id, libraryId: 7 })));
+      bookRepo.findDeletionAuditBooksByIds.mockImplementation((ids: number[]) =>
+        Promise.resolve([...ids].reverse().map((id) => ({ id, title: `Book ${id}` }))),
+      );
+      bookRepo.findAllFilesByBookIds.mockResolvedValue([]);
+      bookRepo.deleteByIds.mockResolvedValue(undefined);
+
+      const result = await service.deleteBooks(bookIds, user);
+
+      expect(bookRepo.findDeletionAuditBooksByIds).toHaveBeenCalledWith(bookIds.slice(0, 25));
+      expect(result.total).toBe(30);
+      expect(result.books).toHaveLength(25);
+      expect(result.books[0]).toEqual({ id: 1, title: 'Book 1' });
+      expect(result.books[24]).toEqual({ id: 25, title: 'Book 25' });
+      expect(result.omitted).toBe(5);
     });
 
     it('returns queued=0 when embed-all is already running', async () => {

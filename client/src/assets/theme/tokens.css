@@ -82,6 +82,14 @@
   --pill-kobo: oklch(0.55 0.1 195);
   --pill-repaired: oklch(0.62 0.14 70);
   --pill-pending: oklch(0.55 0.09 255);
+
+  --audit-authentication: oklch(0.55 0.17 295);
+  --audit-books: oklch(0.55 0.16 245);
+  --audit-users: oklch(0.62 0.14 70);
+  --audit-libraries: oklch(0.55 0.1 195);
+  --audit-collections: oklch(0.55 0.09 255);
+  --audit-integrations: oklch(0.58 0.15 150);
+  --audit-settings: oklch(0.55 0.15 25);
 }
 
 .dark {
@@ -152,4 +160,12 @@
   --pill-kobo: oklch(0.74 0.1 195);
   --pill-repaired: oklch(0.78 0.13 70);
   --pill-pending: oklch(0.72 0.09 255);
+
+  --audit-authentication: oklch(0.72 0.17 295);
+  --audit-books: oklch(0.72 0.14 245);
+  --audit-users: oklch(0.78 0.13 70);
+  --audit-libraries: oklch(0.74 0.1 195);
+  --audit-collections: oklch(0.72 0.09 255);
+  --audit-integrations: oklch(0.75 0.13 150);
+  --audit-settings: oklch(0.72 0.15 25);
 }
