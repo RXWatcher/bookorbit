@@ -160,7 +160,7 @@ function onAudioMaxSizeInput(e: Event) {
     </div>
 
     <template v-if="fileWriteEnabled">
-      <p class="pt-2 text-[11px] font-semibold uppercase tracking-widest text-foreground/80">{{ t('library.creator.fileWrite.formatLimits') }}</p>
+      <p class="pt-2 text-[11px] font-semibold uppercase tracking-widest text-foreground">{{ t('library.creator.fileWrite.formatLimits') }}</p>
 
       <div class="grid gap-3 sm:grid-cols-2">
         <div class="space-y-3 rounded-lg border border-border bg-card p-4">

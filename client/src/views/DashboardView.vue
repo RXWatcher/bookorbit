@@ -96,9 +96,9 @@ onUnmounted(() => {
         <DashboardWelcome v-if="hasNoLibraries" :can-create="hasPermission('manage_libraries')" />
         <template v-else>
           <div class="animate-fade-up flex items-center gap-2 px-1" style="animation-delay: 40ms">
-            <Sparkles :size="16" class="shrink-0 text-primary/85" />
-            <p class="text-[1.05rem] font-medium leading-tight tracking-[-0.01em] text-foreground/90 sm:text-[1.18rem]">
-              <span class="text-foreground/88">{{ greetingText }}</span>
+            <Sparkles :size="16" class="shrink-0 text-primary" />
+            <p class="text-[1.05rem] font-medium leading-tight tracking-[-0.01em] text-foreground sm:text-[1.18rem]">
+              <span class="text-foreground">{{ greetingText }}</span>
               <span class="ml-1 font-semibold text-primary">{{ greetingName }}</span>
             </p>
           </div>

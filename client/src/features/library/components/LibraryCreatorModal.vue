@@ -394,7 +394,7 @@ onMounted(async () => {
                 stepIndex === index
                   ? 'bg-background font-medium text-foreground shadow-sm'
                   : mode === 'create' && index > visitedUpTo
-                    ? 'cursor-not-allowed text-muted-foreground/50'
+                    ? 'cursor-not-allowed text-muted-foreground opacity-50'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground',
               ]"
               :disabled="mode === 'create' && index > visitedUpTo"
