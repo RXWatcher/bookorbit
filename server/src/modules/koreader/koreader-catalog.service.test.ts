@@ -141,6 +141,10 @@ function makeService(
     findByBookIds: vi.fn().mockResolvedValue(new Map([[10, { status: 'reading' }]])),
     setManual: vi.fn().mockResolvedValue(undefined),
   };
+  const dashboardService = {
+    getScrollerBookIds: vi.fn().mockResolvedValue([11, 10]),
+    getSmartScopeBookIds: vi.fn().mockResolvedValue([10]),
+  };
   const dashboardWidgetService = {
     getReadingGoal: vi.fn().mockResolvedValue({ goalBooks: 24, completedBooks: 6, year: 2026 }),
     getReadingStreak: vi.fn().mockResolvedValue({ currentStreak: 4, longestStreak: 9, lastSevenDays: [true, false, true, true, true, false, true] }),
@@ -216,6 +220,7 @@ function makeService(
     bookService as never,
     bookReadService as never,
     userBookStatusService as never,
+    dashboardService as never,
     dashboardWidgetService as never,
     recommendationService as never,
     { isCrossPlatformPathSanitizationEnabled: vi.fn().mockResolvedValue(true) } as never,
@@ -233,6 +238,7 @@ function makeService(
     bookService,
     bookReadService,
     userBookStatusService,
+    dashboardService,
     dashboardWidgetService,
     recommendationService,
     pluginService,
@@ -338,6 +344,96 @@ describe('KoreaderCatalogService', () => {
     expect(dashboardWidgetService.getReadingGoal).toHaveBeenCalledWith(user);
     expect(dashboardWidgetService.getReadingStreak).toHaveBeenCalledWith(user);
     expect(dashboardWidgetService.getHighlightOfTheDay).toHaveBeenCalledWith(user);
+  });
+
+  function makeEntry(id: number, title: string) {
+    return {
+      id,
+      title,
+      folderPath: `/books/${id}`,
+      addedAt: new Date('2026-01-05T00:00:00.000Z'),
+      updatedAt: new Date('2026-02-05T00:00:00.000Z'),
+      description: null,
+      seriesId: null,
+      seriesName: null,
+      seriesIndex: null,
+      language: 'en',
+      publisher: 'Ace',
+      isbn13: null,
+      hasCover: true,
+      authors: ['Someone'],
+      files: [{ id: id * 10, format: 'epub' }],
+    };
+  }
+
+  it('serves a configured section instead of the legacy discover row', async () => {
+    const { service, opdsBookService, dashboardService } = makeService();
+    const user = makeUser({ id: 7 });
+    opdsBookService.getBooksPage.mockResolvedValue({ total: 0, entries: [] });
+
+    const dashboard = await service.getDashboard(user, { type: 'want-to-read' });
+
+    expect(dashboardService.getScrollerBookIds).toHaveBeenCalledWith('want-to-read', user, 10);
+    expect(opdsBookService.getRandomBooks).not.toHaveBeenCalled();
+    expect(dashboard.discover).toEqual([]);
+    expect(dashboard.section).toEqual({ type: 'want-to-read', smartScopeId: null, books: [] });
+  });
+
+  it('omits the section field entirely when no section is named', async () => {
+    const { service, opdsBookService } = makeService();
+    const user = makeUser({ id: 7 });
+    opdsBookService.getBooksPage.mockResolvedValue({ total: 0, entries: [] });
+    opdsBookService.getRandomBooks.mockResolvedValueOnce([]);
+
+    const dashboard = await service.getDashboard(user);
+
+    expect(dashboard.section).toBeUndefined();
+  });
+
+  it('preserves the order the section selected its books in', async () => {
+    const { service, opdsBookService, dashboardService } = makeService();
+    const user = makeUser({ id: 7 });
+    dashboardService.getScrollerBookIds.mockResolvedValueOnce([11, 10]);
+    opdsBookService.getBooksPage.mockResolvedValueOnce({ total: 2, entries: [makeEntry(10, 'Dune'), makeEntry(11, 'Dune Messiah')] });
+
+    const { section } = await service.getDashboardSection(user, { type: 'up-next-in-series' });
+
+    expect(section.books.map((book) => book.id)).toEqual([11, 10]);
+  });
+
+  it('routes a smart-scope section through the smart scope selection', async () => {
+    const { service, opdsBookService, dashboardService } = makeService();
+    const user = makeUser({ id: 7 });
+    opdsBookService.getBooksPage.mockResolvedValue({ total: 0, entries: [] });
+
+    const { section } = await service.getDashboardSection(user, { type: 'smart-scope', smartScopeId: 3 });
+
+    expect(dashboardService.getSmartScopeBookIds).toHaveBeenCalledWith(3, user, 10);
+    expect(dashboardService.getScrollerBookIds).not.toHaveBeenCalled();
+    expect(section.smartScopeId).toBe(3);
+  });
+
+  it('keeps the random section on the original discover implementation', async () => {
+    const { service, opdsBookService, dashboardService } = makeService();
+    const user = makeUser({ id: 7 });
+    opdsBookService.getRandomBooks.mockResolvedValueOnce([makeEntry(22, 'Neuromancer')]);
+
+    const { section } = await service.getDashboardSection(user, { type: 'random' });
+
+    expect(opdsBookService.getRandomBooks).toHaveBeenCalledWith(7, 10, false, user.contentFilters);
+    expect(dashboardService.getScrollerBookIds).not.toHaveBeenCalled();
+    expect(section.books.map((book) => book.id)).toEqual([22]);
+  });
+
+  it('makes no books query when the section selects nothing', async () => {
+    const { service, opdsBookService, dashboardService } = makeService();
+    const user = makeUser({ id: 7 });
+    dashboardService.getScrollerBookIds.mockResolvedValueOnce([]);
+
+    const { section } = await service.getDashboardSection(user, { type: 'recently-added' });
+
+    expect(section.books).toEqual([]);
+    expect(opdsBookService.getBooksPage).not.toHaveBeenCalled();
   });
 
   it('rerolls discover books via getDiscover', async () => {

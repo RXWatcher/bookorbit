@@ -539,12 +539,24 @@ function BookOrbitApi:catalogRoot()
     return self:request("GET", "/koreader/plugin/catalog/root")
 end
 
-function BookOrbitApi:catalogDashboard()
-    return self:request("GET", "/koreader/plugin/catalog/dashboard")
+-- Naming a section is opt-in: without it the server returns the pre-section
+-- dashboard, which is what an older server understands.
+function BookOrbitApi:catalogDashboard(section)
+    local params
+    if section and section.type then
+        params = { section = section.type, smartScopeId = section.smartScopeId }
+    end
+    return self:request("GET", self:query("/koreader/plugin/catalog/dashboard", params))
 end
 
 function BookOrbitApi:catalogDiscover()
     return self:request("GET", "/koreader/plugin/catalog/dashboard/discover")
+end
+
+function BookOrbitApi:catalogDashboardSection(section)
+    if not section or not section.type then return nil, 400 end
+    local path = "/koreader/plugin/catalog/dashboard/sections/" .. util.urlEncode(section.type)
+    return self:request("GET", self:query(path, { smartScopeId = section.smartScopeId }))
 end
 
 function BookOrbitApi:catalogSection(section, params)

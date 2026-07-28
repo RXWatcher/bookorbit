@@ -21,6 +21,7 @@ local _ = require("gettext")
 local BookOrbitApi = require("bookorbit_api")
 local BookOrbitHighlightDiagnostics = require("bookorbit_highlight_diagnostics")
 local BookOrbitSweep = require("bookorbit_sweep")
+local DashboardSections = require("bookorbit_dashboard_sections")
 
 -- Assigned from the plugin class on install so menu labels can name the
 -- shared sync strategies.
@@ -286,13 +287,127 @@ function MainMenu:testConnection()
     end)
 end
 
-function MainMenu:dashboardSettingsMenu()
+function MainMenu:dashboardSectionLabel()
+    return DashboardSections.headerText(DashboardSections.primary(self.settings))
+end
+
+-- Applies a new choice for the configurable dashboard row. When the dashboard
+-- is open it owns the setting write, so the row and its cache signature move
+-- together; otherwise the setting is written directly.
+function MainMenu:applyDashboardSection(config, catalog, touchmenu_instance)
+    if catalog and catalog.setDashboardSection then
+        catalog:setDashboardSection(config)
+    else
+        self.settings[DashboardSections.SETTING_KEY] = DashboardSections.store(config)
+        G_reader_settings:flush()
+    end
+    if touchmenu_instance then touchmenu_instance:updateItems() end
+end
+
+function MainMenu:dashboardSectionClient(catalog)
+    if catalog and catalog.client then return catalog.client end
+    return BookOrbitApi.new(self:apiOpts())
+end
+
+-- SmartScopes live on the server, so the chooser has to ask for them. The
+-- chosen name is stored beside the id purely so the row can be labelled later
+-- without another request.
+function MainMenu:chooseDashboardSmartScope(catalog, touchmenu_instance)
+    local ButtonDialog = require("ui/widget/buttondialog")
+    if NetworkMgr:willRerunWhenConnected(function() self:chooseDashboardSmartScope(catalog, touchmenu_instance) end) then
+        return
+    end
+
+    Device:setIgnoreInput(true)
+    local body, err = self:dashboardSectionClient(catalog):catalogSection("smart-scopes")
+    Device:setIgnoreInput(false)
+
+    local scopes = body and body.items or nil
+    if not scopes then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Could not load your SmartScopes: %1"), tostring(err)),
+            timeout = 3,
+        })
+        return
+    end
+    if #scopes == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("You have no SmartScopes yet. Create one in BookOrbit web settings."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local current = DashboardSections.primary(self.settings)
+    local dialog
+    local buttons = {}
+    for _index, scope in ipairs(scopes) do
+        local scope_id = tonumber(scope.id)
+        if scope_id then
+            table.insert(buttons, {
+                {
+                    text = scope.title .. (current.smartScopeId == scope_id and " *" or ""),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:applyDashboardSection(
+                            { type = "smart-scope", smartScopeId = scope_id, smartScopeName = scope.title },
+                            catalog, touchmenu_instance)
+                    end,
+                },
+            })
+        end
+    end
+    dialog = ButtonDialog:new{
+        title = _("Show which SmartScope?"),
+        buttons = buttons,
+    }
+    UIManager:show(dialog)
+end
+
+function MainMenu:dashboardSectionItems(catalog)
+    local items = {}
+    for _index, section_type in ipairs(DashboardSections.TYPES) do
+        local is_smart_scope = section_type == "smart-scope"
+        table.insert(items, {
+            text_func = function()
+                if is_smart_scope then
+                    local current = DashboardSections.primary(self.settings)
+                    if current.type == "smart-scope" and current.smartScopeName then
+                        return T(_("SmartScope (%1)"), current.smartScopeName)
+                    end
+                end
+                return DashboardSections.label(section_type)
+            end,
+            help_text = DashboardSections.helpText(section_type),
+            checked_func = function()
+                return DashboardSections.primary(self.settings).type == section_type
+            end,
+            keep_menu_open = is_smart_scope,
+            callback = function(touchmenu_instance)
+                if is_smart_scope then
+                    self:chooseDashboardSmartScope(catalog, touchmenu_instance)
+                else
+                    self:applyDashboardSection({ type = section_type }, catalog, touchmenu_instance)
+                end
+            end,
+        })
+    end
+    return items
+end
+
+function MainMenu:dashboardSettingsMenu(catalog)
     return {
         {
             text_func = function()
                 return T(_("Open dashboard on startup (%1)"), self:catalogAutoOpenLabel())
             end,
             sub_item_table = self:catalogAutoOpenMenu(),
+        },
+        {
+            text_func = function()
+                return T(_("Show below Continue reading (%1)"), self:dashboardSectionLabel())
+            end,
+            sub_item_table = self:dashboardSectionItems(catalog),
         },
     }
 end
@@ -385,7 +500,7 @@ function MainMenu:settingsMenu(has_open_book, opts)
     local items = {
         {
             text = _("Dashboard"),
-            sub_item_table = self:dashboardSettingsMenu(),
+            sub_item_table = self:dashboardSettingsMenu(opts.catalog),
         },
         {
             text = _("Sync"),
@@ -517,7 +632,7 @@ function MainMenu:dashboardMenuItems(catalog)
                     id = "settings",
                     text = _("Settings"),
                     separator = item.separator,
-                    sub_item_table = self:settingsMenu(false, { include_plugin = false }),
+                    sub_item_table = self:settingsMenu(false, { include_plugin = false, catalog = catalog }),
                 })
             else
                 table.insert(items, item)

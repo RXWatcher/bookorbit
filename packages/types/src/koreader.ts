@@ -270,6 +270,32 @@ export interface KoreaderCatalogSectionResponse {
   query?: string | null;
 }
 
+// The dashboard row below Continue reading is user-selectable. "random"
+// reproduces the original Discover row and remains the default.
+export const KOREADER_DASHBOARD_SECTION_TYPE = {
+  RANDOM: "random",
+  RECENTLY_ADDED: "recently-added",
+  WANT_TO_READ: "want-to-read",
+  UP_NEXT_IN_SERIES: "up-next-in-series",
+  SMART_SCOPE: "smart-scope",
+} as const;
+
+export type KoreaderDashboardSectionType = (typeof KOREADER_DASHBOARD_SECTION_TYPE)[keyof typeof KOREADER_DASHBOARD_SECTION_TYPE];
+export const KOREADER_DASHBOARD_SECTION_TYPES = Object.values(KOREADER_DASHBOARD_SECTION_TYPE) as ReadonlyArray<KoreaderDashboardSectionType>;
+
+// Ordered so a later release can render more than one configurable row without
+// a wire change. Only the first entry is honoured today.
+export interface KoreaderDashboardSectionConfig {
+  type: KoreaderDashboardSectionType;
+  smartScopeId?: number;
+}
+
+export interface KoreaderCatalogDashboardSection {
+  type: KoreaderDashboardSectionType;
+  smartScopeId: number | null;
+  books: KoreaderCatalogBookListItem[];
+}
+
 export interface KoreaderCatalogDashboardResponse {
   generatedAt: string;
   username: string;
@@ -277,7 +303,11 @@ export interface KoreaderCatalogDashboardResponse {
   totalBooks: number;
   sections: KoreaderCatalogEntry[];
   continueReading: KoreaderCatalogBookListItem[];
+  // Legacy Discover row. Populated only for requests that name no section, so a
+  // plugin predating the section parameter keeps its original response and the
+  // books are never carried twice.
   discover: KoreaderCatalogBookListItem[];
+  section?: KoreaderCatalogDashboardSection;
   readingGoal: ReadingGoalWidgetData;
   readingStreak: ReadingStreakWidgetData;
   highlightOfTheDay: HighlightOfTheDayWidgetData | null;
@@ -285,6 +315,10 @@ export interface KoreaderCatalogDashboardResponse {
 
 export interface KoreaderCatalogDiscoverResponse {
   discover: KoreaderCatalogBookListItem[];
+}
+
+export interface KoreaderCatalogDashboardSectionResponse {
+  section: KoreaderCatalogDashboardSection;
 }
 
 // Everything a bulk download needs per downloadable file, so no per-book detail
@@ -325,7 +359,7 @@ export interface KoreaderCatalogManifestPage {
   restartRequired: boolean;
 }
 
-export type KoreaderPluginCapability = "catalogBulkManifest";
+export type KoreaderPluginCapability = "catalogBulkManifest" | "catalogDashboardSections";
 
 export interface KoreaderPluginVersionInfo {
   pluginVersion: string;

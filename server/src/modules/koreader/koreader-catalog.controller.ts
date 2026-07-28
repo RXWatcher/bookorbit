@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Header, Headers, Param, ParseIntPipe, Put, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, ParseEnumPipe, ParseIntPipe, Put, Query, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
+import { KOREADER_DASHBOARD_SECTION_TYPE } from '@bookorbit/types';
+import type { KoreaderDashboardSectionType } from '@bookorbit/types';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import type { RequestUser } from '../../common/types/request-user';
@@ -9,6 +11,8 @@ import { KoreaderCatalogService } from './koreader-catalog.service';
 import {
   KoreaderCatalogBookDetailQueryDto,
   KoreaderCatalogBooksQueryDto,
+  KoreaderCatalogDashboardQueryDto,
+  KoreaderCatalogDashboardSectionQueryDto,
   KoreaderCatalogManifestQueryDto,
   KoreaderCatalogSectionQueryDto,
   KoreaderCatalogSetRatingDto,
@@ -29,14 +33,25 @@ export class KoreaderCatalogController {
 
   @Get('dashboard')
   @Header('Cache-Control', 'private, max-age=30')
-  dashboard(@CurrentUser() user: RequestUser) {
-    return this.catalogService.getDashboard(user);
+  dashboard(@CurrentUser() user: RequestUser, @Query() query: KoreaderCatalogDashboardQueryDto) {
+    const section = query.section ? { type: query.section, ...(query.smartScopeId ? { smartScopeId: query.smartScopeId } : {}) } : undefined;
+    return this.catalogService.getDashboard(user, section);
   }
 
   @Get('dashboard/discover')
   @Header('Cache-Control', 'no-store')
   discover(@CurrentUser() user: RequestUser) {
     return this.catalogService.getDiscover(user);
+  }
+
+  @Get('dashboard/sections/:type')
+  @Header('Cache-Control', 'no-store')
+  dashboardSection(
+    @CurrentUser() user: RequestUser,
+    @Param('type', new ParseEnumPipe(KOREADER_DASHBOARD_SECTION_TYPE)) type: KoreaderDashboardSectionType,
+    @Query() query: KoreaderCatalogDashboardSectionQueryDto,
+  ) {
+    return this.catalogService.getDashboardSection(user, { type, ...(query.smartScopeId ? { smartScopeId: query.smartScopeId } : {}) });
   }
 
   @Get('sections/:section')

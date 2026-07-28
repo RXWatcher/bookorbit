@@ -12,7 +12,10 @@ import type {
   KoreaderCatalogBookDetail,
   KoreaderCatalogBookListItem,
   KoreaderCatalogDashboardResponse,
+  KoreaderCatalogDashboardSection,
+  KoreaderCatalogDashboardSectionResponse,
   KoreaderCatalogDiscoverResponse,
+  KoreaderDashboardSectionConfig,
   KoreaderCatalogEntry,
   KoreaderCatalogFile,
   KoreaderCatalogManifestBook,
@@ -40,6 +43,7 @@ import { storageConfig } from '../../config/config';
 import { BookReadService } from '../book/book-read.service';
 import { BookService } from '../book/book.service';
 import type { BookDetailDto } from '../book/dto/book-detail.dto';
+import { DashboardService } from '../dashboard/dashboard.service';
 import { DashboardWidgetService } from '../dashboard/dashboard-widget.service';
 import { fileMimeType } from '../opds/opds-xml.helpers';
 import { OpdsBookEntry, OpdsBookService } from '../opds/opds-book.service';
@@ -61,6 +65,7 @@ const CATALOG_BASE = '/api/v1/koreader/plugin/catalog';
 const AUTHOR_SERIES_PAGE_SIZE = 60;
 const DASHBOARD_CONTINUE_READING_LIMIT = 5;
 const DASHBOARD_DISCOVER_LIMIT = 10;
+const DASHBOARD_SECTION_LIMIT = 10;
 const DETAIL_RELATED_LIMIT = 8;
 const MANIFEST_DEFAULT_PAGE_SIZE = 100;
 const MANIFEST_CURSOR_VERSION = 1;
@@ -133,6 +138,7 @@ export class KoreaderCatalogService {
     private readonly bookService: BookService,
     private readonly bookReadService: BookReadService,
     private readonly userBookStatusService: UserBookStatusService,
+    private readonly dashboardService: DashboardService,
     private readonly dashboardWidgetService: DashboardWidgetService,
     private readonly recommendationService: RecommendationService,
     private readonly appSettingsService: AppSettingsService,
@@ -145,7 +151,7 @@ export class KoreaderCatalogService {
     return { sections: ROOT_SECTIONS.map((section) => ({ ...section })) };
   }
 
-  async getDashboard(user: RequestUser): Promise<KoreaderCatalogDashboardResponse> {
+  async getDashboard(user: RequestUser, section?: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogDashboardResponse> {
     const continueReadingQuery = Object.assign(new KoreaderCatalogBooksQueryDto(), {
       page: 1,
       size: DASHBOARD_CONTINUE_READING_LIMIT,
@@ -153,9 +159,10 @@ export class KoreaderCatalogService {
       readStatus: 'reading' as const,
     });
 
-    const [continueReading, discover, readingGoal, readingStreak, highlightOfTheDay, totalBooks] = await Promise.all([
+    const [continueReading, discover, dashboardSection, readingGoal, readingStreak, highlightOfTheDay, totalBooks] = await Promise.all([
       this.getBooksPage(user, continueReadingQuery),
-      this.buildDiscover(user),
+      section ? Promise.resolve<KoreaderCatalogBookListItem[]>([]) : this.buildDiscover(user),
+      section ? this.buildDashboardSection(user, section) : Promise.resolve(undefined),
       this.dashboardWidgetService.getReadingGoal(user),
       this.dashboardWidgetService.getReadingStreak(user),
       this.dashboardWidgetService.getHighlightOfTheDay(user),
@@ -167,9 +174,10 @@ export class KoreaderCatalogService {
       username: user.username,
       displayName: user.name || user.username,
       totalBooks,
-      sections: ROOT_SECTIONS.map((section) => ({ ...section })),
+      sections: ROOT_SECTIONS.map((rootSection) => ({ ...rootSection })),
       continueReading: continueReading.items,
       discover,
+      ...(dashboardSection ? { section: dashboardSection } : {}),
       readingGoal,
       readingStreak,
       highlightOfTheDay,
@@ -178,6 +186,41 @@ export class KoreaderCatalogService {
 
   async getDiscover(user: RequestUser): Promise<KoreaderCatalogDiscoverResponse> {
     return { discover: await this.buildDiscover(user) };
+  }
+
+  async getDashboardSection(user: RequestUser, section: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogDashboardSectionResponse> {
+    return { section: await this.buildDashboardSection(user, section) };
+  }
+
+  private async buildDashboardSection(user: RequestUser, section: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogDashboardSection> {
+    return {
+      type: section.type,
+      smartScopeId: section.smartScopeId ?? null,
+      books: await this.buildSectionBooks(user, section),
+    };
+  }
+
+  private async buildSectionBooks(user: RequestUser, section: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogBookListItem[]> {
+    // Random keeps its original implementation so the row and its reroll stay
+    // byte-for-byte what the Discover row already returned.
+    if (section.type === 'random') return this.buildDiscover(user);
+
+    const bookIds =
+      section.type === 'smart-scope'
+        ? await this.dashboardService.getSmartScopeBookIds(section.smartScopeId, user, DASHBOARD_SECTION_LIMIT)
+        : await this.dashboardService.getScrollerBookIds(section.type, user, DASHBOARD_SECTION_LIMIT);
+
+    return this.loadBookListItemsByIds(user, bookIds);
+  }
+
+  // Selection order carries the section's meaning (series position, recency), so
+  // it is restored after the books query re-sorts by its own criteria.
+  private async loadBookListItemsByIds(user: RequestUser, bookIds: number[]): Promise<KoreaderCatalogBookListItem[]> {
+    if (bookIds.length === 0) return [];
+    const query = Object.assign(new KoreaderCatalogBooksQueryDto(), { page: 1, size: bookIds.length, ids: bookIds });
+    const { items } = await this.getBooksPage(user, query);
+    const byId = new Map(items.map((item) => [item.id, item]));
+    return bookIds.map((id) => byId.get(id)).filter((item): item is KoreaderCatalogBookListItem => item !== undefined);
   }
 
   private async buildDiscover(user: RequestUser): Promise<KoreaderCatalogBookListItem[]> {

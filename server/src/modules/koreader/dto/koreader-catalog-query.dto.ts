@@ -1,11 +1,13 @@
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
+import { KOREADER_DASHBOARD_SECTION_TYPES } from '@bookorbit/types';
 import type {
   KoreaderCatalogReadStatusFilter,
   KoreaderCatalogSettableReadStatus,
   KoreaderCatalogSort,
   KoreaderCatalogSortOrder,
+  KoreaderDashboardSectionType,
 } from '@bookorbit/types';
 import { KOREADER_DEVICE_ID_REGEX } from './koreader-device-param.dto';
 
@@ -195,6 +197,28 @@ export class KoreaderCatalogManifestQueryDto {
   @IsInt()
   @Min(1)
   seriesId?: number;
+}
+
+// Omitting `section` yields the pre-section dashboard response, so a plugin
+// that predates the configurable row keeps working against a newer server.
+export class KoreaderCatalogDashboardQueryDto {
+  @IsOptional()
+  @IsIn(KOREADER_DASHBOARD_SECTION_TYPES)
+  section?: KoreaderDashboardSectionType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  smartScopeId?: number;
+}
+
+export class KoreaderCatalogDashboardSectionQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  smartScopeId?: number;
 }
 
 export class KoreaderCatalogSectionQueryDto {
