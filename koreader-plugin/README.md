@@ -48,23 +48,30 @@ From the dashboard menu, the plugin update check is top-level; from the Tools me
 
 A first sync on a device with years of history uploads in batches of 500 events (roughly 400 requests per 200k events, a few minutes of background work), and is safe to interrupt.
 
-## Two-way highlight sync
+## Two-way highlight and bookmark sync
 
-Requires server 0.4+; against an older server the plugin falls back to upload-only automatically.
+Requires server 0.4+; against an older server the plugin falls back to upload-only automatically. Bookmark sync additionally requires a server that advertises the `bookmarkSync` capability; on an older one the bookmark paths stay dormant and highlights sync exactly as before.
 
 - Device to web: highlight positions (crengine xpointers) convert to reader CFIs, verified against the highlighted text, so they render as native, editable highlights on the web.
 - Web to device: applied on book open (with auto sync on), on manual sync, and during the full sweep for closed books, with positions re-verified/re-anchored against the text.
 - Deletions go both ways through a trash/restore flow, so nothing is lost outright.
 - Identity is the highlight's creation datetime plus position, so extending a highlight on the device is recognized as a move, not a delete-and-recreate.
 - Styles map across formats (e.g. squiggly <-> underline, invert, named colors <-> hex).
-- Toggle via Settings > Sync > "Two-way highlight sync" (uploads keep working either way).
+- Toggle via Settings > Sync > "Two-way highlights & bookmarks" (uploads keep working either way).
+
+Position-only bookmarks (dogears) sync the same way:
+
+- Device to web: the dogear xpointer converts to a reader CFI and shows up in the web reader's bookmark list. Its title is the note you attached, else the chapter, else the page.
+- Web to device: applied on book open, on manual sync, and during the full sweep for closed books. The position is only placed when it resolves; an entry that does not is retried on the next exchange.
+- Deletions and device-side renames propagate; the web has no rename surface yet, so edits flow device to web only.
+- A dogear has no highlighted text to re-anchor against, so a converted position can sit slightly off where a highlight would have been repaired exactly.
 
 ## Limitations
 
 - Web highlight changes reach a closed book only via a manual sweep or its next open.
 - Web-created PDF highlights aren't supported (device PDF highlights sync up but aren't drawn over the PDF).
 - Books with reading stats but no sidecar path sync reading time only, until the full sweep covers them.
-- Position-only bookmarks (no highlighted text) don't sync.
+- PDF bookmarks don't sync in either direction (the web has no PDF bookmark surface).
 - A device clock far in the past can delay edit detection for web-modified highlights.
 - The full sweep is manual-only; books you never reopen only sync when you run it.
 - A cloned device with a different KOReader `device_id` double-counts reading time; clones keeping the same `device_id` deduplicate naturally.

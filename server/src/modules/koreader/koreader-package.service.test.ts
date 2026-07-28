@@ -163,6 +163,7 @@ describe('KoreaderPackageService', () => {
       const result = await service.getVersionInfo();
 
       expect(result.capabilities).toContain('catalogBulkManifest');
+      expect(result.capabilities).toContain('bookmarkSync');
     });
 
     it('returns pluginVersion=unknown when the plugin source dir does not exist', async () => {

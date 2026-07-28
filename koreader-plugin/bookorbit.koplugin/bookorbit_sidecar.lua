@@ -117,6 +117,53 @@ function BookOrbitSidecar.normalizeAnnotations(raw)
         string.format("%d:%s:%d:%d", #annotations, max_datetime, sum, mix)
 end
 
+-- Position-only bookmarks carry no text, so a rename is only visible in the
+-- fields themselves. KOReader also leaves datetime_updated untouched when the
+-- user edits a dogear note, which is why the note and chapter are hashed here
+-- and why the exchange uploads the whole set rather than a datetime delta.
+local function bookmarkHash(entry)
+    local pos = entry.pos or ""
+    local key = entry.datetime .. "|" .. #pos .. "|" .. pos:sub(1, 24) .. "|" .. pos:sub(-24)
+        .. "|" .. (entry.datetimeUpdated or "") .. "|" .. (entry.note or "") .. "|" .. (entry.chapter or "")
+    local hash = 5381
+    for index = 1, #key do
+        hash = (hash * 33 + key:byte(index)) % 4294967296
+    end
+    return hash
+end
+
+-- Returns normalized position-only bookmarks (dogears), the max effective
+-- datetime and a signature that changes whenever the local set changes.
+-- Paging documents store a page number instead of an xpointer; those are out of
+-- scope, so only string positions are kept.
+function BookOrbitSidecar.normalizeBookmarks(raw)
+    local bookmarks = {}
+    local max_datetime = ""
+    local sum, mix = 0, 0
+    for _, a in ipairs(raw or {}) do
+        if a.drawer == nil and isDeviceDatetime(a.datetime) and type(a.page) == "string" and a.page ~= "" then
+            local entry = {
+                datetime = a.datetime,
+                datetimeUpdated = isDeviceDatetime(a.datetime_updated) and a.datetime_updated or nil,
+                pos = truncate(a.page, 4000),
+                pageno = type(a.pageno) == "number" and math.floor(a.pageno) or nil,
+                chapter = truncate(a.chapter, 500),
+                note = truncate(a.note, 500),
+            }
+            table.insert(bookmarks, entry)
+            local effective = entry.datetimeUpdated or entry.datetime
+            if effective > max_datetime then
+                max_datetime = effective
+            end
+            local hash = bookmarkHash(entry)
+            sum = (sum + hash) % 4294967296
+            mix = (mix + hash * (hash % 8191 + 1)) % 4294967296
+        end
+    end
+    return bookmarks, max_datetime,
+        string.format("%d:%s:%d:%d", #bookmarks, max_datetime, sum, mix)
+end
+
 -- Validates a summary table (sidecar or live doc_settings reference) into a
 -- fresh plain table; never returns the input reference.
 function BookOrbitSidecar.normalizeSummary(summary)
@@ -299,8 +346,9 @@ function BookOrbitSidecar.extract(file)
 
     local doc_settings = DocSettings:open(file)
     local summary = BookOrbitSidecar.normalizeSummary(doc_settings:readSetting("summary"))
-    local annotations, max_datetime, signature =
-        BookOrbitSidecar.normalizeAnnotations(doc_settings:readSetting("annotations"))
+    local raw_annotations = doc_settings:readSetting("annotations")
+    local annotations, max_datetime, signature = BookOrbitSidecar.normalizeAnnotations(raw_annotations)
+    local bookmarks, bm_max_datetime, bm_signature = BookOrbitSidecar.normalizeBookmarks(raw_annotations)
 
     local last_position = doc_settings:readSetting("last_xpointer")
     if not last_position then
@@ -322,6 +370,10 @@ function BookOrbitSidecar.extract(file)
         annotations_count = #annotations,
         annotations_max_datetime = max_datetime,
         annotations_signature = signature,
+        bookmarks = bookmarks,
+        bookmarks_count = #bookmarks,
+        bookmarks_max_datetime = bm_max_datetime,
+        bookmarks_signature = bm_signature,
     }
 end
 

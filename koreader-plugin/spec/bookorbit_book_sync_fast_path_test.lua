@@ -30,6 +30,13 @@ package.loaded["libs/libkoreader-lfs"] = {
 package.loaded["ffi/util"] = { template = function(value) return value end }
 package.loaded["gettext"] = function(value) return value end
 
+package.loaded["bookorbit_bookmarks"] = {
+    enabled = function() return false end,
+    markUnsupported = function() end,
+    canSkipExchange = function() return false end,
+    rememberExchanged = function() end,
+    exchangeBook = function() error("bookmark sync is off in this fixture") end,
+}
 package.loaded["bookorbit_annotations"] = {
     exchangeBook = function()
         table.insert(calls, "annotations")

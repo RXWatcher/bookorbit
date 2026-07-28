@@ -31,6 +31,7 @@ local T = ffiutil.template
 local _ = require("gettext")
 
 local BookOrbitAnnotations = require("bookorbit_annotations")
+local BookOrbitBookmarks = require("bookorbit_bookmarks")
 local BookOrbitApi = require("bookorbit_api")
 local BookOrbitHighlightSummary = require("bookorbit_highlight_summary")
 local BookOrbitQueue = require("bookorbit_queue")
@@ -253,7 +254,7 @@ local function finish(ctx, err)
             text = text .. "\n" .. _("BookOrbit server needs an update for two-way highlights.")
         end
         if ctx.highlight_disabled_reported then
-            text = text .. "\n" .. _("Two-way highlight sync is disabled.")
+            text = text .. "\n" .. _("Two-way highlight and bookmark sync is disabled.")
         end
         if ctx.had_errors then
             text = text .. "\n" .. _("Some books failed and will retry on the next sync.")
@@ -745,6 +746,8 @@ local function sidecarEntry(ctx, md5)
             annotations = extract.annotations,
             ann_max_datetime = extract.annotations_max_datetime,
             ann_signature = extract.annotations_signature,
+            bookmarks = extract.bookmarks,
+            bm_signature = extract.bookmarks_signature,
         })
     end
 
@@ -813,6 +816,48 @@ local function currentlyOpenFile()
     if ok and ReaderUI and ReaderUI.instance and ReaderUI.instance.document then
         return ReaderUI.instance.document.file
     end
+end
+
+-- Dogears share the sidecar and the apply mode with highlights, so the sweep
+-- exchanges both for the same book in one pass. A server without the route is
+-- recorded once and skipped for the rest of the run.
+local function exchangeBookmarksForEntry(ctx, entry, apply_mode, pending)
+    if not ctx.annotation_sync or ctx.bookmarks_unsupported then return end
+    if not BookOrbitBookmarks.enabled(ctx.client, true) then
+        ctx.bookmarks_unsupported = true
+        return
+    end
+    local book = ctx.state:getBook(entry.md5)
+    if not book then return end
+    if not ctx.interactive and BookOrbitBookmarks.canSkipExchange(book, entry.bm_signature) then return end
+
+    local result, err = BookOrbitBookmarks.exchangeBook({
+        client = ctx.client,
+        state = ctx.state,
+        digest = entry.md5,
+        bookmarks = entry.bookmarks,
+        bm_signature = entry.bm_signature,
+        apply_mode = apply_mode,
+        file = entry.file,
+    })
+    if not result then
+        if err == "unsupported_server" then
+            BookOrbitBookmarks.markUnsupported(ctx.client)
+            ctx.bookmarks_unsupported = true
+            return
+        end
+        ctx.had_errors = true
+        if pending then pending.failed = true end
+        ctx.highlight_summary = BookOrbitHighlightSummary.addBookmarks(ctx.highlight_summary, { had_errors = true })
+        logger.dbg("BookOrbit: bookmark exchange failed for", entry.md5, err)
+        return
+    end
+    if result.had_errors then
+        ctx.had_errors = true
+        if pending then pending.failed = true end
+    end
+    ctx.counts.bookmarks = (ctx.counts.bookmarks or 0) + result.uploaded
+    ctx.highlight_summary = BookOrbitHighlightSummary.addBookmarks(ctx.highlight_summary, result)
 end
 
 -- Phase 5: per-book annotation exchange. Uploads the local delta, reports the
@@ -885,6 +930,9 @@ local function stepAnnotationsNext(ctx)
     ctx.highlight_summary = BookOrbitHighlightSummary.add(ctx.highlight_summary, result, {
         closed_book = apply_mode == "sidecar",
     })
+
+    exchangeBookmarksForEntry(ctx, entry, apply_mode, pending)
+    if aborted(ctx) then return end
     return step(ctx, ctx.steps.annotationsNext)
 end
 

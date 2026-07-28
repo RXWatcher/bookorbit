@@ -517,6 +517,14 @@ function BookOrbitApi:exchangeAck(books)
     return self:request("POST", "/koreader/plugin/annotations/exchange-ack", self:withDevice({ books = books }))
 end
 
+function BookOrbitApi:exchangeBookmarks(books)
+    return self:request("POST", "/koreader/plugin/bookmarks/exchange", self:withDevice({ books = books }))
+end
+
+function BookOrbitApi:exchangeBookmarksAck(books)
+    return self:request("POST", "/koreader/plugin/bookmarks/exchange-ack", self:withDevice({ books = books }))
+end
+
 function BookOrbitApi:uploadBookStates(books)
     return self:request("POST", "/koreader/plugin/book-states", self:withDevice({ books = books }))
 end

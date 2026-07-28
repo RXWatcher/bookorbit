@@ -189,7 +189,7 @@ function MainMenu:diagnosticsRows()
 
     table.insert(rows, "----------------------------")
     table.insert(rows, { _("Auto sync"), formatBool(self.settings.auto_sync) })
-    table.insert(rows, { _("Two-way highlights"), formatBool(self.settings.annotation_sync) })
+    table.insert(rows, { _("Two-way highlights & bookmarks"), formatBool(self.settings.annotation_sync) })
     table.insert(rows, { _("Open highlights"), open_highlight_text })
     table.insert(rows, { _("Highlight apply retry"), BookOrbitHighlightDiagnostics.retryText(self.open_highlight_retry_status) })
     table.insert(rows, { _("Skip offline auto-sync"), formatBool(self.settings.skip_sync_when_offline) })
@@ -206,6 +206,8 @@ function MainMenu:diagnosticsRows()
     table.insert(rows, "----------------------------")
     table.insert(rows, { _("Last sync"), recordText(self.settings.last_sync) })
     table.insert(rows, { _("Last highlight sync"), highlightRecordText(self.settings.last_highlight_sync) })
+    table.insert(rows, { _("Last bookmark sync"),
+        BookOrbitHighlightDiagnostics.lastBookmarkSyncText(self.settings.last_highlight_sync, formatShortTime) })
     table.insert(rows, { _("Last error"), recordText(self.settings.last_error) })
     table.insert(rows, "----------------------------")
     if has_open_book then
@@ -452,9 +454,9 @@ If set to 0, updating progress based on page turns will be disabled.]]),
         end,
     })
     table.insert(items, {
-        text = _("Two-way highlight sync"),
+        text = _("Two-way highlights & bookmarks"),
         checked_func = function() return self.settings.annotation_sync end,
-        help_text = _([[Also applies highlights, notes and deletions made in BookOrbit to this device: on book open, after the manual book sync, and during the full sweep for closed books. Turning this off keeps uploads only.]]),
+        help_text = _([[Also applies highlights, notes, bookmarks (dogears) and deletions made in BookOrbit to this device: on book open, after the manual book sync, and during the full sweep for closed books. Turning this off keeps uploads only. Bookmark sync needs a server that supports it, and PDF bookmarks never sync.]]),
         callback = function()
             self.settings.annotation_sync = not self.settings.annotation_sync
         end,

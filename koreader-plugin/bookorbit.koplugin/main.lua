@@ -30,6 +30,7 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local BookOrbitAnnotations = require("bookorbit_annotations")
+local BookOrbitBookmarks = require("bookorbit_bookmarks")
 local BookOrbitApi = require("bookorbit_api")
 local BookOrbitBookSync = require("bookorbit_book_sync")
 local BookOrbitCatalog = require("bookorbit_catalog")
@@ -1013,46 +1014,70 @@ function BookOrbit:exchangeAnnotationsForOpenBook(reason, retry_count)
     end
 
     self.annotation_exchange_running = true
+    local client = self:newClient()
     local ok, result, err = pcall(BookOrbitAnnotations.exchangeOpenBook, {
-        client = self:newClient(),
+        client = client,
         state = state,
         digest = digest,
         ui = self.ui,
     })
+    local bm_ok, bm_result, bm_err
+    if BookOrbitBookmarks.enabled(client, self.settings.annotation_sync) then
+        bm_ok, bm_result, bm_err = pcall(BookOrbitBookmarks.exchangeOpenBook, {
+            client = client,
+            state = state,
+            digest = digest,
+            ui = self.ui,
+        })
+        if bm_ok and bm_err == "unsupported_server" then
+            BookOrbitBookmarks.markUnsupported(client)
+        end
+    end
     state:flush()
     self.annotation_exchange_running = false
 
+    local summary = { event = "open_book", reason = reason or "auto" }
+    local error_code
     if not ok then
         logger.err("BookOrbit: annotation exchange error:", result)
-        self:recordHighlightSync({
-            event = "open_book",
-            reason = reason or "auto",
-            failed = 1,
-        }, "partial_failure")
+        summary.failed = 1
+        error_code = "partial_failure"
     elseif result then
-        local summary = BookOrbitHighlightSummary.add({
-            event = "open_book",
-            reason = reason or "auto",
-        }, result)
-        self:recordHighlightSync(summary)
-        if BookOrbitHighlightSummary.hasRemoteChanges(summary) then
-            Notification:notify(T(_("BookOrbit: %1 highlight(s) updated"),
-                summary.applied + summary.deleted))
+        summary = BookOrbitHighlightSummary.add(summary, result)
+    elseif err then
+        summary.skipped = err == "unmatched" and 1 or 0
+        summary.failed = (err == "network" or err == "unsupported_server") and 1 or 0
+        error_code = err
+        if err ~= "unmatched" and err ~= "unsupported_server" and err ~= "network" then
+            logger.dbg("BookOrbit: annotation exchange skipped:", err)
         end
+    end
+
+    if bm_ok == false then
+        logger.err("BookOrbit: bookmark exchange error:", bm_result)
+        summary = BookOrbitHighlightSummary.addBookmarks(summary, { had_errors = true })
+        error_code = error_code or "partial_failure"
+    elseif bm_result then
+        summary = BookOrbitHighlightSummary.addBookmarks(summary, bm_result)
+    elseif bm_err and bm_err ~= "unmatched" and bm_err ~= "unsupported_server" then
+        summary = BookOrbitHighlightSummary.addBookmarks(summary, { had_errors = true })
+        error_code = error_code or bm_err
+    end
+
+    self:recordHighlightSync(summary, error_code)
+    if BookOrbitHighlightSummary.hasRemoteChanges(summary) then
+        Notification:notify(T(_("BookOrbit: %1 highlight(s) updated"),
+            summary.applied + summary.deleted))
+    end
+    if BookOrbitHighlightSummary.hasRemoteBookmarkChanges(summary) then
+        Notification:notify(T(_("BookOrbit: %1 bookmark(s) updated"),
+            summary.bm_applied + summary.bm_deleted))
+    end
+    if ok and result then
         if reason == "annotation_open" and (summary.failed or 0) > 0 then
             self:scheduleOpenHighlightRetry(reason, retry_count or 0)
         elseif (summary.failed or 0) == 0 then
             self.open_highlight_retry_status = nil
-        end
-    elseif err then
-        self:recordHighlightSync({
-            event = "open_book",
-            reason = reason or "auto",
-            skipped = err == "unmatched" and 1 or 0,
-            failed = (err == "network" or err == "unsupported_server") and 1 or 0,
-        }, err)
-        if err ~= "unmatched" and err ~= "unsupported_server" and err ~= "network" then
-            logger.dbg("BookOrbit: annotation exchange skipped:", err)
         end
     end
 end

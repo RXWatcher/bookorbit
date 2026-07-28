@@ -22,6 +22,7 @@ local _ = require("gettext")
 
 local BookOrbitAnnotations = require("bookorbit_annotations")
 local BookOrbitApi = require("bookorbit_api")
+local BookOrbitBookmarks = require("bookorbit_bookmarks")
 local BookOrbitHighlightSummary = require("bookorbit_highlight_summary")
 local BookOrbitSidecar = require("bookorbit_sidecar")
 local BookOrbitState = require("bookorbit_state")
@@ -73,8 +74,9 @@ function BookOrbitBookSync.capture(plugin)
     if not digest then return nil end
 
     local started_ms = nowMs()
-    local annotations, ann_max, ann_signature =
-        BookOrbitSidecar.normalizeAnnotations(ui.annotation and ui.annotation.annotations)
+    local live_annotations = ui.annotation and ui.annotation.annotations
+    local annotations, ann_max, ann_signature = BookOrbitSidecar.normalizeAnnotations(live_annotations)
+    local bookmarks, _bm_max, bm_signature = BookOrbitSidecar.normalizeBookmarks(live_annotations)
     local summary = BookOrbitSidecar.normalizeSummary(ui.doc_settings:readSetting("summary"))
 
     local stats = ui.statistics
@@ -119,6 +121,8 @@ function BookOrbitBookSync.capture(plugin)
         ann_count = #annotations,
         ann_max_datetime = ann_max,
         ann_signature = ann_signature,
+        bookmarks = bookmarks,
+        bm_signature = bm_signature,
         mtime_at_capture = file and BookOrbitSidecar.sidecarMtime(file) or nil,
         ts = ts,
     }
@@ -216,7 +220,7 @@ local function finish(ctx, err)
                 text = text .. "\n" .. _("BookOrbit server needs an update for two-way highlights.")
             end
             if ctx.highlight_disabled_reported then
-                text = text .. "\n" .. _("Two-way highlight sync is disabled.")
+                text = text .. "\n" .. _("Two-way highlight and bookmark sync is disabled.")
             end
             if ctx.skip_progress then
                 text = text .. "\n" .. _("Progress was not changed.")
@@ -266,7 +270,7 @@ local function step(ctx, fn)
     end)
 end
 
-local stepMatch, stepStats, stepAnnotations, stepAnnotationsLegacy, stepState, stepProgress
+local stepMatch, stepStats, stepAnnotations, stepAnnotationsLegacy, stepBookmarks, stepState, stepProgress
 
 stepMatch = function(ctx)
     if ctx.acknowledged.match then
@@ -374,7 +378,7 @@ end
 -- while the book is open, sidecar on the close path) and acks them.
 stepAnnotations = function(ctx)
     if ctx.acknowledged.annotations then
-        return step(ctx, stepState)
+        return step(ctx, stepBookmarks)
     end
     local book = ctx.state:getBook(ctx.snap.digest)
     if not book then return finish(ctx, "unmatched") end
@@ -401,7 +405,7 @@ stepAnnotations = function(ctx)
             and BookOrbitAnnotations.canSkipExchange(book, ctx.snap.ann_signature) then
         logger.dbg("BookOrbit: book sync annotation exchange skipped, local set unchanged")
         if not acknowledge(ctx, "annotations", false) then return end
-        return step(ctx, stepState)
+        return step(ctx, stepBookmarks)
     end
 
     if pending and apply_mode == "sidecar" then
@@ -445,7 +449,7 @@ stepAnnotations = function(ctx)
         end
         ctx.had_errors = true
         ctx.highlight_summary = BookOrbitHighlightSummary.add(ctx.highlight_summary, { had_errors = true })
-        return step(ctx, stepState)
+        return step(ctx, stepBookmarks)
     end
 
     if result.had_errors then ctx.had_errors = true end
@@ -469,7 +473,7 @@ stepAnnotations = function(ctx)
             return
         end
     end
-    return step(ctx, stepState)
+    return step(ctx, stepBookmarks)
 end
 
 -- One-way upload for servers without the 0.4 exchange endpoint.
@@ -498,7 +502,7 @@ stepAnnotationsLegacy = function(ctx)
             book.annCount = ctx.snap.ann_count
             if not acknowledge(ctx, "annotations") then return end
         end
-        return step(ctx, stepState)
+        return step(ctx, stepBookmarks)
     end
 
     -- Consumed through a head cursor: removing from the front of a Lua array
@@ -518,7 +522,7 @@ stepAnnotationsLegacy = function(ctx)
         ctx.highlight_summary = BookOrbitHighlightSummary.add(ctx.highlight_summary, { had_errors = true })
         if isTransportError(err) then return finish(ctx, "network") end
         logger.dbg("BookOrbit: book sync annotations upload failed:", err)
-        return step(ctx, stepState)
+        return step(ctx, stepBookmarks)
     end
     if isUnmatched(body, ctx.snap.digest) then
         ctx.state:setUnmatched(ctx.snap.digest)
@@ -528,6 +532,86 @@ stepAnnotationsLegacy = function(ctx)
     ctx.counts.annotations = ctx.counts.annotations + #chunk
     ctx.highlight_summary = BookOrbitHighlightSummary.add(ctx.highlight_summary, { uploaded = #chunk })
     return step(ctx, stepAnnotationsLegacy)
+end
+
+-- Two-way dogear exchange. It shares the annotations phase acknowledgement, so
+-- an outbox entry queued before bookmark sync existed still drains: only the
+-- free-form remote_pending kind is new.
+stepBookmarks = function(ctx)
+    if not ctx.annotation_sync or not BookOrbitBookmarks.enabled(ctx.client, true) then
+        return step(ctx, stepState)
+    end
+    local book = ctx.state:getBook(ctx.snap.digest)
+    if not book then return finish(ctx, "unmatched") end
+
+    local apply_mode = "skip"
+    if (ctx.reason == "close" or ctx.reason == "suspend" or ctx.reason == "recovery")
+            and ctx.snap.file and lfs.attributes(ctx.snap.file, "mode") == "file" then
+        apply_mode = "sidecar"
+    elseif ctx.reason == "manual" and ctx.plugin and ctx.plugin.ui and ctx.plugin.ui.document then
+        apply_mode = "live"
+    end
+
+    local pending = ctx.remote_pending and ctx.remote_pending.bookmarks
+    if not pending and not ctx.interactive
+            and BookOrbitBookmarks.canSkipExchange(book, ctx.snap.bm_signature) then
+        logger.dbg("BookOrbit: book sync bookmark exchange skipped, local set unchanged")
+        return step(ctx, stepState)
+    end
+
+    if pending and apply_mode == "sidecar" then
+        local applied, deleted = BookOrbitBookmarks.applySidecar(ctx.snap.file, pending.to_apply or {})
+        local ack_body, ack_err = ctx.client:exchangeBookmarksAck({
+            { hash = ctx.snap.digest, applied = applied, deleted = deleted },
+        })
+        if not ack_body then
+            if isAuthError(ack_err) then return finish(ctx, "auth") end
+            return finish(ctx, "network")
+        end
+        if ctx.on_remote_applied then
+            local ok, cleared = pcall(ctx.on_remote_applied, "bookmarks")
+            if not ok or cleared == false then return finish(ctx, "outbox") end
+        end
+        ctx.remote_pending.bookmarks = nil
+    end
+
+    local result, err = BookOrbitBookmarks.exchangeBook({
+        client = ctx.client,
+        state = ctx.state,
+        digest = ctx.snap.digest,
+        bookmarks = ctx.snap.bookmarks,
+        bm_signature = ctx.snap.bm_signature,
+        apply_mode = apply_mode,
+        ui = apply_mode == "live" and ctx.plugin.ui or nil,
+        file = ctx.snap.file,
+    })
+    if not result then
+        if err == "auth" then return finish(ctx, "auth") end
+        if err == "network" then
+            ctx.had_errors = true
+            return finish(ctx, "network")
+        end
+        if err == "unmatched" then return finish(ctx, "unmatched") end
+        if err == "unsupported_server" then
+            BookOrbitBookmarks.markUnsupported(ctx.client)
+            return step(ctx, stepState)
+        end
+        ctx.had_errors = true
+        ctx.highlight_summary = BookOrbitHighlightSummary.addBookmarks(ctx.highlight_summary, { had_errors = true })
+        return step(ctx, stepState)
+    end
+
+    if result.had_errors then ctx.had_errors = true end
+    ctx.counts.bookmarks = (ctx.counts.bookmarks or 0) + result.uploaded
+    ctx.highlight_summary = BookOrbitHighlightSummary.addBookmarks(ctx.highlight_summary, result)
+    if not result.had_errors and result.remote_pending and ctx.on_remote_pending then
+        local ok, recorded = pcall(ctx.on_remote_pending, "bookmarks", result.remote_pending)
+        if not ok or recorded == false then
+            ctx.had_errors = true
+            return finish(ctx, "outbox")
+        end
+    end
+    return step(ctx, stepState)
 end
 
 stepState = function(ctx)

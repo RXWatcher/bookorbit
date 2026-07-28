@@ -155,6 +155,7 @@ function SweepHarness.install(opts)
             sidecar_extracts = {},
             history_resolved = {},
         },
+        bookmark_exchanges = {},
         flushes = 0,
     }
 
@@ -254,9 +255,20 @@ function SweepHarness.install(opts)
         readWatermark = function() return "" end,
         advanceWatermark = function() end,
     }
+    package.loaded["bookorbit_bookmarks"] = {
+        enabled = function() return opts.bookmark_sync == true end,
+        markUnsupported = function() end,
+        canSkipExchange = function() return false end,
+        rememberExchanged = function() end,
+        exchangeBook = function()
+            table.insert(handle.bookmark_exchanges, true)
+            return { uploaded = 0, applied = 0, deleted = 0, failed = 0, had_errors = false }
+        end,
+    }
     package.loaded["bookorbit_highlight_summary"] = {
         normalize = function(value) return value end,
         add = function(value) return value end,
+        addBookmarks = function(value) return value end,
         hasCounts = function() return false end,
         hasRemoteChanges = function() return false end,
     }

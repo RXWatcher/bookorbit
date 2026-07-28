@@ -51,7 +51,7 @@ describe('KOReader plugin update source wiring', () => {
     expect(topLevelActionBlock).toContain('self:onBookOrbitToggleAutoSync(nil, true)');
     expect(dashboardSettingsBlock).toContain('return T(_("Open dashboard on startup (%1)"), self:catalogAutoOpenLabel())');
     expect(syncSettingsBlock).not.toContain('text = _("Auto sync current book")');
-    expect(syncSettingsBlock).toContain('text = _("Two-way highlight sync")');
+    expect(syncSettingsBlock).toContain('text = _("Two-way highlights & bookmarks")');
     expect(syncSettingsBlock).toContain('text = _("Skip auto-sync when offline")');
     expect(syncSettingsBlock).not.toContain('return T(_("Open dashboard on startup (%1)"), self:catalogAutoOpenLabel())');
     expect(syncSettingsBlock).toContain('return T(_("Periodically sync every # pages (%1)")');
