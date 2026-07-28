@@ -1,7 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import type { MockedFunction } from 'vitest';
 import { readdir, readFile, stat } from 'fs/promises';
-import { AUDIO_BOOK_FILE_WRITE_FIELDS, EPUB_BOOK_FILE_WRITE_FIELDS, MOBI_BOOK_FILE_WRITE_FIELDS, NotificationType } from '@bookorbit/types';
+import {
+  AUDIO_BOOK_FILE_WRITE_FIELDS,
+  EPUB_BOOK_FILE_WRITE_FIELDS,
+  FB2_BOOK_FILE_WRITE_FIELDS,
+  MOBI_BOOK_FILE_WRITE_FIELDS,
+  NotificationType,
+} from '@bookorbit/types';
 import { SelfWriteRegistry } from '../../common/services/self-write-registry.service';
 
 const { computeFileHashMock } = vi.hoisted(() => ({
@@ -35,6 +41,8 @@ const DEFAULT_LIB_CONFIG = {
   fileWriteWriteCover: true,
   fileWriteEpubEnabled: true,
   fileWriteEpubMaxFileSizeMb: 100,
+  fileWriteFb2Enabled: true,
+  fileWriteFb2MaxFileSizeMb: 100,
   fileWritePdfEnabled: true,
   fileWritePdfMaxFileSizeMb: 100,
   fileWriteCbxEnabled: true,
@@ -175,6 +183,64 @@ describe('FileWriteService', () => {
         writableFormats: [],
         writableFields: [],
       });
+    });
+
+    it('returns the FB2 field set for fb2 files', () => {
+      const { service, registry } = makeService();
+      registry.supports.mockImplementation((value: string) => value === 'fb2');
+
+      expect(service.resolveBookFileWriteStatus(DEFAULT_LIB_CONFIG, [{ id: 1, format: 'fb2', sizeBytes: 1024 }], 1)).toEqual({
+        enabled: true,
+        reason: null,
+        writableFormats: ['fb2'],
+        writableFields: [...FB2_BOOK_FILE_WRITE_FIELDS],
+      });
+    });
+
+    it('honours the FB2 enable toggle', () => {
+      const { service, registry } = makeService();
+      registry.supports.mockImplementation((value: string) => value === 'fb2');
+
+      expect(
+        service.resolveBookFileWriteStatus({ ...DEFAULT_LIB_CONFIG, fileWriteFb2Enabled: false }, [{ id: 1, format: 'fb2', sizeBytes: 1024 }], 1),
+      ).toEqual({
+        enabled: false,
+        reason: 'format_disabled',
+        writableFormats: [],
+        writableFields: [],
+      });
+    });
+
+    it('honours the FB2 size limit', () => {
+      const { service, registry } = makeService();
+      registry.supports.mockImplementation((value: string) => value === 'fb2');
+
+      expect(
+        service.resolveBookFileWriteStatus(
+          { ...DEFAULT_LIB_CONFIG, fileWriteFb2MaxFileSizeMb: 1 },
+          [{ id: 1, format: 'fb2', sizeBytes: 2 * 1024 * 1024 }],
+          1,
+        ),
+      ).toEqual({
+        enabled: false,
+        reason: 'file_exceeds_size_limit',
+        writableFormats: [],
+        writableFields: [],
+      });
+    });
+
+    it('drops the cover field for FB2 when the library disables cover writing', () => {
+      const { service, registry } = makeService();
+      registry.supports.mockImplementation((value: string) => value === 'fb2');
+
+      const status = service.resolveBookFileWriteStatus(
+        { ...DEFAULT_LIB_CONFIG, fileWriteWriteCover: false },
+        [{ id: 1, format: 'fb2', sizeBytes: 1024 }],
+        1,
+      );
+
+      expect(status.writableFields).not.toContain('coverBytes');
+      expect(status.writableFields).toContain('seriesName');
     });
 
     it.each(['mobi', 'azw3', 'azw'])('returns the MOBI field set for %s files', (format) => {

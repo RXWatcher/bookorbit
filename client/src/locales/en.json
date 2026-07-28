@@ -5052,6 +5052,11 @@
           "hint": "Writes metadata into the OPF file inside the EPUB archive.",
           "toggleAria": "Write EPUB metadata"
         },
+        "fb2": {
+          "title": "FictionBook (FB2)",
+          "hint": "Rewrites the description block inside FB2 files, leaving the book text untouched.",
+          "toggleAria": "Write FB2 metadata"
+        },
         "pdf": {
           "title": "PDF",
           "hint": "Embeds metadata into PDF Info dictionary and XMP stream.",

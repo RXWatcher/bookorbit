@@ -137,6 +137,16 @@ export class CreateLibraryDto {
 
   @IsOptional()
   @IsBoolean()
+  fileWriteFb2Enabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(LIBRARY_FILE_WRITE_MAX_SIZE_MB_MIN)
+  @Max(LIBRARY_FILE_WRITE_MAX_SIZE_MB_MAX)
+  fileWriteFb2MaxFileSizeMb?: number;
+
+  @IsOptional()
+  @IsBoolean()
   fileWritePdfEnabled?: boolean;
 
   @IsOptional()

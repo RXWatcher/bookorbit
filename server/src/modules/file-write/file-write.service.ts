@@ -17,6 +17,7 @@ import {
   FORMAT_CB7,
   FORMAT_CBZ,
   FORMAT_EPUB,
+  FORMAT_FB2,
   FORMAT_MOBI,
   FORMAT_PDF,
   createBookWriteFieldMask,
@@ -579,6 +580,8 @@ type LibraryFileWriteConfig = {
   fileWriteWriteCover: boolean;
   fileWriteEpubEnabled: boolean;
   fileWriteEpubMaxFileSizeMb: number;
+  fileWriteFb2Enabled: boolean;
+  fileWriteFb2MaxFileSizeMb: number;
   fileWritePdfEnabled: boolean;
   fileWritePdfMaxFileSizeMb: number;
   fileWriteCbxEnabled: boolean;
@@ -593,6 +596,8 @@ function resolveFormatSettings(config: LibraryFileWriteConfig, format: string): 
   switch (format) {
     case FORMAT_EPUB:
       return { enabled: config.fileWriteEpubEnabled, maxFileSizeBytes: config.fileWriteEpubMaxFileSizeMb * 1024 * 1024 };
+    case FORMAT_FB2:
+      return { enabled: config.fileWriteFb2Enabled, maxFileSizeBytes: config.fileWriteFb2MaxFileSizeMb * 1024 * 1024 };
     case FORMAT_PDF:
       return { enabled: config.fileWritePdfEnabled, maxFileSizeBytes: config.fileWritePdfMaxFileSizeMb * 1024 * 1024 };
     case FORMAT_CBZ:
@@ -658,6 +663,8 @@ function isCompleteLibraryFileWriteConfig(config: FileWriteCapabilityLibraryConf
     typeof config.fileWriteWriteCover === 'boolean' &&
     typeof config.fileWriteEpubEnabled === 'boolean' &&
     typeof config.fileWriteEpubMaxFileSizeMb === 'number' &&
+    typeof config.fileWriteFb2Enabled === 'boolean' &&
+    typeof config.fileWriteFb2MaxFileSizeMb === 'number' &&
     typeof config.fileWritePdfEnabled === 'boolean' &&
     typeof config.fileWritePdfMaxFileSizeMb === 'number' &&
     typeof config.fileWriteCbxEnabled === 'boolean' &&

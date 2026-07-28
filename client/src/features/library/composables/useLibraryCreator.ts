@@ -38,6 +38,8 @@ function blankForm() {
     fileWriteWriteCover: true,
     fileWriteEpubEnabled: true,
     fileWriteEpubMaxFileSizeMb: 100,
+    fileWriteFb2Enabled: false,
+    fileWriteFb2MaxFileSizeMb: 100,
     fileWritePdfEnabled: true,
     fileWritePdfMaxFileSizeMb: 100,
     fileWriteCbxEnabled: false,
@@ -117,6 +119,8 @@ export function useLibraryCreator() {
     form.fileWriteWriteCover = library.fileWriteWriteCover
     form.fileWriteEpubEnabled = library.fileWriteEpubEnabled
     form.fileWriteEpubMaxFileSizeMb = library.fileWriteEpubMaxFileSizeMb
+    form.fileWriteFb2Enabled = library.fileWriteFb2Enabled
+    form.fileWriteFb2MaxFileSizeMb = library.fileWriteFb2MaxFileSizeMb
     form.fileWritePdfEnabled = library.fileWritePdfEnabled
     form.fileWritePdfMaxFileSizeMb = library.fileWritePdfMaxFileSizeMb
     form.fileWriteCbxEnabled = library.fileWriteCbxEnabled

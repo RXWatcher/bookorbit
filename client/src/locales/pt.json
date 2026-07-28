@@ -5094,6 +5094,11 @@
           "hint": "Grava os metadados no arquivo OPF dentro do arquivo EPUB.",
           "toggleAria": "Gravar metadados no EPUB"
         },
+        "fb2": {
+          "title": "FictionBook (FB2)",
+          "hint": "Rewrites the description block inside FB2 files, leaving the book text untouched.",
+          "toggleAria": "Write FB2 metadata"
+        },
         "pdf": {
           "title": "PDF",
           "hint": "Embutir metadados no dicionário Info do PDF e no fluxo XMP.",

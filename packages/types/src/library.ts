@@ -70,6 +70,8 @@ export interface Library {
   fileWriteWriteCover: boolean;
   fileWriteEpubEnabled: boolean;
   fileWriteEpubMaxFileSizeMb: number;
+  fileWriteFb2Enabled: boolean;
+  fileWriteFb2MaxFileSizeMb: number;
   fileWritePdfEnabled: boolean;
   fileWritePdfMaxFileSizeMb: number;
   fileWriteCbxEnabled: boolean;

@@ -68,6 +68,8 @@ export class FileWriteRepository {
         fileWriteWriteCover: libraries.fileWriteWriteCover,
         fileWriteEpubEnabled: libraries.fileWriteEpubEnabled,
         fileWriteEpubMaxFileSizeMb: libraries.fileWriteEpubMaxFileSizeMb,
+        fileWriteFb2Enabled: libraries.fileWriteFb2Enabled,
+        fileWriteFb2MaxFileSizeMb: libraries.fileWriteFb2MaxFileSizeMb,
         fileWritePdfEnabled: libraries.fileWritePdfEnabled,
         fileWritePdfMaxFileSizeMb: libraries.fileWritePdfMaxFileSizeMb,
         fileWriteCbxEnabled: libraries.fileWriteCbxEnabled,

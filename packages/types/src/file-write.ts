@@ -109,6 +109,15 @@ export const EPUB_BOOK_FILE_WRITE_FIELDS = [
   "coverBytes",
 ] as const satisfies readonly BookFileWriteField[];
 
+// FB2 keeps managed metadata in <description>: standard slots cover the core
+// fields, and <custom-info info-type="bookorbit:*"> carries the rest.
+export const FB2_BOOK_FILE_WRITE_FIELDS = [
+  ...CORE_BOOK_FILE_WRITE_FIELDS,
+  ...COMMON_PROVIDER_BOOK_FILE_WRITE_FIELDS,
+  "itunesId",
+  "coverBytes",
+] as const satisfies readonly BookFileWriteField[];
+
 export const PDF_BOOK_FILE_WRITE_FIELDS = [
   ...CORE_BOOK_FILE_WRITE_FIELDS,
   ...COMMON_PROVIDER_BOOK_FILE_WRITE_FIELDS,
@@ -158,6 +167,7 @@ export const AUDIO_BOOK_FILE_WRITE_FIELDS = [
 
 export const BOOK_FILE_WRITE_FORMAT_FIELDS = {
   epub: EPUB_BOOK_FILE_WRITE_FIELDS,
+  fb2: FB2_BOOK_FILE_WRITE_FIELDS,
   pdf: PDF_BOOK_FILE_WRITE_FIELDS,
   cbz: CBX_BOOK_FILE_WRITE_FIELDS,
   cb7: CBX_BOOK_FILE_WRITE_FIELDS,

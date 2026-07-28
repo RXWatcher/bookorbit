@@ -2,6 +2,7 @@ import { BOOK_FILE_WRITE_FIELDS } from '@bookorbit/types';
 import type { BookWritePayloadKey } from './interfaces/book-write-payload.interface';
 
 export const FORMAT_EPUB = 'epub';
+export const FORMAT_FB2 = 'fb2';
 export const FORMAT_PDF = 'pdf';
 export const FORMAT_CBZ = 'cbz';
 export const FORMAT_CB7 = 'cb7';

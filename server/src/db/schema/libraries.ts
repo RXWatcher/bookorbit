@@ -51,6 +51,8 @@ export const libraries = pgTable(
     fileWriteWriteCover: boolean('file_write_write_cover').notNull().default(true),
     fileWriteEpubEnabled: boolean('file_write_epub_enabled').notNull().default(true),
     fileWriteEpubMaxFileSizeMb: integer('file_write_epub_max_file_size_mb').notNull().default(100),
+    fileWriteFb2Enabled: boolean('file_write_fb2_enabled').notNull().default(false),
+    fileWriteFb2MaxFileSizeMb: integer('file_write_fb2_max_file_size_mb').notNull().default(100),
     fileWritePdfEnabled: boolean('file_write_pdf_enabled').notNull().default(true),
     fileWritePdfMaxFileSizeMb: integer('file_write_pdf_max_file_size_mb').notNull().default(100),
     fileWriteCbxEnabled: boolean('file_write_cbx_enabled').notNull().default(false),

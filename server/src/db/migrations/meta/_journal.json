@@ -407,6 +407,13 @@
       "when": 1785215769241,
       "tag": "0057_add_kindle_file_write_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1785219732532,
+      "tag": "0058_add_fb2_file_write_settings",
+      "breakpoints": true
     }
   ]
 }

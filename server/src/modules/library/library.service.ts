@@ -129,6 +129,8 @@ export class LibraryService {
       fileWriteWriteCover: dto.fileWriteWriteCover ?? true,
       fileWriteEpubEnabled: dto.fileWriteEpubEnabled ?? true,
       fileWriteEpubMaxFileSizeMb: dto.fileWriteEpubMaxFileSizeMb ?? 100,
+      fileWriteFb2Enabled: dto.fileWriteFb2Enabled ?? false,
+      fileWriteFb2MaxFileSizeMb: dto.fileWriteFb2MaxFileSizeMb ?? 100,
       fileWritePdfEnabled: dto.fileWritePdfEnabled ?? true,
       fileWritePdfMaxFileSizeMb: dto.fileWritePdfMaxFileSizeMb ?? 100,
       fileWriteCbxEnabled: dto.fileWriteCbxEnabled ?? false,

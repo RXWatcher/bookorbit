@@ -5094,6 +5094,11 @@
           "hint": "Zapiše metapodatke v datoteko OPF znotraj arhiva EPUB.",
           "toggleAria": "Zapiši metapodatke EPUB"
         },
+        "fb2": {
+          "title": "FictionBook (FB2)",
+          "hint": "Rewrites the description block inside FB2 files, leaving the book text untouched.",
+          "toggleAria": "Write FB2 metadata"
+        },
         "pdf": {
           "title": "PDF",
           "hint": "Vdela metapodatke v slovar Info datoteke PDF in tok XMP.",

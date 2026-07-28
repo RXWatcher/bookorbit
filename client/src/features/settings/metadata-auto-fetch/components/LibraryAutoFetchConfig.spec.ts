@@ -101,6 +101,8 @@ function makeLibrary(): Library {
     fileWriteWriteCover: false,
     fileWriteEpubEnabled: false,
     fileWriteEpubMaxFileSizeMb: 100,
+    fileWriteFb2Enabled: false,
+    fileWriteFb2MaxFileSizeMb: 100,
     fileWritePdfEnabled: false,
     fileWritePdfMaxFileSizeMb: 100,
     fileWriteCbxEnabled: false,
