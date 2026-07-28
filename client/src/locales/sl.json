@@ -5104,6 +5104,11 @@
           "hint": "Zapiše ComicInfo.xml v arhive CBZ in CB7.",
           "toggleAria": "Zapiši metapodatke arhiva stripov"
         },
+        "kindle": {
+          "title": "Kindle (MOBI, AZW3)",
+          "hint": "Writes metadata into the EXTH header of MOBI, AZW3, and AZW files.",
+          "toggleAria": "Write Kindle metadata"
+        },
         "audio": {
           "title": "Zvok",
           "hint": "Vdela shranjeno naslovnico v datoteke M4B, M4A, MP3 in FLAC.",

@@ -74,6 +74,8 @@ export interface Library {
   fileWritePdfMaxFileSizeMb: number;
   fileWriteCbxEnabled: boolean;
   fileWriteCbxMaxFileSizeMb: number;
+  fileWriteKindleEnabled: boolean;
+  fileWriteKindleMaxFileSizeMb: number;
   fileWriteAudioEnabled: boolean;
   fileWriteAudioMaxFileSizeMb: number;
   fileRenameEnabled: boolean;

@@ -5104,6 +5104,11 @@
           "hint": "Schrijft ComicInfo.xml naar CBZ- en CB7-archieven.",
           "toggleAria": "Metadata naar striparchieven schrijven"
         },
+        "kindle": {
+          "title": "Kindle (MOBI, AZW3)",
+          "hint": "Writes metadata into the EXTH header of MOBI, AZW3, and AZW files.",
+          "toggleAria": "Write Kindle metadata"
+        },
         "audio": {
           "title": "Audio",
           "hint": "Sluit de opgeslagen omslag in M4B-, M4A-, MP3- en FLAC-bestanden in.",

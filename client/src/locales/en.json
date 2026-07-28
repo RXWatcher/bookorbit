@@ -5062,6 +5062,11 @@
           "hint": "Writes ComicInfo.xml into CBZ and CB7 archives.",
           "toggleAria": "Write comic archive metadata"
         },
+        "kindle": {
+          "title": "Kindle (MOBI, AZW3)",
+          "hint": "Writes metadata into the EXTH header of MOBI, AZW3, and AZW files.",
+          "toggleAria": "Write Kindle metadata"
+        },
         "audio": {
           "title": "Audio",
           "hint": "Embeds the stored cover into M4B, M4A, MP3, and FLAC files.",

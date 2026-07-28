@@ -16,6 +16,8 @@ describe('LibraryCreatorFileWrite', () => {
         fileWritePdfMaxFileSizeMb: 100,
         fileWriteCbxEnabled: false,
         fileWriteCbxMaxFileSizeMb: 500,
+        fileWriteKindleEnabled: false,
+        fileWriteKindleMaxFileSizeMb: 100,
         fileWriteAudioEnabled: false,
         fileWriteAudioMaxFileSizeMb: 500,
         ...props,
@@ -46,35 +48,63 @@ describe('LibraryCreatorFileWrite', () => {
       fileWritePdfMaxFileSizeMb: 20,
       fileWriteCbxEnabled: true,
       fileWriteCbxMaxFileSizeMb: 30,
+      fileWriteKindleEnabled: true,
+      fileWriteKindleMaxFileSizeMb: 50,
       fileWriteAudioEnabled: true,
       fileWriteAudioMaxFileSizeMb: 40,
     })
 
     const switches = wrapper.findAll('[role="switch"]')
-    expect(switches).toHaveLength(7)
+    expect(switches).toHaveLength(8)
     await switches[1]!.trigger('click')
     await switches[2]!.trigger('click')
     await switches[3]!.trigger('click')
     await switches[4]!.trigger('click')
     await switches[5]!.trigger('click')
     await switches[6]!.trigger('click')
+    await switches[7]!.trigger('click')
 
     const inputs = wrapper.findAll('input[type="number"]')
-    expect(inputs).toHaveLength(4)
+    expect(inputs).toHaveLength(5)
     await inputs[0]!.setValue('15')
     await inputs[1]!.setValue('25')
     await inputs[2]!.setValue('35')
-    await inputs[3]!.setValue('45')
+    await inputs[3]!.setValue('55')
+    await inputs[4]!.setValue('45')
     expect(wrapper.emitted('update:fileWriteEnabled')).toEqual([[false]])
     expect(wrapper.emitted('update:fileWriteWriteCover')).toEqual([[false]])
     expect(wrapper.emitted('update:fileWriteEpubEnabled')).toEqual([[false]])
     expect(wrapper.emitted('update:fileWritePdfEnabled')).toEqual([[false]])
     expect(wrapper.emitted('update:fileWriteCbxEnabled')).toEqual([[false]])
+    expect(wrapper.emitted('update:fileWriteKindleEnabled')).toEqual([[false]])
     expect(wrapper.emitted('update:fileWriteAudioEnabled')).toEqual([[false], [false]])
     expect(wrapper.emitted('update:fileWriteEpubMaxFileSizeMb')).toEqual([[15]])
     expect(wrapper.emitted('update:fileWritePdfMaxFileSizeMb')).toEqual([[25]])
     expect(wrapper.emitted('update:fileWriteCbxMaxFileSizeMb')).toEqual([[35]])
+    expect(wrapper.emitted('update:fileWriteKindleMaxFileSizeMb')).toEqual([[55]])
     expect(wrapper.emitted('update:fileWriteAudioMaxFileSizeMb')).toEqual([[45]])
+  })
+
+  it('hides the Kindle size input until the Kindle toggle is on', () => {
+    const off = mountComponent({ fileWriteEnabled: true, fileWriteKindleEnabled: false })
+    expect(off.text()).toContain('Kindle (MOBI, AZW3)')
+    expect(off.find('#kindle-max-size').exists()).toBe(false)
+
+    const on = mountComponent({ fileWriteEnabled: true, fileWriteKindleEnabled: true })
+    expect(on.find('#kindle-max-size').exists()).toBe(true)
+  })
+
+  it('shows Kindle controls independently of the cover-writing toggle', () => {
+    const wrapper = mountComponent({ fileWriteEnabled: true, fileWriteWriteCover: false, fileWriteKindleEnabled: true })
+
+    expect(wrapper.text()).toContain('Kindle (MOBI, AZW3)')
+    expect(wrapper.text()).not.toContain('Audio')
+  })
+
+  it('gives the Kindle toggle an accessible label', () => {
+    const wrapper = mountComponent({ fileWriteEnabled: true })
+
+    expect(wrapper.findAll('[role="switch"]').some((node) => node.attributes('aria-label') === 'Write Kindle metadata')).toBe(true)
   })
 
   it('renders audio controls only when file write details and cover writing are enabled', () => {

@@ -15,6 +15,7 @@ import { AudioMetadataEmbedder } from './formats/audio/audio-metadata-embedder';
 import { Cb7FormatWriter } from './formats/cbx/cb7-format-writer';
 import { CbzFormatWriter } from './formats/cbx/cbz-format-writer';
 import { EpubFormatWriter } from './formats/epub/epub-format-writer';
+import { Azw3FormatWriter, AzwFormatWriter, MobiEbookFormatWriter } from './formats/mobi/mobi-format-writer';
 import { PdfFormatWriter } from './formats/pdf/pdf-format-writer';
 import { FORMAT_WRITERS } from './interfaces/format-writer.interface';
 
@@ -32,6 +33,9 @@ import { FORMAT_WRITERS } from './interfaces/format-writer.interface';
     PdfFormatWriter,
     CbzFormatWriter,
     Cb7FormatWriter,
+    MobiEbookFormatWriter,
+    Azw3FormatWriter,
+    AzwFormatWriter,
     M4bAudioFormatWriter,
     M4aAudioFormatWriter,
     Mp3AudioFormatWriter,
@@ -43,16 +47,22 @@ import { FORMAT_WRITERS } from './interfaces/format-writer.interface';
         pdf: PdfFormatWriter,
         cbz: CbzFormatWriter,
         cb7: Cb7FormatWriter,
+        mobi: MobiEbookFormatWriter,
+        azw3: Azw3FormatWriter,
+        azw: AzwFormatWriter,
         m4b: M4bAudioFormatWriter,
         m4a: M4aAudioFormatWriter,
         mp3: Mp3AudioFormatWriter,
         flac: FlacAudioFormatWriter,
-      ) => [epub, pdf, cbz, cb7, m4b, m4a, mp3, flac],
+      ) => [epub, pdf, cbz, cb7, mobi, azw3, azw, m4b, m4a, mp3, flac],
       inject: [
         EpubFormatWriter,
         PdfFormatWriter,
         CbzFormatWriter,
         Cb7FormatWriter,
+        MobiEbookFormatWriter,
+        Azw3FormatWriter,
+        AzwFormatWriter,
         M4bAudioFormatWriter,
         M4aAudioFormatWriter,
         Mp3AudioFormatWriter,

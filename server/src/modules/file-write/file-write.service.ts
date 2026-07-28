@@ -10,7 +10,17 @@ import { SelfWriteRegistry } from '../../common/services/self-write-registry.ser
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { NotificationService } from '../notification/notification.service';
 import { computeFileHash } from '../scanner/lib/hash';
-import { AUDIO_WRITE_FORMATS, FORMAT_CB7, FORMAT_CBZ, FORMAT_EPUB, FORMAT_PDF, createBookWriteFieldMask } from './file-write.constants';
+import {
+  AUDIO_WRITE_FORMATS,
+  FORMAT_AZW,
+  FORMAT_AZW3,
+  FORMAT_CB7,
+  FORMAT_CBZ,
+  FORMAT_EPUB,
+  FORMAT_MOBI,
+  FORMAT_PDF,
+  createBookWriteFieldMask,
+} from './file-write.constants';
 import { FileLockService, bookOperationLockKey } from './file-lock.service';
 import { FileWriteRepository } from './file-write.repository';
 import { FormatWriterRegistry } from './format-writer.registry';
@@ -573,6 +583,8 @@ type LibraryFileWriteConfig = {
   fileWritePdfMaxFileSizeMb: number;
   fileWriteCbxEnabled: boolean;
   fileWriteCbxMaxFileSizeMb: number;
+  fileWriteKindleEnabled: boolean;
+  fileWriteKindleMaxFileSizeMb: number;
   fileWriteAudioEnabled: boolean;
   fileWriteAudioMaxFileSizeMb: number;
 };
@@ -586,6 +598,10 @@ function resolveFormatSettings(config: LibraryFileWriteConfig, format: string): 
     case FORMAT_CBZ:
     case FORMAT_CB7:
       return { enabled: config.fileWriteCbxEnabled, maxFileSizeBytes: config.fileWriteCbxMaxFileSizeMb * 1024 * 1024 };
+    case FORMAT_MOBI:
+    case FORMAT_AZW3:
+    case FORMAT_AZW:
+      return { enabled: config.fileWriteKindleEnabled, maxFileSizeBytes: config.fileWriteKindleMaxFileSizeMb * 1024 * 1024 };
     default:
       if (AUDIO_WRITE_FORMATS.includes(format as (typeof AUDIO_WRITE_FORMATS)[number])) {
         return { enabled: config.fileWriteAudioEnabled, maxFileSizeBytes: config.fileWriteAudioMaxFileSizeMb * 1024 * 1024 };
@@ -646,6 +662,8 @@ function isCompleteLibraryFileWriteConfig(config: FileWriteCapabilityLibraryConf
     typeof config.fileWritePdfMaxFileSizeMb === 'number' &&
     typeof config.fileWriteCbxEnabled === 'boolean' &&
     typeof config.fileWriteCbxMaxFileSizeMb === 'number' &&
+    typeof config.fileWriteKindleEnabled === 'boolean' &&
+    typeof config.fileWriteKindleMaxFileSizeMb === 'number' &&
     typeof config.fileWriteAudioEnabled === 'boolean' &&
     typeof config.fileWriteAudioMaxFileSizeMb === 'number'
   );

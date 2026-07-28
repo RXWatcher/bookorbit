@@ -121,6 +121,23 @@ export const CBX_BOOK_FILE_WRITE_FIELDS = [
   ...COMIC_BOOK_FILE_WRITE_FIELDS,
 ] as const satisfies readonly BookFileWriteField[];
 
+// MOBI EXTH records are keyed by number and have no extensible string-keyed
+// namespace, so fields without a standard EXTH slot (series, rating, page count,
+// subtitle, provider IDs, comic fields, narrators) cannot be represented at all.
+export const MOBI_BOOK_FILE_WRITE_FIELDS = [
+  "title",
+  "description",
+  "publisher",
+  "publishedDate",
+  "language",
+  "isbn10",
+  "isbn13",
+  "authors",
+  "genres",
+  "tags",
+  "coverBytes",
+] as const satisfies readonly BookFileWriteField[];
+
 export const AUDIO_BOOK_FILE_WRITE_FIELDS = [
   "title",
   "subtitle",
@@ -144,6 +161,9 @@ export const BOOK_FILE_WRITE_FORMAT_FIELDS = {
   pdf: PDF_BOOK_FILE_WRITE_FIELDS,
   cbz: CBX_BOOK_FILE_WRITE_FIELDS,
   cb7: CBX_BOOK_FILE_WRITE_FIELDS,
+  mobi: MOBI_BOOK_FILE_WRITE_FIELDS,
+  azw3: MOBI_BOOK_FILE_WRITE_FIELDS,
+  azw: MOBI_BOOK_FILE_WRITE_FIELDS,
   m4b: AUDIO_BOOK_FILE_WRITE_FIELDS,
   m4a: AUDIO_BOOK_FILE_WRITE_FIELDS,
   mp3: AUDIO_BOOK_FILE_WRITE_FIELDS,

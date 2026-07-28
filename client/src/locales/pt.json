@@ -5104,6 +5104,11 @@
           "hint": "Grava ComicInfo.xml dentro de arquivos CBZ e CB7.",
           "toggleAria": "Gravar metadados em arquivos de quadrinhos"
         },
+        "kindle": {
+          "title": "Kindle (MOBI, AZW3)",
+          "hint": "Writes metadata into the EXTH header of MOBI, AZW3, and AZW files.",
+          "toggleAria": "Write Kindle metadata"
+        },
         "audio": {
           "title": "Áudio",
           "hint": "Embutir a capa armazenada nos arquivos M4B, M4A, MP3 e FLAC.",

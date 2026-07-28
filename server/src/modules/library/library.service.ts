@@ -133,6 +133,8 @@ export class LibraryService {
       fileWritePdfMaxFileSizeMb: dto.fileWritePdfMaxFileSizeMb ?? 100,
       fileWriteCbxEnabled: dto.fileWriteCbxEnabled ?? false,
       fileWriteCbxMaxFileSizeMb: dto.fileWriteCbxMaxFileSizeMb ?? 500,
+      fileWriteKindleEnabled: dto.fileWriteKindleEnabled ?? false,
+      fileWriteKindleMaxFileSizeMb: dto.fileWriteKindleMaxFileSizeMb ?? 100,
       fileWriteAudioEnabled: dto.fileWriteAudioEnabled ?? true,
       fileWriteAudioMaxFileSizeMb: dto.fileWriteAudioMaxFileSizeMb ?? 500,
       fileRenameEnabled: dto.fileRenameEnabled ?? false,

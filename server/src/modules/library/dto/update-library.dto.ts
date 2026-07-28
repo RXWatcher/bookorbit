@@ -158,6 +158,16 @@ export class UpdateLibraryDto {
 
   @IsOptional()
   @IsBoolean()
+  fileWriteKindleEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(LIBRARY_FILE_WRITE_MAX_SIZE_MB_MIN)
+  @Max(LIBRARY_FILE_WRITE_MAX_SIZE_MB_MAX)
+  fileWriteKindleMaxFileSizeMb?: number;
+
+  @IsOptional()
+  @IsBoolean()
   fileWriteAudioEnabled?: boolean;
 
   @IsOptional()

@@ -105,6 +105,8 @@ function makeLibrary(): Library {
     fileWritePdfMaxFileSizeMb: 100,
     fileWriteCbxEnabled: false,
     fileWriteCbxMaxFileSizeMb: 500,
+    fileWriteKindleEnabled: false,
+    fileWriteKindleMaxFileSizeMb: 100,
     fileWriteAudioEnabled: false,
     fileWriteAudioMaxFileSizeMb: 500,
     fileRenameEnabled: false,

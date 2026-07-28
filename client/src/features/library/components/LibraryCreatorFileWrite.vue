@@ -14,6 +14,8 @@ const props = defineProps<{
   fileWritePdfMaxFileSizeMb: number
   fileWriteCbxEnabled: boolean
   fileWriteCbxMaxFileSizeMb: number
+  fileWriteKindleEnabled: boolean
+  fileWriteKindleMaxFileSizeMb: number
   fileWriteAudioEnabled: boolean
   fileWriteAudioMaxFileSizeMb: number
 }>()
@@ -28,6 +30,8 @@ const emit = defineEmits<{
   'update:fileWritePdfMaxFileSizeMb': [value: number]
   'update:fileWriteCbxEnabled': [value: boolean]
   'update:fileWriteCbxMaxFileSizeMb': [value: number]
+  'update:fileWriteKindleEnabled': [value: boolean]
+  'update:fileWriteKindleMaxFileSizeMb': [value: number]
   'update:fileWriteAudioEnabled': [value: boolean]
   'update:fileWriteAudioMaxFileSizeMb': [value: number]
 }>()
@@ -60,15 +64,20 @@ function handleCbxToggle() {
   emit('update:fileWriteCbxEnabled', !props.fileWriteCbxEnabled)
 }
 
+function handleKindleToggle() {
+  emit('update:fileWriteKindleEnabled', !props.fileWriteKindleEnabled)
+}
+
 function handleAudioToggle() {
   emit('update:fileWriteAudioEnabled', !props.fileWriteAudioEnabled)
 }
 
-function onMaxSizeInput(field: 'epub' | 'pdf' | 'cbx' | 'audio', e: Event) {
+function onMaxSizeInput(field: 'epub' | 'pdf' | 'cbx' | 'kindle' | 'audio', e: Event) {
   const val = Number((e.target as HTMLInputElement).value)
   if (field === 'epub') emit('update:fileWriteEpubMaxFileSizeMb', val)
   else if (field === 'pdf') emit('update:fileWritePdfMaxFileSizeMb', val)
   else if (field === 'cbx') emit('update:fileWriteCbxMaxFileSizeMb', val)
+  else if (field === 'kindle') emit('update:fileWriteKindleMaxFileSizeMb', val)
   else emit('update:fileWriteAudioMaxFileSizeMb', val)
 }
 
@@ -82,6 +91,10 @@ function onPdfMaxSizeInput(e: Event) {
 
 function onCbxMaxSizeInput(e: Event) {
   onMaxSizeInput('cbx', e)
+}
+
+function onKindleMaxSizeInput(e: Event) {
+  onMaxSizeInput('kindle', e)
 }
 
 function onAudioMaxSizeInput(e: Event) {
@@ -214,6 +227,33 @@ function onAudioMaxSizeInput(e: Event) {
               step="1"
               class="w-24 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               @input="onCbxMaxSizeInput"
+            />
+          </label>
+        </div>
+
+        <div class="space-y-3 rounded-lg border border-border bg-card p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium text-foreground">{{ t('library.creator.fileWrite.kindle.title') }}</p>
+              <p class="mt-1 text-xs text-muted-foreground">{{ t('library.creator.fileWrite.kindle.hint') }}</p>
+            </div>
+            <ToggleSwitch
+              :model-value="fileWriteKindleEnabled"
+              :aria-label="t('library.creator.fileWrite.kindle.toggleAria')"
+              @update:model-value="handleKindleToggle"
+            />
+          </div>
+          <label v-if="fileWriteKindleEnabled" for="kindle-max-size" class="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            {{ t('library.creator.fileWrite.maxFileSizeMb') }}
+            <input
+              id="kindle-max-size"
+              type="number"
+              :value="fileWriteKindleMaxFileSizeMb"
+              min="1"
+              max="10000"
+              step="1"
+              class="w-24 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              @input="onKindleMaxSizeInput"
             />
           </label>
         </div>

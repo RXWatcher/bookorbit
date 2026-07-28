@@ -72,6 +72,8 @@ export class FileWriteRepository {
         fileWritePdfMaxFileSizeMb: libraries.fileWritePdfMaxFileSizeMb,
         fileWriteCbxEnabled: libraries.fileWriteCbxEnabled,
         fileWriteCbxMaxFileSizeMb: libraries.fileWriteCbxMaxFileSizeMb,
+        fileWriteKindleEnabled: libraries.fileWriteKindleEnabled,
+        fileWriteKindleMaxFileSizeMb: libraries.fileWriteKindleMaxFileSizeMb,
         fileWriteAudioEnabled: libraries.fileWriteAudioEnabled,
         fileWriteAudioMaxFileSizeMb: libraries.fileWriteAudioMaxFileSizeMb,
       })

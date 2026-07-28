@@ -55,6 +55,8 @@ export const libraries = pgTable(
     fileWritePdfMaxFileSizeMb: integer('file_write_pdf_max_file_size_mb').notNull().default(100),
     fileWriteCbxEnabled: boolean('file_write_cbx_enabled').notNull().default(false),
     fileWriteCbxMaxFileSizeMb: integer('file_write_cbx_max_file_size_mb').notNull().default(500),
+    fileWriteKindleEnabled: boolean('file_write_kindle_enabled').notNull().default(false),
+    fileWriteKindleMaxFileSizeMb: integer('file_write_kindle_max_file_size_mb').notNull().default(100),
     fileWriteAudioEnabled: boolean('file_write_audio_enabled').notNull().default(false),
     fileWriteAudioMaxFileSizeMb: integer('file_write_audio_max_file_size_mb').notNull().default(500),
     fileRenameEnabled: boolean('file_rename_enabled').notNull().default(false),
@@ -93,6 +95,7 @@ export const libraries = pgTable(
     check('libraries_file_write_epub_max_size_chk', sql`${t.fileWriteEpubMaxFileSizeMb} >= 1`),
     check('libraries_file_write_pdf_max_size_chk', sql`${t.fileWritePdfMaxFileSizeMb} >= 1`),
     check('libraries_file_write_cbx_max_size_chk', sql`${t.fileWriteCbxMaxFileSizeMb} >= 1`),
+    check('libraries_file_write_kindle_max_size_chk', sql`${t.fileWriteKindleMaxFileSizeMb} >= 1`),
     check('libraries_file_write_audio_max_size_chk', sql`${t.fileWriteAudioMaxFileSizeMb} >= 1`),
   ],
 );

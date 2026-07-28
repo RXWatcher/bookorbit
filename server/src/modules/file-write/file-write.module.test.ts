@@ -14,6 +14,7 @@ import { AudioMetadataEmbedder } from './formats/audio/audio-metadata-embedder';
 import { Cb7FormatWriter } from './formats/cbx/cb7-format-writer';
 import { CbzFormatWriter } from './formats/cbx/cbz-format-writer';
 import { EpubFormatWriter } from './formats/epub/epub-format-writer';
+import { Azw3FormatWriter, AzwFormatWriter, MobiEbookFormatWriter } from './formats/mobi/mobi-format-writer';
 import { PdfFormatWriter } from './formats/pdf/pdf-format-writer';
 import { FORMAT_WRITERS } from './interfaces/format-writer.interface';
 
@@ -36,6 +37,9 @@ describe('FileWriteModule', () => {
         PdfFormatWriter,
         CbzFormatWriter,
         Cb7FormatWriter,
+        MobiEbookFormatWriter,
+        Azw3FormatWriter,
+        AzwFormatWriter,
         M4bAudioFormatWriter,
         M4aAudioFormatWriter,
         Mp3AudioFormatWriter,
@@ -57,6 +61,9 @@ describe('FileWriteModule', () => {
       PdfFormatWriter,
       CbzFormatWriter,
       Cb7FormatWriter,
+      MobiEbookFormatWriter,
+      Azw3FormatWriter,
+      AzwFormatWriter,
       M4bAudioFormatWriter,
       M4aAudioFormatWriter,
       Mp3AudioFormatWriter,
@@ -67,10 +74,25 @@ describe('FileWriteModule', () => {
     const pdf = { format: 'pdf' };
     const cbz = { format: 'cbz' };
     const cb7 = { format: 'cb7' };
+    const mobi = { format: 'mobi' };
+    const azw3 = { format: 'azw3' };
+    const azw = { format: 'azw' };
     const m4b = { format: 'm4b' };
     const m4a = { format: 'm4a' };
     const mp3 = { format: 'mp3' };
     const flac = { format: 'flac' };
-    expect(writerProvider.useFactory(epub, pdf, cbz, cb7, m4b, m4a, mp3, flac)).toEqual([epub, pdf, cbz, cb7, m4b, m4a, mp3, flac]);
+    expect(writerProvider.useFactory(epub, pdf, cbz, cb7, mobi, azw3, azw, m4b, m4a, mp3, flac)).toEqual([
+      epub,
+      pdf,
+      cbz,
+      cb7,
+      mobi,
+      azw3,
+      azw,
+      m4b,
+      m4a,
+      mp3,
+      flac,
+    ]);
   });
 });

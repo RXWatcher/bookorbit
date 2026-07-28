@@ -32,6 +32,8 @@ function makeLibrary(overrides: Partial<Library> = {}): Library {
     fileWritePdfMaxFileSizeMb: 50,
     fileWriteCbxEnabled: false,
     fileWriteCbxMaxFileSizeMb: 50,
+    fileWriteKindleEnabled: false,
+    fileWriteKindleMaxFileSizeMb: 100,
     fileWriteAudioEnabled: false,
     fileWriteAudioMaxFileSizeMb: 50,
     fileRenameEnabled: false,
