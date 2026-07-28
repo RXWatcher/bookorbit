@@ -6657,6 +6657,11 @@
       "defaultName": "Smart Scope",
       "filter": "Filter",
       "edit": "Smart Scope bearbeiten",
+      "koboSync": {
+        "label": "Sync to my Kobo",
+        "enabledHint": "Books in this shared Smart Scope sync to your Kobo device. Turn off to stop syncing them.",
+        "disabledHint": "Turn on to sync books in this shared Smart Scope to your Kobo device."
+      },
       "showControlsAria": "Smart-Scope-Steuerelemente anzeigen",
       "hideFilter": "Filter ausblenden",
       "showFilter": "Filter anzeigen",
@@ -6664,7 +6669,10 @@
       "loadError": "Dieser SmartScope konnte nicht geladen werden",
       "toast": {
         "deleted": "\"{name}\" gelöscht",
-        "deleteFailed": "Löschen von \"{name}\" fehlgeschlagen"
+        "deleteFailed": "Löschen von \"{name}\" fehlgeschlagen",
+        "koboSyncEnabled": "\"{name}\" now syncs to your Kobo",
+        "koboSyncDisabled": "\"{name}\" no longer syncs to your Kobo",
+        "koboSyncFailed": "Failed to update Kobo sync for \"{name}\""
       },
       "empty": {
         "noRules": "Keine Regeln konfiguriert",

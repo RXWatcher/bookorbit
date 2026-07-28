@@ -48,6 +48,15 @@ useLibraryScanRefresh()
 
 const SUPPORT_URL = 'https://ko-fi.com/neonbookorbit'
 
+// Shared scopes belong to their owner, so their display order is not this user's to
+// persist. Sending them anyway makes the server reject the whole reorder.
+async function persistSmartScopeOrder(order: { id: number; displayOrder: number }[]) {
+  const ownedIds = new Set(smartScopes.value.filter((scope) => scope.isOwner).map((scope) => scope.id))
+  const ownedOrder = order.filter((entry) => ownedIds.has(entry.id))
+  if (ownedOrder.length === 0) return
+  await reorderSmartScopes(ownedOrder)
+}
+
 const createSmartScopeOpen = ref(false)
 const createCollectionOpen = ref(false)
 const createLibraryOpen = ref(false)
@@ -312,7 +321,7 @@ onUnmounted(() => stopLibraryUploadListener())
           can-add
           :add-label="t('components.sidebar.newSmartScope')"
           can-reorder
-          :persist-order="reorderSmartScopes"
+          :persist-order="persistSmartScopeOrder"
           @add="openCreateSmartScope"
           @navigate="handleNavigate"
         />

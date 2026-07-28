@@ -6657,6 +6657,11 @@
       "defaultName": "Alcance inteligente",
       "filter": "Filtrar",
       "edit": "Editar alcance inteligente",
+      "koboSync": {
+        "label": "Sync to my Kobo",
+        "enabledHint": "Books in this shared Smart Scope sync to your Kobo device. Turn off to stop syncing them.",
+        "disabledHint": "Turn on to sync books in this shared Smart Scope to your Kobo device."
+      },
       "showControlsAria": "Mostrar controles de alcance inteligente",
       "hideFilter": "Ocultar filtro",
       "showFilter": "Mostrar filtro",
@@ -6664,7 +6669,10 @@
       "loadError": "No se pudo cargar este SmartScope",
       "toast": {
         "deleted": "\"{name}\" eliminado",
-        "deleteFailed": "No se pudo eliminar \"{name}\""
+        "deleteFailed": "No se pudo eliminar \"{name}\"",
+        "koboSyncEnabled": "\"{name}\" now syncs to your Kobo",
+        "koboSyncDisabled": "\"{name}\" no longer syncs to your Kobo",
+        "koboSyncFailed": "Failed to update Kobo sync for \"{name}\""
       },
       "empty": {
         "noRules": "No hay reglas configuradas",
