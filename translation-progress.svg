@@ -35,11 +35,11 @@
   <rect x="214" y="150" width="392" height="16" rx="4" class="bar-bg" />
   <rect x="214" y="150" width="376" height="16" rx="4" class="bar-high" />
   <text x="618" y="162" class="pct-label">96%</text>
-  <text x="24" y="204" class="lang-label">🇳🇱  Dutch</text>
+  <text x="24" y="204" class="lang-label">🇸🇮  Slovenian</text>
   <rect x="214" y="192" width="392" height="16" rx="4" class="bar-bg" />
-  <rect x="214" y="192" width="372" height="16" rx="4" class="bar-high" />
-  <text x="618" y="204" class="pct-label">95%</text>
-  <text x="24" y="246" class="lang-label">🇸🇮  Slovenian</text>
+  <rect x="214" y="192" width="376" height="16" rx="4" class="bar-high" />
+  <text x="618" y="204" class="pct-label">96%</text>
+  <text x="24" y="246" class="lang-label">🇳🇱  Dutch</text>
   <rect x="214" y="234" width="392" height="16" rx="4" class="bar-bg" />
   <rect x="214" y="234" width="372" height="16" rx="4" class="bar-high" />
   <text x="618" y="246" class="pct-label">95%</text>
