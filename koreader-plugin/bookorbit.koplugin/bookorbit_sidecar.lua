@@ -60,11 +60,29 @@ local function serializePos(pos)
     return nil
 end
 
--- Returns normalized annotations plus the max effective datetime; accepts the
--- raw sidecar list or the live ui.annotation.annotations array.
+-- Order-independent change signal for one normalized entry. Count plus max
+-- datetime cannot see a delete-plus-add that leaves both unchanged, so every
+-- entry contributes a hash of its identity fields. Positions can be kilobytes
+-- long, so only their length and both ends are sampled: this signal decides
+-- whether an unchanged book may skip an exchange, never what gets uploaded.
+local function entryHash(entry)
+    local pos0 = entry.pos0 or ""
+    local key = entry.datetime .. "|" .. #pos0 .. "|" .. pos0:sub(1, 24) .. "|" .. pos0:sub(-24)
+        .. "|" .. (entry.datetimeUpdated or "")
+    local hash = 5381
+    for index = 1, #key do
+        hash = (hash * 33 + key:byte(index)) % 4294967296
+    end
+    return hash
+end
+
+-- Returns normalized annotations, the max effective datetime and a signature
+-- that changes whenever the local set changes; accepts the raw sidecar list or
+-- the live ui.annotation.annotations array.
 function BookOrbitSidecar.normalizeAnnotations(raw)
     local annotations = {}
     local max_datetime = ""
+    local sum, mix = 0, 0
     for _, a in ipairs(raw or {}) do
         -- drawer == nil marks a position-only bookmark; those are skipped in v1.
         if ALLOWED_DRAWERS[a.drawer] and isDeviceDatetime(a.datetime) then
@@ -89,10 +107,14 @@ function BookOrbitSidecar.normalizeAnnotations(raw)
                 if effective > max_datetime then
                     max_datetime = effective
                 end
+                local hash = entryHash(entry)
+                sum = (sum + hash) % 4294967296
+                mix = (mix + hash * (hash % 8191 + 1)) % 4294967296
             end
         end
     end
-    return annotations, max_datetime
+    return annotations, max_datetime,
+        string.format("%d:%s:%d:%d", #annotations, max_datetime, sum, mix)
 end
 
 -- Validates a summary table (sidecar or live doc_settings reference) into a
@@ -212,6 +234,25 @@ function BookOrbitSidecar.buildStatePayload(hash, book, summary, force_pull)
     return payload, status_changed, rating_changed, review_changed
 end
 
+-- A forced pull is the only way the device learns a rating or review written
+-- on the web, but paying for it on every drained lifecycle entry is what made
+-- an unchanged book still cost a request. Bound it by age instead: manual sync
+-- and the sweep pull unconditionally, everything else once per interval.
+BookOrbitSidecar.STATE_PULL_MAX_AGE = 24 * 3600
+
+function BookOrbitSidecar.needsStatePull(book, now)
+    local pulled_at = book and book.statePulledAt
+    if type(pulled_at) ~= "number" then return true end
+    now = now or os.time()
+    if pulled_at > now then return true end
+    return (now - pulled_at) > BookOrbitSidecar.STATE_PULL_MAX_AGE
+end
+
+function BookOrbitSidecar.markStatePulled(book, now)
+    if not book then return end
+    book.statePulledAt = now or os.time()
+end
+
 local function applySummary(doc_settings, state)
     if not doc_settings or not state then return false end
     local summary = doc_settings:readSetting("summary") or {}
@@ -258,7 +299,8 @@ function BookOrbitSidecar.extract(file)
 
     local doc_settings = DocSettings:open(file)
     local summary = BookOrbitSidecar.normalizeSummary(doc_settings:readSetting("summary"))
-    local annotations, max_datetime = BookOrbitSidecar.normalizeAnnotations(doc_settings:readSetting("annotations"))
+    local annotations, max_datetime, signature =
+        BookOrbitSidecar.normalizeAnnotations(doc_settings:readSetting("annotations"))
 
     local last_position = doc_settings:readSetting("last_xpointer")
     if not last_position then
@@ -279,6 +321,7 @@ function BookOrbitSidecar.extract(file)
         annotations = annotations,
         annotations_count = #annotations,
         annotations_max_datetime = max_datetime,
+        annotations_signature = signature,
     }
 end
 

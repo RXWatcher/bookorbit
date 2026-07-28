@@ -281,8 +281,15 @@ describe('KOReader plugin update source wiring', () => {
     expect(bulk).not.toContain('Download Discover');
     expect(bulk).not.toContain('Download dashboard books');
 
+    expect(bulk).toContain('local MANIFEST_FEATURE = "catalogBulkManifest"');
+    expect(bulk).toContain('self.client:catalogManifest(params)');
+    expect(bulk).toContain('function Catalog:bulkCommitCheckpoint(ctx)');
+    expect(bulk).toContain('BookOrbitStateManager.linkFiles(links)');
+    expect(bulk).not.toContain('MAX_PAGES = 200');
+
     expect(download).toContain('local on_catalog_page = (self.bookMode and self:bookMode())');
     expect(download).toContain('elseif self.updateItems and on_catalog_page then');
+    expect(download).toContain('local Transfer = require("bookorbit_download_transfer")');
 
     expect(menu).toContain('text = _("Close BookOrbit")');
     expect(menu).toContain('catalog:onCloseAllMenus()');
@@ -319,7 +326,12 @@ describe('KOReader plugin update source wiring', () => {
     expect(statsReader).toContain('if authors == "" then authors = nil end');
     expect(statsReader).toContain('if title then entry.title = title end');
     expect(statsReader).toContain('if authors then entry.authors = authors end');
-    expect(bookSync).toContain('local metadata = BookOrbitStatsReader.getBook(digest) or {}');
+    // Identity is primed after reader ready so the lifecycle handlers open no
+    // database; a cold cache still resolves through the same lookup.
+    expect(bookSync).toContain('local metadata, cached = BookOrbitStatsReader.cachedIdentity(digest)');
+    expect(bookSync).toContain('metadata = BookOrbitStatsReader.primeIdentity(digest)');
+    expect(statsReader).toContain('function BookOrbitStatsReader.primeIdentity(md5)');
+    expect(statsReader).toContain('local book = BookOrbitStatsReader.getBook(md5)');
     expect(bookSync).toContain('local stats_ambiguous = metadata.metadata_ambiguous == true');
     expect(bookSync).toContain('title = stats_ambiguous and titleFromFile(file) or (metadata.title or titleFromFile(file))');
     expect(bookSync).toContain('authors = stats_ambiguous and nil or metadata.authors');

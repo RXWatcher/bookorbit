@@ -122,6 +122,81 @@ export class KoreaderCatalogBooksQueryDto {
   seriesId?: number;
 }
 
+// Bulk download enumeration. Deliberately not a subclass of the list query:
+// the manifest has one fixed cursor order and no page/sort inputs.
+export class KoreaderCatalogManifestQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  size?: number = 100;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(KOREADER_DEVICE_ID_REGEX)
+  deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsIn(KOREADER_CATALOG_READ_STATUS_FILTERS)
+  readStatus?: KoreaderCatalogReadStatusFilter;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  format?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => parseIdList(value))
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  ids?: number[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  libraryId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  collectionId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  smartScopeId?: number;
+
+  @IsOptional()
+  @IsString()
+  author?: string;
+
+  @IsOptional()
+  @IsString()
+  series?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  seriesId?: number;
+}
+
 export class KoreaderCatalogSectionQueryDto {
   @IsOptional()
   @Type(() => Number)

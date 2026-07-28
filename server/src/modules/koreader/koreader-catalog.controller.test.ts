@@ -13,6 +13,7 @@ function makeController() {
       .fn()
       .mockResolvedValue({ items: [], total: 0, page: 1, size: 20, hasNext: false, hasPrevious: false, nextUrl: null, previousUrl: null }),
     getBookDetail: vi.fn().mockResolvedValue({ id: 10 }),
+    getBulkManifest: vi.fn().mockResolvedValue({ items: [], hasNext: false, nextCursor: null, manifestVersion: 'lib-v1', restartRequired: false }),
     setReadStatus: vi.fn().mockResolvedValue({ readStatus: 'reading' }),
     setRating: vi.fn().mockResolvedValue({ rating: 4 }),
     streamThumbnail: vi.fn().mockResolvedValue(undefined),
@@ -40,6 +41,8 @@ describe('KoreaderCatalogController', () => {
     await expect(controller.sections(user, 'libraries', sectionQuery)).resolves.toEqual({ section: 'libraries', items: [] });
     await expect(controller.books(user, query)).resolves.toEqual(expect.objectContaining({ total: 0 }));
     await expect(controller.bookDetail(user, 10, bookDetailQuery)).resolves.toEqual({ id: 10 });
+    const manifestQuery = { deviceId: 'device-1', size: 100 } as never;
+    await expect(controller.manifest(user, manifestQuery)).resolves.toEqual(expect.objectContaining({ manifestVersion: 'lib-v1' }));
     await expect(controller.setReadStatus(user, 10, { status: 'reading' } as never)).resolves.toEqual({ readStatus: 'reading' });
     await expect(controller.setRating(user, 10, { rating: 4 } as never)).resolves.toEqual({ rating: 4 });
     await controller.thumbnail(user, 10, reply, '"etag"');
@@ -49,6 +52,7 @@ describe('KoreaderCatalogController', () => {
     expect(catalogService.getSectionEntries).toHaveBeenCalledWith(user, 'libraries', sectionQuery);
     expect(catalogService.getBooksPage).toHaveBeenCalledWith(user, query);
     expect(catalogService.getBookDetail).toHaveBeenCalledWith(user, 10, 'device-1');
+    expect(catalogService.getBulkManifest).toHaveBeenCalledWith(user, manifestQuery);
     expect(catalogService.setReadStatus).toHaveBeenCalledWith(user, 10, 'reading');
     expect(catalogService.setRating).toHaveBeenCalledWith(user, 10, 4);
     expect(catalogService.streamThumbnail).toHaveBeenCalledWith(user, 10, reply, '"etag"');

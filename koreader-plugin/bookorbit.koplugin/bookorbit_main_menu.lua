@@ -145,6 +145,8 @@ end
 function MainMenu:diagnosticsRows()
     local status = BookOrbitSweep.syncStatus()
     local sync_status = self.getSyncCoordinatorStatus and self:getSyncCoordinatorStatus() or { pending_count = 0 }
+    local outbox_status = self.getLifecycleOutboxStatus and self:getLifecycleOutboxStatus()
+        or { count = 0, bytes = 0, blocked = 0 }
     local has_open_book = hasReaderBook(self)
     local digest = safeDocumentDigest(self, has_open_book)
     local scheduler = self.open_annotation_scheduler and self.open_annotation_scheduler:status() or nil
@@ -193,6 +195,9 @@ function MainMenu:diagnosticsRows()
     table.insert(rows, { _("Current sync"), jobText(sync_status.current) })
     table.insert(rows, { _("Current sync started"), jobStartedText(sync_status.current) })
     table.insert(rows, { _("Pending syncs"), tostring(sync_status.pending_count or 0) })
+    table.insert(rows, { _("Pending lifecycle syncs"), tostring(outbox_status.count or 0) })
+    table.insert(rows, { _("Parked lifecycle syncs"), tostring(outbox_status.blocked or 0) })
+    table.insert(rows, { _("Lifecycle sync storage"), tostring(outbox_status.bytes or 0) .. " B" })
     table.insert(rows, { _("Next sync"), jobText(sync_status.next) })
     table.insert(rows, { _("Last sweep"), formatTime(status.lastSweepAt) })
     table.insert(rows, { _("Matched local books"), tostring(status.matched or 0) })
@@ -220,6 +225,13 @@ function MainMenu:diagnosticsRows()
             end,
         })
     end
+    table.insert(rows, {
+        _("Recheck all book matches"),
+        _("Run"),
+        callback = function()
+            self:startMatchRecheck()
+        end,
+    })
     table.insert(rows, {
         _("Test connection"),
         _("Run"),
@@ -424,6 +436,7 @@ function MainMenu:addToMainMenu(menu_items)
         end
         table.insert(items, {
             text = _("Sync all books now"),
+            help_text = _([[Syncs reading data, highlights, status and progress for books that changed since the last sync. Use "Recheck all book matches" in diagnostics to re-verify every book against the server.]]),
             callback = function()
                 self:startSweep()
             end,
@@ -595,7 +608,7 @@ function MainMenu:setServerAddress()
 end
 
 function MainMenu:login(menu)
-    if NetworkMgr:willRerunWhenOnline(function() self:login(menu) end) then
+    if NetworkMgr:willRerunWhenConnected(function() self:login(menu) end) then
         return
     end
 

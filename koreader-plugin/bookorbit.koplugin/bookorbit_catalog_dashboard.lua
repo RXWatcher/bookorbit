@@ -95,10 +95,38 @@ function CatalogDashboard:dashboardContext(dashboard, opts)
         dashboard = dashboard,
         stale = opts.stale == true,
         unavailable = opts.unavailable == true,
+        loading = opts.loading == true,
     }
 end
 
-function CatalogDashboard:dashboardRoot()
+-- What the catalog widget opens on, built without touching the network: the
+-- cached dashboard when there is one, otherwise a placeholder the pending
+-- refresh replaces in place.
+function CatalogDashboard:initialDashboardContext()
+    local cached = self:dashboardCache()
+    if cached then
+        return self:dashboardContext(cached, { stale = true })
+    end
+    if self:shouldRefreshDashboardOnOpen() then
+        return self:dashboardContext(nil, { stale = true, loading = true })
+    end
+    return self:dashboardContext(nil, { stale = true, unavailable = true })
+end
+
+-- An offline-tolerant open (auto-open, offline browse) never asks for a
+-- connection on its own; only an explicit browse goes through the connected
+-- gate.
+function CatalogDashboard:shouldRefreshDashboardOnOpen()
+    if self.prefer_cached_dashboard and not NetworkMgr:isConnected() then
+        return false
+    end
+    return true
+end
+
+function CatalogDashboard:dashboardRoot(opts)
+    local function requestIsCurrent()
+        return not opts or not opts.is_current or opts.is_current()
+    end
     local cached = self:dashboardCache()
     if self.prefer_cached_dashboard and cached and not NetworkMgr:isConnected() then
         return self:dashboardContext(cached, { stale = true })
@@ -106,17 +134,19 @@ function CatalogDashboard:dashboardRoot()
 
     local body, err = self:fetch(_("Loading dashboard..."), function()
         return self.client:catalogDashboard()
-    end)
+    end, opts)
     if body and body.continueReading then
         self:cacheDashboard(body)
         return self:dashboardContext(body)
     end
 
     if isDashboardUnsupported(err) then
-        UIManager:show(InfoMessage:new{
-            text = _("BookOrbit dashboard needs a newer server. Showing the catalog instead."),
-            timeout = 4,
-        })
+        if requestIsCurrent() then
+            UIManager:show(InfoMessage:new{
+                text = _("BookOrbit dashboard needs a newer server. Showing the catalog instead."),
+                timeout = 4,
+            })
+        end
         return self:rootItems(), { kind = "root", title = self.title }
     end
 
@@ -124,15 +154,29 @@ function CatalogDashboard:dashboardRoot()
         return self:dashboardContext(cached, { stale = true })
     end
 
-    if err ~= "cancelled" then
+    if err ~= "cancelled" and requestIsCurrent() then
         self:showServerError(err)
     end
     return self:dashboardContext(nil, { stale = true, unavailable = true })
 end
 
-function CatalogDashboard:loadDashboardRoot(replace)
+function CatalogDashboard:loadDashboardRoot(replace, opts)
+    self.dashboard_request_generation = (self.dashboard_request_generation or 0) + 1
+    local request_generation = self.dashboard_request_generation
+    local expected_context = self.current_context
+    local request_opts = {}
+    for key, value in pairs(opts or {}) do request_opts[key] = value end
+    request_opts.is_current = function()
+        return not self.catalog_closed
+            and request_generation == self.dashboard_request_generation
+            and self.current_context == expected_context
+    end
     self:runConnected(function()
-        local items, context = self:dashboardRoot()
+        local items, context = self:dashboardRoot(request_opts)
+        if self.catalog_closed or request_generation ~= self.dashboard_request_generation
+                or self.current_context ~= expected_context then
+            return
+        end
         self:switchTo(context.title or self.title, items, context, not replace)
     end)
 end
@@ -428,7 +472,7 @@ function CatalogDashboard:addDashboardCoverGrid(
 end
 
 -- A friendlier empty/unavailable state than a bare status line: a short
--- centered message with a borderless action button underneath.
+-- centered message with an optional borderless action button underneath.
 function CatalogDashboard:addDashboardEmptyState(text, button_text, callback)
     local col = VerticalGroup:new{ align = "center" }
     table.insert(col, TextBoxWidget:new{
@@ -438,6 +482,10 @@ function CatalogDashboard:addDashboardEmptyState(text, button_text, callback)
         fgcolor = Blitbuffer.COLOR_DARK_GRAY,
         face = Font:getFace("cfont", 14),
     })
+    if not button_text then
+        self:addDashboardInset(col)
+        return
+    end
     local button = Button:new{
         text = button_text,
         bordersize = 0,
@@ -574,7 +622,7 @@ end
 
 function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dimen)
     local old_dimen = self:prepareCustomUpdate(no_recalculate_dimen)
-    self:refreshOnDevice()
+    self:ensureOnDeviceCurrent()
     local context = self.current_context or {}
     local dashboard = context.dashboard
     local continue_books = dashboard and dashboard.continueReading or {}
@@ -700,6 +748,8 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     self:addDashboardSpacer(inner_gap)
     if has_continue then
         self:addDashboardHeroRow(continue_books, hero_h, hero_slots, hero_page)
+    elseif context.loading then
+        self:addDashboardEmptyState(_("Loading dashboard..."))
     elseif context.unavailable then
         self:addDashboardEmptyState(
             _("The dashboard could not be loaded."),

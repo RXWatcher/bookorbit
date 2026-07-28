@@ -9,6 +9,7 @@ import { KoreaderCatalogService } from './koreader-catalog.service';
 import {
   KoreaderCatalogBookDetailQueryDto,
   KoreaderCatalogBooksQueryDto,
+  KoreaderCatalogManifestQueryDto,
   KoreaderCatalogSectionQueryDto,
   KoreaderCatalogSetRatingDto,
   KoreaderCatalogSetReadStatusDto,
@@ -48,6 +49,12 @@ export class KoreaderCatalogController {
   @Header('Cache-Control', 'private, max-age=30')
   books(@CurrentUser() user: RequestUser, @Query() query: KoreaderCatalogBooksQueryDto) {
     return this.catalogService.getBooksPage(user, query);
+  }
+
+  @Get('manifest')
+  @Header('Cache-Control', 'no-store')
+  manifest(@CurrentUser() user: RequestUser, @Query() query: KoreaderCatalogManifestQueryDto) {
+    return this.catalogService.getBulkManifest(user, query);
   }
 
   @Get('books/:bookId')

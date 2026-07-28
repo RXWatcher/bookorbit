@@ -1082,8 +1082,7 @@ end
 function CatalogDetail:buildDetailHeader(detail, width)
     local cover_w, cover_h = self:detailCoverDimensions()
     local text_w = math.max(1, width - 2 * DETAIL_INSET - cover_w - DETAIL_GAP_M)
-    local path = self:cachedThumbnailPath(detail)
-    local state = self:thumbnailState(detail)
+    local path, state = self:thumbnailDisplay(detail)
 
     self.detail_status_button = nil
     self.detail_read_button = nil

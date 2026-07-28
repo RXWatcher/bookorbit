@@ -287,6 +287,52 @@ export interface KoreaderCatalogDiscoverResponse {
   discover: KoreaderCatalogBookListItem[];
 }
 
+// Everything a bulk download needs per downloadable file, so no per-book detail
+// request remains. `fileHash` is the KOReader partial MD5 of the exact bytes the
+// download route streams, so it doubles as the restart-validation checksum and
+// as the digest that keys local match state.
+export interface KoreaderCatalogManifestFile {
+  id: number;
+  format: string;
+  sizeBytes: number | null;
+  contentVersion: string;
+  fileHash: string | null;
+  downloadUrl: string;
+  devicePath: string;
+}
+
+export interface KoreaderCatalogManifestBook {
+  id: number;
+  title: string;
+  authors: string[];
+  seriesName: string | null;
+  seriesIndex: number | null;
+  formats: string[];
+  files: KoreaderCatalogManifestFile[];
+}
+
+export interface KoreaderCatalogManifestPage {
+  items: KoreaderCatalogManifestBook[];
+  hasNext: boolean;
+  // Opaque, bound to the user, the normalized filter and the manifest snapshot.
+  nextCursor: string | null;
+  manifestVersion: string;
+  // Set when a supplied cursor was minted under a different cursor contract.
+  // A library change during a run does not set it: the keyset orders by immutable
+  // book id, so enumeration continues and only manifestVersion carries the change.
+  // On a restart, already-published files are skipped by size and hash validation,
+  // so no transfer work is repeated.
+  restartRequired: boolean;
+}
+
+export type KoreaderPluginCapability = "catalogBulkManifest";
+
+export interface KoreaderPluginVersionInfo {
+  pluginVersion: string;
+  serverVersion: string;
+  capabilities: KoreaderPluginCapability[];
+}
+
 export interface KoreaderCatalogReadStatusResult {
   readStatus: KoreaderCatalogSettableReadStatus;
 }
