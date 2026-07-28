@@ -80,6 +80,7 @@ jobs:
         id: translation-progress
         continue-on-error: true
         env:
+          CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
           SVG_PATH: ${{ runner.temp }}/translation-progress.svg
         run: |
           node scripts/crowdin-stats/generate.mjs --out "$SVG_PATH"

@@ -51,8 +51,16 @@ pagination limit.
 The translation generator reads public Crowdin project statistics and renders
 every language the project exposes, so no code change is needed when a language
 is added. English is pinned first at 100% as the source language and is
-excluded from the average. Up to eight languages render as horizontal bars;
-beyond that the chart switches to a vertical bar chart with a fixed height.
+excluded from the average, though it renders like any other completed row.
+
+Every language is one horizontal meter row, so the card grows in height as
+languages are added rather than switching layout. The label column is measured
+from the widest language name and long names are truncated, which keeps the bar
+from being squeezed out. Bars carry three progress tiers, listed in a legend on
+the card: complete at 100%, in progress at 70% or above, and needs work below
+that. Three is the ceiling; a fourth tier would need an amber that sits at
+deuteranopia delta-E 1.4 against the orange, which no threshold tuning can
+separate.
 
 ## Local commands
 
