@@ -1,72 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="580" height="271" viewBox="0 0 680 318" fill="none" role="img" aria-label="BookOrbit translation progress">
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="362" viewBox="0 0 540 362" fill="none" role="img" aria-label="BookOrbit translation progress">
   <title>BookOrbit translation progress</title>
   <style>
     .card { fill: #0d1117; stroke: #30363d; stroke-width: 1px; rx: 12px; }
     .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; fill: #f0f6fc; }
     .subtitle { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; font-weight: 400; fill: #8b949e; }
-    .lang-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 500; fill: #c9d1d9; }
-    .lang-label-small { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11.5px; font-weight: 500; fill: #c9d1d9; }
-    .pct-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 600; fill: #58a6ff; }
-    .pct-label-small { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 10.5px; font-weight: 600; fill: #8b949e; }
-    .axis-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 10px; font-weight: 400; fill: #6e7681; }
+    .lang-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 500; fill: #e6edf3; }
+    .pct-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 600; fill: #e6edf3; font-variant-numeric: tabular-nums; }
+    .legend-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 400; fill: #8b949e; }
     .grid { stroke: #21262d; stroke-width: 1; }
     .bar-bg { fill: #21262d; }
-    .bar-source { fill: #58a6ff; }
-    .bar-high { fill: #2ea44f; }
-    .bar-medium { fill: #d29922; }
+    .bar-done { fill: #2ea043; }
+    .bar-progress { fill: #2f81f7; }
     .bar-low { fill: #db6d28; }
   </style>
-  <rect width="678" height="316" x="1" y="1" class="card" />
+  <rect width="538" height="360" x="1" y="1" class="card" />
 
-  <text x="24" y="36" class="title">Translation Progress</text>
-  <text x="656" y="36" text-anchor="end" class="subtitle">Crowdin · 8 target languages · 98% average</text>
+  <text x="24" y="35" class="title">Translation Progress</text>
+  <text x="516" y="35" text-anchor="end" class="subtitle">Crowdin · 8 target languages · 98% average</text>
 
-  <line x1="24" y1="48" x2="656" y2="48" class="grid" />
+  <line x1="24" y1="51" x2="516" y2="51" class="grid" />
 
-  <line x1="48" y1="224" x2="656" y2="224" class="grid" />
-  <text x="42" y="227.5" text-anchor="end" class="axis-label">0</text>
-  <line x1="48" y1="186" x2="656" y2="186" class="grid" />
-  <text x="42" y="189.5" text-anchor="end" class="axis-label">25</text>
-  <line x1="48" y1="149" x2="656" y2="149" class="grid" />
-  <text x="42" y="152.5" text-anchor="end" class="axis-label">50</text>
-  <line x1="48" y1="111" x2="656" y2="111" class="grid" />
-  <text x="42" y="114.5" text-anchor="end" class="axis-label">75</text>
-  <line x1="48" y1="74" x2="656" y2="74" class="grid" />
-  <text x="42" y="77.5" text-anchor="end" class="axis-label">100</text>
-  <rect x="70" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="70" y="74" width="34" height="150" rx="4" class="bar-source" />
-  <text x="87" y="67" text-anchor="middle" class="pct-label-small">100%</text>
-  <text x="87" y="240" text-anchor="end" transform="rotate(-45 87 240)" class="lang-label-small">🇺🇸  English</text>
-  <rect x="137" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="137" y="74" width="34" height="150" rx="4" class="bar-high" />
-  <text x="154" y="67" text-anchor="middle" class="pct-label-small">100%</text>
-  <text x="154" y="240" text-anchor="end" transform="rotate(-45 154 240)" class="lang-label-small">🇫🇷  French</text>
-  <rect x="204" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="204" y="74" width="34" height="150" rx="4" class="bar-high" />
-  <text x="221" y="67" text-anchor="middle" class="pct-label-small">100%</text>
-  <text x="221" y="240" text-anchor="end" transform="rotate(-45 221 240)" class="lang-label-small">🇮🇹  Italian</text>
-  <rect x="271" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="271" y="74" width="34" height="150" rx="4" class="bar-high" />
-  <text x="288" y="67" text-anchor="middle" class="pct-label-small">100%</text>
-  <text x="288" y="240" text-anchor="end" transform="rotate(-45 288 240)" class="lang-label-small">🇵🇱  Polish</text>
-  <rect x="338" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="338" y="74" width="34" height="150" rx="4" class="bar-high" />
-  <text x="355" y="67" text-anchor="middle" class="pct-label-small">100%</text>
-  <text x="355" y="240" text-anchor="end" transform="rotate(-45 355 240)" class="lang-label-small">🇪🇸  Spanish</text>
-  <rect x="405" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="405" y="78" width="34" height="146" rx="4" class="bar-high" />
-  <text x="422" y="71" text-anchor="middle" class="pct-label-small">97%</text>
-  <text x="422" y="240" text-anchor="end" transform="rotate(-45 422 240)" class="lang-label-small">🇧🇷  Portuguese</text>
-  <rect x="472" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="472" y="78" width="34" height="146" rx="4" class="bar-high" />
-  <text x="489" y="71" text-anchor="middle" class="pct-label-small">97%</text>
-  <text x="489" y="240" text-anchor="end" transform="rotate(-45 489 240)" class="lang-label-small">🇸🇮  Slovenian</text>
-  <rect x="539" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="539" y="84" width="34" height="140" rx="4" class="bar-high" />
-  <text x="556" y="77" text-anchor="middle" class="pct-label-small">93%</text>
-  <text x="556" y="240" text-anchor="end" transform="rotate(-45 556 240)" class="lang-label-small">🇩🇪  German</text>
-  <rect x="606" y="74" width="34" height="150" rx="4" class="bar-bg" />
-  <rect x="606" y="86" width="34" height="138" rx="4" class="bar-high" />
-  <text x="623" y="79" text-anchor="middle" class="pct-label-small">92%</text>
-  <text x="623" y="240" text-anchor="end" transform="rotate(-45 623 240)" class="lang-label-small">🇳🇱  Dutch</text>
+  <text x="24" y="78" class="lang-label">🇺🇸  English</text>
+  <rect x="144" y="69" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="69" width="316" height="8" rx="4" class="bar-done" />
+  <text x="516" y="78" text-anchor="end" class="pct-label">100%</text>
+  <text x="24" y="106" class="lang-label">🇫🇷  French</text>
+  <rect x="144" y="97" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="97" width="316" height="8" rx="4" class="bar-done" />
+  <text x="516" y="106" text-anchor="end" class="pct-label">100%</text>
+  <text x="24" y="134" class="lang-label">🇮🇹  Italian</text>
+  <rect x="144" y="125" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="125" width="316" height="8" rx="4" class="bar-done" />
+  <text x="516" y="134" text-anchor="end" class="pct-label">100%</text>
+  <text x="24" y="162" class="lang-label">🇵🇱  Polish</text>
+  <rect x="144" y="153" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="153" width="316" height="8" rx="4" class="bar-done" />
+  <text x="516" y="162" text-anchor="end" class="pct-label">100%</text>
+  <text x="24" y="190" class="lang-label">🇪🇸  Spanish</text>
+  <rect x="144" y="181" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="181" width="316" height="8" rx="4" class="bar-done" />
+  <text x="516" y="190" text-anchor="end" class="pct-label">100%</text>
+  <text x="24" y="218" class="lang-label">🇧🇷  Portuguese</text>
+  <rect x="144" y="209" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="209" width="307" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="218" text-anchor="end" class="pct-label">97%</text>
+  <text x="24" y="246" class="lang-label">🇸🇮  Slovenian</text>
+  <rect x="144" y="237" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="237" width="307" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="246" text-anchor="end" class="pct-label">97%</text>
+  <text x="24" y="274" class="lang-label">🇩🇪  German</text>
+  <rect x="144" y="265" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="265" width="294" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="274" text-anchor="end" class="pct-label">93%</text>
+  <text x="24" y="302" class="lang-label">🇳🇱  Dutch</text>
+  <rect x="144" y="293" width="316" height="8" rx="4" class="bar-bg" />
+  <rect x="144" y="293" width="291" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="302" text-anchor="end" class="pct-label">92%</text>
+  <line x1="24" y1="322" x2="516" y2="322" class="grid" />
+  <rect x="24" y="334" width="8" height="8" rx="2" class="bar-done" />
+  <text x="38" y="342" class="legend-label">Complete</text>
+  <rect x="107.2" y="334" width="8" height="8" rx="2" class="bar-progress" />
+  <text x="121.2" y="342" class="legend-label">In progress</text>
+  <rect x="208.10000000000002" y="334" width="8" height="8" rx="2" class="bar-low" />
+  <text x="222.10000000000002" y="342" class="legend-label">Needs work</text>
 </svg>
