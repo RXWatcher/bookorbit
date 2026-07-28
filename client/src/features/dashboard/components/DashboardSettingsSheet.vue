@@ -7,6 +7,7 @@ import type { ScrollerConfig, ScrollerType, WidgetConfig } from '@bookorbit/type
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useSmartScopes } from '@/features/smart-scope/composables/useSmartScopes'
 import { DEFAULT_SCROLLERS, SCROLLER_LABELS, useDashboardConfig } from '../composables/useDashboardConfig'
+import { useDashboardLabels } from '../composables/useDashboardLabels'
 import { useDashboardWidgets } from '../composables/useDashboardWidgets'
 import { useDraggableList } from '../composables/useDraggableList'
 
@@ -16,8 +17,9 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 const { t } = useI18n()
 
 const { scrollers, saveScrollers, MAX_SCROLLERS } = useDashboardConfig()
-const { widgets, saveWidgets, WIDGET_LABELS, DEFAULT_WIDGETS } = useDashboardWidgets()
+const { widgets, saveWidgets, DEFAULT_WIDGETS } = useDashboardWidgets()
 const { smartScopes, fetchSmartScopes } = useSmartScopes()
+const { widgetName, shelfTypeName } = useDashboardLabels()
 
 const activeTab = ref<'widgets' | 'shelves'>('widgets')
 const draft = ref<ScrollerConfig[]>([])
@@ -211,7 +213,7 @@ function resetToDefault() {
                   />
                 </button>
 
-                <span class="flex-1 text-sm font-medium">{{ WIDGET_LABELS[widget.type] }}</span>
+                <span class="flex-1 text-sm font-medium">{{ widgetName(widget.type) }}</span>
               </div>
             </div>
           </div>
@@ -277,8 +279,8 @@ function resetToDefault() {
                   class="h-8 flex-1 appearance-none rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   @change="onTypeChange(scroller)"
                 >
-                  <option v-for="t in ALL_TYPES" :key="t" :value="t">
-                    {{ SCROLLER_LABELS[t] }}
+                  <option v-for="scrollerType in ALL_TYPES" :key="scrollerType" :value="scrollerType">
+                    {{ shelfTypeName(scrollerType) }}
                   </option>
                 </select>
 

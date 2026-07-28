@@ -4584,6 +4584,29 @@
         "widgets": "Widgets",
         "shelves": "Regale"
       },
+      "widgetNames": {
+        "readingStreak": "Lese-Serie",
+        "currentlyReading": "Aktuell gelesen",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Lese-DNA",
+        "monthlyChallenge": "Monatliche Herausforderung",
+        "highlightOfTheDay": "Highlight des Tages",
+        "neglectedGems": "Vernachlässigte Schätze",
+        "readingRhythm": "Leserhythmus",
+        "diversityScore": "Diversitätswert",
+        "libraryOverview": "Bibliotheksübersicht",
+        "yearProjection": "Jahresprognose",
+        "longWait": "Die lange Wartezeit"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Ziehen zum Neuanordnen. Umschalten, um ein Widget ein- oder auszublenden.",
       "reorderHintShelf": "Ziehen zum Neuanordnen. Umschalten, um ein Regal ein- oder auszublenden.",
       "smartScope": "Smart Scope",

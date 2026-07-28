@@ -4584,6 +4584,29 @@
         "widgets": "Widgets",
         "shelves": "Shelves"
       },
+      "widgetNames": {
+        "readingStreak": "Reading Streak",
+        "currentlyReading": "Currently Reading",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Reading DNA",
+        "monthlyChallenge": "Monthly Challenge",
+        "highlightOfTheDay": "Highlight of the Day",
+        "neglectedGems": "Neglected Gems",
+        "readingRhythm": "Reading Rhythm",
+        "diversityScore": "Diversity Score",
+        "libraryOverview": "Library Overview",
+        "yearProjection": "Year Projection",
+        "longWait": "The Long Wait"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Drag to reorder. Toggle to show or hide a widget.",
       "reorderHintShelf": "Drag to reorder. Toggle to show or hide a shelf.",
       "smartScope": "Smart Scope",

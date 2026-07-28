@@ -4584,6 +4584,29 @@
         "widgets": "Widgets",
         "shelves": "Planken"
       },
+      "widgetNames": {
+        "readingStreak": "Leesreeks",
+        "currentlyReading": "Nu aan het lezen",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Lees-DNA",
+        "monthlyChallenge": "Maandelijkse uitdaging",
+        "highlightOfTheDay": "Markering van de dag",
+        "neglectedGems": "Vergeten pareltjes",
+        "readingRhythm": "Leesritme",
+        "diversityScore": "Diversiteitsscore",
+        "libraryOverview": "Bibliotheekoverzicht",
+        "yearProjection": "Jaarprognose",
+        "longWait": "Het lange wachten"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Sleep om te herordenen. Schakel in of uit om een widget te tonen of verbergen.",
       "reorderHintShelf": "Sleep om te herordenen. Schakel in of uit om een plank te tonen of verbergen.",
       "smartScope": "Smart Scope",

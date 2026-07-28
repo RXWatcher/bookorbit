@@ -13,6 +13,7 @@ import DashboardSettingsSheet from '@/features/dashboard/components/DashboardSet
 import DashboardWelcome from '@/features/dashboard/components/DashboardWelcome.vue'
 import DashboardWidgetRow from '@/features/dashboard/components/DashboardWidgetRow.vue'
 import { useDashboardConfig } from '@/features/dashboard/composables/useDashboardConfig'
+import { useDashboardLabels } from '@/features/dashboard/composables/useDashboardLabels'
 import { useOnboardingTour } from '@/features/onboarding/composables/useOnboardingTour'
 import { useSmartScopes } from '@/features/smart-scope/composables/useSmartScopes'
 
@@ -21,6 +22,7 @@ const { hasPermission } = usePermissions()
 const { user } = useAuth()
 const { libraries, loading: librariesLoading, fetchLibraries } = useLibraries()
 const { scrollers, pruneDeletedSmartScopeScrollers } = useDashboardConfig()
+const { shelfTitle } = useDashboardLabels()
 const { maybeStartTour } = useOnboardingTour()
 const { smartScopes, loaded: smartScopesLoaded, fetchSmartScopes } = useSmartScopes()
 
@@ -108,7 +110,7 @@ onUnmounted(() => {
             v-for="(scroller, index) in enabledScrollers"
             :key="`${scroller.id}-${scroller.type}-${scroller.smartScopeId ?? 0}`"
             :type="scroller.type"
-            :title="scroller.label"
+            :title="shelfTitle(scroller)"
             :limit="scroller.limit"
             :smartScope-id="scroller.smartScopeId"
             class="animate-fade-up"

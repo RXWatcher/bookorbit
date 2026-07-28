@@ -4584,6 +4584,29 @@
         "widgets": "Widgets",
         "shelves": "Étagères"
       },
+      "widgetNames": {
+        "readingStreak": "Série de lecture",
+        "currentlyReading": "Lecture en cours",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Lire l'ADN",
+        "monthlyChallenge": "Défi mensuel",
+        "highlightOfTheDay": "Le moment fort de la journée",
+        "neglectedGems": "Joyaux négligés",
+        "readingRhythm": "Rythme de lecture",
+        "diversityScore": "Score de diversité",
+        "libraryOverview": "Présentation de la bibliothèque",
+        "yearProjection": "Année projetée",
+        "longWait": "La longue attente"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Faites glisser pour réorganiser. Basculez pour afficher ou masquer un widget.",
       "reorderHintShelf": "Faites glisser pour réorganiser. Basculez pour afficher ou masquer une étagère.",
       "smartScope": "Portée intelligente",

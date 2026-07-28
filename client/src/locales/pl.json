@@ -4584,6 +4584,29 @@
         "widgets": "Widżety",
         "shelves": "Półki"
       },
+      "widgetNames": {
+        "readingStreak": "Czytelnicza passa",
+        "currentlyReading": "Aktualnie czytam",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Czytanie DNA",
+        "monthlyChallenge": "Comiesięczne wyzwanie",
+        "highlightOfTheDay": "Najważniejsza atrakcja dnia",
+        "neglectedGems": "Zaniedbane klejnoty",
+        "readingRhythm": "Rytm czytania",
+        "diversityScore": "Wynik różnorodności",
+        "libraryOverview": "Przegląd biblioteki",
+        "yearProjection": "Projekcja roku",
+        "longWait": "Długie oczekiwanie"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Przeciągnij, aby zmienić kolejność. Przełącz, aby pokazać lub ukryć widżet.",
       "reorderHintShelf": "Przeciągnij, aby zmienić kolejność. Przełącz, aby pokazać lub ukryć półkę.",
       "smartScope": "Inteligentny zakres",

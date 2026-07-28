@@ -4584,6 +4584,29 @@
         "widgets": "Gradniki",
         "shelves": "Police"
       },
+      "widgetNames": {
+        "readingStreak": "Bralni niz",
+        "currentlyReading": "Trenutno bereš",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Bralni DNK",
+        "monthlyChallenge": "Mesečni izziv",
+        "highlightOfTheDay": "Poudarek dneva",
+        "neglectedGems": "Zapostavljeni biseri",
+        "readingRhythm": "Bralni ritem",
+        "diversityScore": "Ocena raznolikosti",
+        "libraryOverview": "Pregled knjižnice",
+        "yearProjection": "Letna napoved",
+        "longWait": "Dolgo čakanje"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Povleci za spremembo vrstnega reda. Preklopi za prikaz ali skritje gradnika.",
       "reorderHintShelf": "Povleci za spremembo vrstnega reda. Preklopi za prikaz ali skritje police.",
       "smartScope": "Pametna zbirka",

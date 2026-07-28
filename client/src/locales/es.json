@@ -4584,6 +4584,29 @@
         "widgets": "widgets",
         "shelves": "estantes"
       },
+      "widgetNames": {
+        "readingStreak": "Racha de lectura",
+        "currentlyReading": "Actualmente leyendo",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Lectura de ADN",
+        "monthlyChallenge": "Reto Mensual",
+        "highlightOfTheDay": "Lo más destacado del día",
+        "neglectedGems": "Gemas olvidadas",
+        "readingRhythm": "Ritmo de lectura",
+        "diversityScore": "Puntuación de diversidad",
+        "libraryOverview": "Descripción general de la biblioteca",
+        "yearProjection": "Proyección del año",
+        "longWait": "La larga espera"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Arrastre para reordenar. Alternar para mostrar u ocultar un widget.",
       "reorderHintShelf": "Arrastre para reordenar. Alternar para mostrar u ocultar un estante.",
       "smartScope": "Alcance inteligente",

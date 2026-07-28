@@ -4584,6 +4584,29 @@
         "widgets": "Widget",
         "shelves": "Scaffali"
       },
+      "widgetNames": {
+        "readingStreak": "Striscia di lettura",
+        "currentlyReading": "Attualmente sto leggendo",
+        "readingGoal": "Reading Goal",
+        "readingDna": "Leggere il DNA",
+        "monthlyChallenge": "Sfida mensile",
+        "highlightOfTheDay": "Momento clou della giornata",
+        "neglectedGems": "Gemme trascurate",
+        "readingRhythm": "Ritmo di lettura",
+        "diversityScore": "Punteggio di diversità",
+        "libraryOverview": "Panoramica della biblioteca",
+        "yearProjection": "Proiezione dell'anno",
+        "longWait": "La lunga attesa"
+      },
+      "shelfNames": {
+        "recentlyAdded": "Recently Added",
+        "continueReading": "Continue Reading",
+        "continueListening": "Continue Listening",
+        "wantToRead": "Want to Read",
+        "upNextInSeries": "Up Next in Series",
+        "random": "Discover Something New",
+        "smartScope": "Smart Scope"
+      },
       "reorderHintWidget": "Trascina per riordinare. Seleziona per mostrare o nascondere un widget.",
       "reorderHintShelf": "Trascina per riordinare. Attiva/disattiva per mostrare o nascondere uno scaffale.",
       "smartScope": "Ambito intelligente",
