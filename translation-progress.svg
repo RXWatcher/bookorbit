@@ -24,30 +24,30 @@
   <rect x="144" y="69" width="316" height="8" rx="4" class="bar-bg" />
   <rect x="144" y="69" width="316" height="8" rx="4" class="bar-done" />
   <text x="516" y="78" text-anchor="end" class="pct-label">100%</text>
-  <text x="24" y="106" class="lang-label">🇫🇷  French</text>
+  <text x="24" y="106" class="lang-label">🇧🇷  Portuguese</text>
   <rect x="144" y="97" width="316" height="8" rx="4" class="bar-bg" />
   <rect x="144" y="97" width="316" height="8" rx="4" class="bar-done" />
   <text x="516" y="106" text-anchor="end" class="pct-label">100%</text>
-  <text x="24" y="134" class="lang-label">🇮🇹  Italian</text>
+  <text x="24" y="134" class="lang-label">🇪🇸  Spanish</text>
   <rect x="144" y="125" width="316" height="8" rx="4" class="bar-bg" />
   <rect x="144" y="125" width="316" height="8" rx="4" class="bar-done" />
   <text x="516" y="134" text-anchor="end" class="pct-label">100%</text>
-  <text x="24" y="162" class="lang-label">🇵🇱  Polish</text>
+  <text x="24" y="162" class="lang-label">🇫🇷  French</text>
   <rect x="144" y="153" width="316" height="8" rx="4" class="bar-bg" />
-  <rect x="144" y="153" width="316" height="8" rx="4" class="bar-done" />
-  <text x="516" y="162" text-anchor="end" class="pct-label">100%</text>
-  <text x="24" y="190" class="lang-label">🇪🇸  Spanish</text>
+  <rect x="144" y="153" width="313" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="162" text-anchor="end" class="pct-label">99%</text>
+  <text x="24" y="190" class="lang-label">🇮🇹  Italian</text>
   <rect x="144" y="181" width="316" height="8" rx="4" class="bar-bg" />
-  <rect x="144" y="181" width="316" height="8" rx="4" class="bar-done" />
-  <text x="516" y="190" text-anchor="end" class="pct-label">100%</text>
-  <text x="24" y="218" class="lang-label">🇧🇷  Portuguese</text>
+  <rect x="144" y="181" width="313" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="190" text-anchor="end" class="pct-label">99%</text>
+  <text x="24" y="218" class="lang-label">🇵🇱  Polish</text>
   <rect x="144" y="209" width="316" height="8" rx="4" class="bar-bg" />
-  <rect x="144" y="209" width="307" height="8" rx="4" class="bar-progress" />
-  <text x="516" y="218" text-anchor="end" class="pct-label">97%</text>
+  <rect x="144" y="209" width="313" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="218" text-anchor="end" class="pct-label">99%</text>
   <text x="24" y="246" class="lang-label">🇸🇮  Slovenian</text>
   <rect x="144" y="237" width="316" height="8" rx="4" class="bar-bg" />
-  <rect x="144" y="237" width="307" height="8" rx="4" class="bar-progress" />
-  <text x="516" y="246" text-anchor="end" class="pct-label">97%</text>
+  <rect x="144" y="237" width="303" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="246" text-anchor="end" class="pct-label">96%</text>
   <text x="24" y="274" class="lang-label">🇩🇪  German</text>
   <rect x="144" y="265" width="316" height="8" rx="4" class="bar-bg" />
   <rect x="144" y="265" width="294" height="8" rx="4" class="bar-progress" />
