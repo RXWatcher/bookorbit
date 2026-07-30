@@ -807,13 +807,22 @@ export class BookQueryBuilder {
       return sql`exists (${sq})`;
     };
 
+    // A book only gets a user_book_status row once a status is set explicitly or derived from
+    // progress. Everywhere else (sorting, jump buckets, OPDS, the UI) a missing row reads as
+    // 'unread', so filtering on 'unread' has to cover row-less books too.
+    const targetsUnread = values?.includes('unread') ?? false;
+
     switch (operator) {
-      case 'includesAny':
+      case 'includesAny': {
         if (!values?.length) return sql`1 = 0`;
-        return existsStatus(inArray(userBookStatus.status, values as ReadStatus[]));
-      case 'excludesAll':
+        const matches = existsStatus(inArray(userBookStatus.status, values as ReadStatus[]));
+        return targetsUnread ? or(matches, not(existsStatus()))! : matches;
+      }
+      case 'excludesAll': {
         if (!values?.length) return sql`1 = 1`;
-        return not(existsStatus(inArray(userBookStatus.status, values as ReadStatus[])));
+        const matches = existsStatus(inArray(userBookStatus.status, values as ReadStatus[]));
+        return targetsUnread ? and(not(matches), existsStatus())! : not(matches);
+      }
       case 'isEmpty':
         return not(existsStatus());
       case 'isNotEmpty':
