@@ -3263,6 +3263,8 @@
         "language": "Language",
         "metadataScore": "Metadata Score"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "remove": "Rimuovi",
       "emptyState": "Nessun ordinamento configurato. Verrà utilizzato il titolo crescente.",
       "addLevel": "Aggiungi livello di ordinamento"

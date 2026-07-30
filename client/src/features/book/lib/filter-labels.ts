@@ -1,5 +1,7 @@
 import type { Rule, RuleField, RuleOperator, SortField } from '@bookorbit/types'
+import { parseCustomSortFieldId } from '@bookorbit/types'
 import { i18n } from '@/i18n'
+import { activeCustomFieldLabel } from '@/features/book/composables/useActiveCustomFields'
 import { PROVIDER_SHORT_LABELS } from '@/lib/provider-colors'
 
 // Resolved through the global composer rather than useI18n() because these helpers also run
@@ -8,7 +10,10 @@ import { PROVIDER_SHORT_LABELS } from '@/lib/provider-colors'
 const t = i18n.global.t
 
 export function sortFieldLabel(field: SortField): string {
-  return t(`book.sort.fields.${field}`)
+  const customFieldId = parseCustomSortFieldId(field)
+  if (customFieldId === null) return t(`book.sort.fields.${field}`)
+  // Custom field labels are user-authored, so they are shown as-is rather than translated.
+  return activeCustomFieldLabel(customFieldId) ?? t('book.sort.customFieldFallback')
 }
 
 export function fieldLabel(field: RuleField): string {

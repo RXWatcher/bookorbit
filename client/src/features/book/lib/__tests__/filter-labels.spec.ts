@@ -1,10 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import type { Rule } from '@bookorbit/types'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { CustomMetadataFieldSummary, Rule } from '@bookorbit/types'
 import { RULE_FIELDS, RULE_OPERATORS, SORT_FIELDS } from '@bookorbit/types'
 import { activateI18nLocale, i18n } from '@/i18n'
 import { compileIcuCatalog } from '@/i18n/icu'
 import en from '@/locales/en.json'
+import { activeCustomFieldLabel } from '@/features/book/composables/useActiveCustomFields'
 import { fieldLabel, operatorLabel, ruleToParts, sortFieldLabel } from '../filter-labels'
+
+vi.mock('@/features/book/composables/useActiveCustomFields', () => ({
+  activeCustomFieldLabel: vi.fn<(fieldId: number) => string | null>(() => null),
+}))
+
+function mockCustomFieldLabel(label: CustomMetadataFieldSummary['label'] | null) {
+  vi.mocked(activeCustomFieldLabel).mockReturnValue(label)
+}
 
 describe('catalog coverage', () => {
   it('translates every rule field', () => {
@@ -23,6 +32,21 @@ describe('catalog coverage', () => {
     for (const field of SORT_FIELDS) {
       expect(sortFieldLabel(field)).not.toBe(`book.sort.fields.${field}`)
     }
+  })
+})
+
+describe('custom metadata sort fields', () => {
+  it('shows the user-authored field label verbatim', () => {
+    mockCustomFieldLabel('Shelf Location')
+
+    expect(sortFieldLabel('custom:7')).toBe('Shelf Location')
+    expect(activeCustomFieldLabel).toHaveBeenCalledWith(7)
+  })
+
+  it('falls back to a translated placeholder when the field no longer resolves', () => {
+    mockCustomFieldLabel(null)
+
+    expect(sortFieldLabel('custom:7')).toBe('Custom field')
   })
 })
 

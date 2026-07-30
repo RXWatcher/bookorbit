@@ -3263,6 +3263,8 @@
         "language": "Language",
         "metadataScore": "Metadata Score"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "remove": "Quitar",
       "emptyState": "No hay clasificación configurada. Se utilizará título ascendente.",
       "addLevel": "Agregar nivel de clasificación"

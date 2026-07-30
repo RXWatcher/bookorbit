@@ -2,13 +2,22 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { AnyColumn, SQL, and, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, not, or, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import type { CommunityRatingProvider, ContentFilterRules, GroupRule, ReadStatus, Rule, SortSpec } from '@bookorbit/types';
+import { parseCustomSortFieldId } from '@bookorbit/types';
+import type {
+  CommunityRatingProvider,
+  ContentFilterRules,
+  CustomMetadataFieldTypeMap,
+  GroupRule,
+  ReadStatus,
+  Rule,
+  SortSpec,
+} from '@bookorbit/types';
 import { DB } from '../../db';
 import { isDateKey, resolveTimeZone, toDateKeyInTimeZone } from '../../common/utils/timezone.utils';
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
 import { accentInsensitiveIlike } from '../../common/utils/accent-insensitive-search.utils';
 import * as schema from '../../db/schema';
-import { BookSortBuilder } from './book-sort-builder.service';
+import { BookSortBuilder, customMetadataValueColumn } from './book-sort-builder.service';
 import {
   audiobookProgress,
   authors,
@@ -118,8 +127,8 @@ export class BookQueryBuilder {
     )!;
   }
 
-  buildOrderBy(sort: SortSpec[], userId?: number): SQL[] {
-    return this.sortBuilder.build(sort, userId);
+  buildOrderBy(sort: SortSpec[], userId?: number, customFieldTypes?: CustomMetadataFieldTypeMap): SQL[] {
+    return this.sortBuilder.build(sort, userId, customFieldTypes);
   }
 
   private groupToSql(node: GroupRule, depth: number, userId?: number, timeZone = 'UTC'): SQL {
@@ -935,7 +944,7 @@ export class BookQueryBuilder {
     return node.rules.some((r) => BookQueryBuilder.hasSeriesSelectionFilter(r));
   }
 
-  static buildCollapseOrderBy(sort: SortSpec[], userId: number): string {
+  static buildCollapseOrderBy(sort: SortSpec[], userId: number, customFieldTypes?: CustomMetadataFieldTypeMap): string {
     if (sort.length === 0) return 'sort_title ASC NULLS LAST, r.id ASC';
 
     if (!Number.isSafeInteger(userId)) throw new BadRequestException('Invalid userId for collapse order');
@@ -945,6 +954,18 @@ export class BookQueryBuilder {
     for (const { field, dir } of sort) {
       const D = dir.toUpperCase();
       if (D !== 'ASC' && D !== 'DESC') continue;
+      // Custom field ids are parsed to bounded integers and the column comes from a fixed
+      // map, so both are safe to inline into this raw ORDER BY.
+      const customFieldId = parseCustomSortFieldId(field);
+      if (customFieldId !== null) {
+        const column = customMetadataValueColumn(customFieldId, customFieldTypes);
+        if (column) {
+          parts.push(
+            `(SELECT v.${column} FROM book_custom_metadata_values v WHERE v.book_id = r.id AND v.field_id = ${customFieldId}) ${D} NULLS LAST`,
+          );
+        }
+        continue;
+      }
       switch (field) {
         case 'title':
         case 'series':

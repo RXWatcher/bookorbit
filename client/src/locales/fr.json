@@ -3263,6 +3263,8 @@
         "language": "Language",
         "metadataScore": "Metadata Score"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "remove": "Supprimer",
       "emptyState": "Aucun tri configuré. Le titre ascendant sera utilisé.",
       "addLevel": "Ajouter un niveau de tri"

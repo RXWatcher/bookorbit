@@ -3263,6 +3263,8 @@
         "language": "Language",
         "metadataScore": "Metadata Score"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "remove": "Odstrani",
       "emptyState": "Razvrščanje ni nastavljeno. Uporabljen bo naslov naraščajoče.",
       "addLevel": "Dodaj raven razvrščanja"

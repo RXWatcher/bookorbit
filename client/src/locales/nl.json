@@ -3263,6 +3263,8 @@
         "language": "Language",
         "metadataScore": "Metadata Score"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "remove": "Verwijderen",
       "emptyState": "Geen sortering ingesteld. Titel oplopend wordt gebruikt.",
       "addLevel": "Sorteerniveau toevoegen"
