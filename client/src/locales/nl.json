@@ -6078,6 +6078,8 @@
   "smartScope": {
     "syncToKobo": "Synchroniseren met Kobo",
     "syncToKoboHint": "Boeken die aan dit bereik voldoen, verschijnen op uw Kobo-apparaat",
+    "visibleToAll": "Visible to all users",
+    "visibleToAllHint": "Every user can see and use this smart scope",
     "dialog": {
       "name": "Naam",
       "namePlaceholder": "bijv. Ongelezen sci-fi",
@@ -6091,7 +6093,6 @@
     },
     "createDialog": {
       "title": "Nieuwe Smart Scope",
-      "visibleToAll": "Zichtbaar voor alle gebruikers",
       "createFailed": "Smart Scope aanmaken mislukt"
     },
     "saveAsDialog": {

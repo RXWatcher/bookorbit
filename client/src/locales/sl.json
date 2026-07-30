@@ -6078,6 +6078,8 @@
   "smartScope": {
     "syncToKobo": "Sinhroniziraj s Kobo",
     "syncToKoboHint": "Knjige, ki ustrezajo temu obsegu, bodo prikazane v napravi Kobo",
+    "visibleToAll": "Visible to all users",
+    "visibleToAllHint": "Every user can see and use this smart scope",
     "dialog": {
       "name": "Ime",
       "namePlaceholder": "npr. Neprebrana znanstvena fantastika",
@@ -6091,7 +6093,6 @@
     },
     "createDialog": {
       "title": "Nov pametni obseg",
-      "visibleToAll": "Vidno vsem uporabnikom",
       "createFailed": "Ustvarjanje pametnega obsega ni uspelo"
     },
     "saveAsDialog": {

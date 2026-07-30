@@ -6078,6 +6078,8 @@
   "smartScope": {
     "syncToKobo": "Mit Kobo synchronisieren",
     "syncToKoboHint": "Bücher, die diesem Bereich entsprechen, werden auf deinem Kobo-Gerät angezeigt",
+    "visibleToAll": "Visible to all users",
+    "visibleToAllHint": "Every user can see and use this smart scope",
     "dialog": {
       "name": "Name",
       "namePlaceholder": "z. B. Ungelesene Science-Fiction",
@@ -6091,7 +6093,6 @@
     },
     "createDialog": {
       "title": "Neuer SmartScope",
-      "visibleToAll": "Für alle Benutzer sichtbar",
       "createFailed": "SmartScope konnte nicht erstellt werden"
     },
     "saveAsDialog": {
