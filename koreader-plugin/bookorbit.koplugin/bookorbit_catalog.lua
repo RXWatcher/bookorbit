@@ -234,6 +234,16 @@ function BookOrbitCatalog:init()
     self.client = BookOrbitApi.new(self.api)
     self.stack = {}
     self.settings = self.settings or {}
+    CatalogWidgets.setAssetIconFiles({
+        on_device = self:pluginAssetFile("bookorbit.on-device.svg"),
+        shuffle = self:pluginAssetFile("bookorbit.shuffle.svg"),
+        in_progress = self:pluginAssetFile("bookorbit.in-progress.svg"),
+        collections = self:pluginAssetFile("bookorbit.collections.svg"),
+        stat_today = self:pluginAssetFile("bookorbit.stat-today.svg"),
+        stat_week = self:pluginAssetFile("bookorbit.stat-week.svg"),
+        stat_streak = self:pluginAssetFile("bookorbit.stat-streak.svg"),
+        stat_goal = self:pluginAssetFile("bookorbit.stat-goal.svg"),
+    })
     self:initThumbnailCache()
     self:initBulkDownloadState()
     self.view_mode = self.settings.catalog_view_mode == "list" and "list" or "mosaic"
@@ -276,12 +286,15 @@ function BookOrbitCatalog:init()
     end)
 end
 
-function BookOrbitCatalog:downloadIconPath()
+function BookOrbitCatalog:pluginAssetFile(name)
     local source_dir = self.path or (self._manager and self._manager.path)
-    if source_dir then
-        local path = source_dir .. "/assets/" .. DOWNLOAD_ICON_FILE
-        if lfs.attributes(path, "mode") == "file" then return path end
-    end
+    if not source_dir then return nil end
+    local path = source_dir .. "/assets/" .. name
+    if lfs.attributes(path, "mode") == "file" then return path end
+end
+
+function BookOrbitCatalog:downloadIconPath()
+    return self:pluginAssetFile(DOWNLOAD_ICON_FILE)
 end
 
 function BookOrbitCatalog:isBulkSelectionActive()
@@ -559,6 +572,16 @@ end
 
 function BookOrbitCatalog:isOnDevice(book)
     return book ~= nil and book.id ~= nil and self.on_device[book.id] ~= nil
+end
+
+-- The local file a Continue-reading tap should resume: only when the
+-- tap-to-resume setting is on and the book is already on the device. Nil sends
+-- the tap to the detail page instead.
+function BookOrbitCatalog:dashboardResumePath(book)
+    if self.settings.catalog_dashboard_tap_resumes == false then return nil end
+    local path = book ~= nil and book.id ~= nil and self.on_device[book.id] or nil
+    if type(path) == "string" and path ~= "" then return path end
+    return nil
 end
 
 function BookOrbitCatalog:onDeviceFilePath(file)
@@ -1890,7 +1913,15 @@ end
 function BookOrbitCatalog:finishCustomUpdate(old_dimen, select_number)
     self:updatePageInfo(select_number)
     Menu.mergeTitleBarIntoLayout(self)
+    -- A view may narrow the e-ink refresh to the region it actually changed
+    -- (the dashboard does for row page turns); everything else refreshes the
+    -- whole menu as before.
+    local refresh_region = self.custom_refresh_region
+    self.custom_refresh_region = nil
     UIManager:setDirty(self.show_parent, function()
+        if refresh_region then
+            return "ui", refresh_region
+        end
         local refresh_dimen = old_dimen and old_dimen:combine(self.dimen) or self.dimen
         return "ui", refresh_dimen
     end)
@@ -2161,7 +2192,14 @@ function BookOrbitCatalog:onMenuSelect(item)
     if item.kind == "section" then
         self:loadSection(item.section)
     elseif item.kind == "dashboard-book" then
-        self:loadBookDetail(item.book_id)
+        -- Continue-reading heroes resume the book directly when it is on the
+        -- device; hold still opens the full action sheet.
+        local resume_path = item.resume and self:dashboardResumePath(item.book) or nil
+        if resume_path then
+            self:openDownloadedFile(resume_path)
+        else
+            self:loadBookDetail(item.book_id)
+        end
     elseif item.kind == "dashboard-highlight" then
         self:loadBookDetail(item.book_id)
     elseif item.kind == "dashboard-search" then

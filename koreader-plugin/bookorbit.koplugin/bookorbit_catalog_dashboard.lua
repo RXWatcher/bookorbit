@@ -27,12 +27,14 @@ local NetworkMgr = require("ui/network/manager")
 local Screen = require("device").screen
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
+local Capabilities = require("bookorbit_capabilities")
 local CatalogUtil = require("bookorbit_catalog_util")
 local CatalogWidgets = require("bookorbit_catalog_widgets")
 local DashboardSections = require("bookorbit_dashboard_sections")
@@ -40,10 +42,12 @@ local BookOrbitStatsReader = require("bookorbit_stats_reader")
 
 local formatDuration = CatalogUtil.formatDuration
 local formatProgress = CatalogUtil.formatProgress
+local formatRelativeTime = CatalogUtil.formatRelativeTime
 local readingStreakDays = CatalogUtil.readingStreakDays
 
 local BookOrbitDashboardCoverCard = CatalogWidgets.DashboardCoverCard
 local BookOrbitDashboardHeroCard = CatalogWidgets.DashboardHeroCard
+local BookOrbitDashboardHighlightCard = CatalogWidgets.DashboardHighlightCard
 local BookOrbitDashboardBrowseRow = CatalogWidgets.DashboardBrowseRow
 local BookOrbitDashboardIconButton = CatalogWidgets.DashboardIconButton
 
@@ -59,6 +63,20 @@ local SECTION_PAGE_PREFIX = "section"
 local SHELF_PAGE_SIZE = 12
 -- Cover cards never get narrower than this, however tight the page is.
 local SHELF_MIN_CARD_WIDTH = 72
+-- Header controls are drawn inside the section header's label row, so the row
+-- stays as tall as a header without controls; the tap box reaches into the gap
+-- above and below it to stay finger-sized.
+local HEADER_CONTROL_ICON = 19
+local HEADER_CONTROL_TAP_PAD = 9
+-- The seven-day activity chart inside the stats strip.
+local WEEK_BAR_MAX_HEIGHT = 18
+local WEEK_BAR_WIDTH = 5
+local WEEK_BAR_GAP = 3
+-- Breathing room above and below the stats blocks, inside the strip's rules.
+local STATS_BODY_PADDING = 6
+-- The marker a stats block shows between its value and its label when it has
+-- no sparkline of its own.
+local STATS_ICON_SIZE = 20
 
 local CatalogDashboard = {}
 
@@ -105,13 +123,23 @@ function CatalogDashboard.dashboardItems()
     }
 end
 
+local function greetingForHour(hour)
+    if hour >= 5 and hour < 12 then
+        return _("Good morning"), _("Good morning, %1")
+    elseif hour >= 12 and hour < 18 then
+        return _("Good afternoon"), _("Good afternoon, %1")
+    end
+    return _("Good evening"), _("Good evening, %1")
+end
+
 function CatalogDashboard:dashboardSubtitle(dashboard)
     local username = dashboard and (dashboard.displayName or dashboard.name or dashboard.username)
         or (self.settings and self.settings.username)
+    local plain, templated = greetingForHour(tonumber(os.date("%H")) or 12)
     if type(username) == "string" and username ~= "" then
-        return T(_("Hi, %1"), username)
+        return T(templated, username)
     end
-    return _("Hi")
+    return plain
 end
 
 function CatalogDashboard:dashboardContext(dashboard, opts)
@@ -193,6 +221,28 @@ function CatalogDashboard:dashboardRoot(opts)
                 end
                 return { type = config.type, books = response.discover or {} }
             end
+            -- Sources without a catalog-books equivalent go through the server's
+            -- dashboard-section endpoint. A confirmed 404/405 downgrades the
+            -- capability so the picker stops offering them against this server.
+            if DashboardSections.usesSectionEndpoint(config.type) then
+                local known = Capabilities.cached(self.client)
+                if known and not known[DashboardSections.SECTION_ENDPOINT_CAPABILITY] then
+                    return { type = config.type, books = {} }
+                end
+                local response, section_err = self:fetch(_("Loading dashboard..."), function()
+                    return self.client:catalogDashboardSection(config.type)
+                end, opts)
+                if isDashboardUnsupported(section_err) then
+                    Capabilities.markUnsupported(self.client, DashboardSections.SECTION_ENDPOINT_CAPABILITY)
+                    return { type = config.type, books = {} }
+                end
+                if section_err or type(response) ~= "table" then
+                    return nil, section_err or "invalid response"
+                end
+                local section = type(response.section) == "table" and response.section or {}
+                return { type = config.type, books = section.books or {} }
+            end
+
             local params = { page = 1, size = SHELF_PAGE_SIZE }
             if config.type == "recently-added" then
                 params.sort = "recently_added"
@@ -293,11 +343,12 @@ function CatalogDashboard.dashboardBooks(dashboard)
     return books
 end
 
-function CatalogDashboard:dashboardActionEntries()
+function CatalogDashboard:dashboardActionEntries(total_books)
     return {
         {
             text = _("In progress"),
             icon = "dogear.reading",
+            icon_file = CatalogWidgets.assetIconFile("in_progress"),
             kind = "books",
             params = { sort = "recently_read", readStatus = "reading" },
         },
@@ -316,6 +367,7 @@ function CatalogDashboard:dashboardActionEntries()
         {
             text = _("All Books"),
             icon = "appbar.pageview",
+            mandatory = total_books and tostring(total_books) or nil,
             kind = "books",
             params = { sort = "title" },
         },
@@ -334,6 +386,7 @@ function CatalogDashboard:dashboardActionEntries()
         {
             text = _("Collections"),
             icon = "texture-box",
+            icon_file = CatalogWidgets.assetIconFile("collections"),
             kind = "section",
             section = "collections",
         },
@@ -342,6 +395,11 @@ function CatalogDashboard:dashboardActionEntries()
             icon = "cre.render.working",
             kind = "section",
             section = "smart-scopes",
+        },
+        {
+            text = _("Search"),
+            icon = "appbar.search",
+            kind = "dashboard-search",
         },
     }
 end
@@ -371,20 +429,25 @@ end
 -- thick underline running into a hairline rule. Controls (paging chevrons,
 -- the Discover reroll) are pinned to the header's right edge so the rows
 -- below keep the full content width and stay aligned with the margins.
-function CatalogDashboard:addDashboardHeader(text, controls)
+-- focus_controls names the tappable subset when controls also carries
+-- display-only widgets such as the page indicator.
+function CatalogDashboard:addDashboardHeader(text, controls, focus_controls)
     local right
     if controls and #controls > 0 then
         right = HorizontalGroup:new{ align = "center" }
         for index, control in ipairs(controls) do
             if index > 1 then
-                table.insert(right, HorizontalSpan:new{ width = Size.span.horizontal_default })
+                -- The control boxes already carry padding around their glyphs;
+                -- a wide span on top of that scatters the cluster.
+                table.insert(right, HorizontalSpan:new{ width = Size.span.horizontal_small })
             end
             table.insert(right, control)
         end
     end
     self:addDashboardInset(CatalogWidgets.buildDashboardSectionHeader(text, self.content_w, right))
-    if controls and #controls > 0 then
-        table.insert(self.layout, controls)
+    local focus_row = focus_controls or controls
+    if focus_row and #focus_row > 0 then
+        table.insert(self.layout, focus_row)
     end
 end
 
@@ -394,34 +457,51 @@ function CatalogDashboard:dashboardSectionSupportsReroll(config)
     return (config or {}).type == DashboardSections.DEFAULT_TYPE
 end
 
-function CatalogDashboard:buildDashboardRerollButton(index)
-    local size = Screen:scaleBySize(24)
+-- Every header control is a square the size of the header's label row, so the
+-- controls fill that row rather than making the header taller than one without
+-- them.
+function CatalogDashboard:buildDashboardHeaderControl(opts)
+    local size = CatalogWidgets.dashboardSectionHeaderRowHeight()
     return BookOrbitDashboardIconButton:new{
-        entry = { kind = "dashboard-reroll", section_index = index or 1, icon = "cre.render.reload" },
+        entry = opts.entry,
         dimen = Geom:new{ x = 0, y = 0, w = size, h = size },
+        icon_size = Screen:scaleBySize(HEADER_CONTROL_ICON),
+        tap_padding_v = Screen:scaleBySize(HEADER_CONTROL_TAP_PAD),
+        enabled = opts.enabled,
+        callback = opts.callback,
         menu = self,
     }
 end
 
--- A pair of small borderless paging chevrons for a section header.
+function CatalogDashboard:buildDashboardRerollButton(index)
+    return self:buildDashboardHeaderControl{
+        entry = {
+            kind = "dashboard-reroll",
+            section_index = index or 1,
+            icon = "cre.render.reload",
+            icon_file = CatalogWidgets.assetIconFile("shuffle"),
+        },
+    }
+end
+
+-- Paging chevrons for a section header, with a "page/pages" indicator between
+-- them so a shelf's extent is visible.
 function CatalogDashboard:buildDashboardHeaderNav(section_id, page, page_count)
-    local size = Screen:scaleBySize(24)
     local function navButton(icon, enabled, delta)
-        return Button:new{
-            icon = icon,
-            icon_width = Screen:scaleBySize(12),
-            icon_height = Screen:scaleBySize(12),
-            width = size,
-            height = size,
-            bordersize = 0,
-            show_border = false,
+        return self:buildDashboardHeaderControl{
+            entry = { icon = icon },
             enabled = enabled,
             callback = function()
                 self:turnDashboardPage(section_id, delta)
             end,
         }
     end
-    return navButton("chevron.left", page > 1, -1), navButton("chevron.right", page < page_count, 1)
+    local indicator = TextWidget:new{
+        text = tostring(page) .. "/" .. tostring(page_count),
+        face = Font:getFace("cfont", 12),
+        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+    }
+    return navButton("chevron.left", page > 1, -1), navButton("chevron.right", page < page_count, 1), indicator
 end
 
 function CatalogDashboard:dashboardPage(section_id, page_count)
@@ -437,6 +517,9 @@ function CatalogDashboard:turnDashboardPage(section_id, delta)
     local context = self.current_context or {}
     context.dash_pages = context.dash_pages or {}
     context.dash_pages[section_id] = math.max(1, (tonumber(context.dash_pages[section_id]) or 1) + delta)
+    -- A page turn changes one section band and nothing else, so only that band
+    -- needs an e-ink refresh; the rebuild below records the band's position.
+    self.dash_refresh_section = section_id
     self:updateItems(nil, true)
 end
 
@@ -448,6 +531,10 @@ function CatalogDashboard:dashboardHeroMetaText(book)
     else
         local status = self:readStatusLabel(book)
         if status then table.insert(parts, status) end
+    end
+    local recency = formatRelativeTime(book.lastReadAt)
+    if recency then
+        table.insert(parts, recency)
     end
     if self:isOnDevice(book) then
         table.insert(parts, _("On device"))
@@ -461,6 +548,7 @@ function CatalogDashboard:buildDashboardHeroCard(book, width, height)
             kind = "dashboard-book",
             book_id = book.id,
             book = book,
+            resume = true,
             meta_text = self:dashboardHeroMetaText(book),
         },
         dimen = Geom:new{ x = 0, y = 0, w = width, h = height },
@@ -620,6 +708,21 @@ function CatalogDashboard:addDashboardEmptyState(text, button_text, callback)
     table.insert(self.layout, { button })
 end
 
+-- A muted status line shown while the dashboard renders cached data, built
+-- from the generatedAt timestamp the cached body carries.
+function CatalogDashboard:buildDashboardStatusLine(dashboard)
+    local updated = formatRelativeTime(dashboard and dashboard.generatedAt)
+    local text
+    if NetworkMgr:isConnected() then
+        text = updated and T(_("Showing cached dashboard - updated %1"), updated)
+            or _("Showing cached dashboard")
+    else
+        text = updated and T(_("Offline - updated %1"), updated)
+            or _("Offline - showing cached dashboard")
+    end
+    return CatalogWidgets.buildStatusLabel(text, self.content_w, nil, "center")
+end
+
 -- Local reading activity from statistics.sqlite3, cached briefly so row page
 -- turns do not reopen the database. The local streak is retained as a fallback
 -- for cached responses from servers that do not provide the account streak.
@@ -638,37 +741,117 @@ function CatalogDashboard:dashboardStatsSummary()
     return summary
 end
 
--- Three plain stat blocks separated by hairlines: no boxes, so the strip
--- reads as information rather than competing with the tappable cards.
+-- The last seven days as bar heights, oldest first, normalized to the busiest
+-- day. Falls back to the account streak's read/not-read days when local
+-- statistics carry nothing, and to nil when neither side has data.
+local function weekBarData(summary, dashboard)
+    local day_seconds = type(summary.day_seconds) == "table" and summary.day_seconds or {}
+    local values, max_value = {}, 0
+    for day = 1, 7 do
+        local value = tonumber(day_seconds[day]) or 0
+        values[day] = value
+        max_value = math.max(max_value, value)
+    end
+    if max_value > 0 then return values, max_value end
+    local reading_streak = dashboard and dashboard.readingStreak
+    local last_seven = type(reading_streak) == "table" and reading_streak.lastSevenDays or nil
+    if type(last_seven) ~= "table" then return nil end
+    local any = false
+    for day = 1, 7 do
+        values[day] = last_seven[day] and 1 or 0
+        any = any or values[day] > 0
+    end
+    if not any then return nil end
+    return values, 1
+end
+
+-- A seven-day activity chart under the "Past 7 days" value: a bar per day
+-- scaled against the busiest one and standing on a shared baseline, today
+-- solid black and earlier days dark gray.
+function CatalogDashboard:buildDashboardWeekBars(summary, dashboard)
+    local values, max_value = weekBarData(summary, dashboard)
+    if not values then return nil end
+    local max_h = Screen:scaleBySize(WEEK_BAR_MAX_HEIGHT)
+    local min_fill = math.max(1, Screen:scaleBySize(2))
+    local bar_w = Screen:scaleBySize(WEEK_BAR_WIDTH)
+    local gap = Screen:scaleBySize(WEEK_BAR_GAP)
+    local row = HorizontalGroup:new{ align = "bottom" }
+    for day = 1, 7 do
+        if day > 1 then
+            table.insert(row, HorizontalSpan:new{ width = gap })
+        end
+        local fill_h = values[day] > 0
+            and math.max(min_fill, math.floor(max_h * values[day] / max_value + 0.5))
+            or 0
+        table.insert(row, CatalogWidgets.buildDashboardWeekBar(bar_w, max_h, fill_h, day == 7))
+    end
+    return CatalogWidgets.buildDashboardWeekChart(row)
+end
+
+-- Activity blocks separated by hairlines: no boxes, so the strip reads as
+-- information rather than competing with the tappable cards. Inventory counts
+-- live in the Browse block; the strip keeps to reading activity plus the
+-- yearly goal when one is set.
 function CatalogDashboard:buildDashboardStatsStrip(summary, dashboard, height)
     local sep_w = Size.line.thin
-    local today_seconds = summary.today_seconds or 0
     local streak_days = readingStreakDays(dashboard, summary.streak_days)
+    local week_bars = self:buildDashboardWeekBars(summary, dashboard)
+    -- The blocks without a sparkline take an icon in that row instead, so the
+    -- strip reads as four equally furnished blocks rather than one chart and
+    -- three gaps.
+    local icon_size = Screen:scaleBySize(STATS_ICON_SIZE)
     local blocks = {
-        { value = today_seconds > 0 and formatDuration(today_seconds) or _("Not yet"), label = _("Today") },
-        { value = formatDuration(summary.week_seconds or 0), label = _("Past 7 days") },
-        { value = tostring(streak_days), label = _("Day streak") },
+        {
+            value = formatDuration(summary.today_seconds or 0),
+            label = _("Today"),
+            extra = CatalogWidgets.buildDashboardStatIcon("stat_today", icon_size),
+        },
+        {
+            value = formatDuration(summary.week_seconds or 0),
+            label = _("Past 7 days"),
+            -- No per-day data to chart (a fresh install, or a server without
+            -- the streak) still gets a marker rather than the lone gap.
+            extra = week_bars or CatalogWidgets.buildDashboardStatIcon("stat_week", icon_size),
+        },
+        {
+            value = tostring(streak_days),
+            label = _("Day streak"),
+            extra = CatalogWidgets.buildDashboardStatIcon("stat_streak", icon_size),
+        },
     }
-    local total = dashboard and tonumber(dashboard.totalBooks or dashboard.bookCount)
-    if total then
-        table.insert(blocks, { value = tostring(total), label = _("Library") })
+    local reading_goal = dashboard and type(dashboard.readingGoal) == "table" and dashboard.readingGoal or nil
+    local goal_books = reading_goal and tonumber(reading_goal.goalBooks) or nil
+    if goal_books and goal_books > 0 then
+        table.insert(blocks, {
+            value = tostring(tonumber(reading_goal.completedBooks) or 0) .. " / " .. tostring(goal_books),
+            label = reading_goal.year and T(_("%1 goal"), reading_goal.year) or _("Yearly goal"),
+            extra = CatalogWidgets.buildDashboardStatIcon("stat_goal", icon_size),
+        })
     end
-    table.insert(blocks, { value = tostring(self:onDeviceCount()), label = _("On device") })
 
+    -- One set of row heights for every block, so the values sit on one baseline
+    -- and the labels on another whether a block carries the sparkline or an icon.
+    local marker_h = week_bars and week_bars:getSize().h or 0
+    for _, block in ipairs(blocks) do
+        if block.extra then marker_h = math.max(marker_h, block.extra:getSize().h) end
+    end
+    local metrics = CatalogWidgets.dashboardStatMetrics(marker_h)
     local block_w = math.floor((self.content_w - (#blocks - 1) * sep_w) / #blocks)
     local row = HorizontalGroup:new{ align = "center" }
     for index, block in ipairs(blocks) do
         if index > 1 then
             table.insert(row, LineWidget:new{
                 background = Blitbuffer.COLOR_LIGHT_GRAY,
-                dimen = Geom:new{ w = sep_w, h = Screen:scaleBySize(18) },
+                dimen = Geom:new{ w = sep_w, h = metrics.total_h },
             })
         end
-        table.insert(row, CatalogWidgets.buildDashboardStat(block.value, block.label, block_w))
+        table.insert(row, CatalogWidgets.buildDashboardStat(
+            block.value, block.label, block_w, block.extra, metrics))
     end
     local line_h = Size.line.thin
-    local body_h = height and math.max(row:getSize().h, height - 2 * line_h)
-        or math.max(row:getSize().h, Screen:scaleBySize(STATS_MIN_BODY_HEIGHT))
+    local padded_h = row:getSize().h + 2 * Screen:scaleBySize(STATS_BODY_PADDING)
+    local body_h = height and math.max(padded_h, height - 2 * line_h)
+        or math.max(padded_h, Screen:scaleBySize(STATS_MIN_BODY_HEIGHT))
     return VerticalGroup:new{
         align = "center",
         LineWidget:new{
@@ -743,18 +926,20 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     local context = self.current_context or {}
     local dashboard = context.dashboard or {}
     local continue_books = dashboard.continueReading or {}
-    local action_entries = self:dashboardActionEntries()
+    local action_entries = self:dashboardActionEntries(tonumber(dashboard.totalBooks or dashboard.bookCount))
     local summary = self:dashboardStatsSummary() or { today_seconds = 0, week_seconds = 0, streak_days = 0 }
     local stale_sections = type(context.section_stale) == "table" and context.section_stale or {}
+    local highlight = type(dashboard.highlightOfTheDay) == "table" and dashboard.highlightOfTheDay or nil
 
     local function px(n) return Screen:scaleBySize(n) end
     local avail = self.available_height
     local inner_gap = px(9)
     local top_gap = px(4)
-    local section_gap = px(14)
+    local section_gap = px(18)
     local compact_gap = px(SECTION_COMPACT_GAP)
     self.dash_inner_gap = inner_gap
     self.dash_used = 0
+    self.dash_section_bands = {}
 
     local header_h = CatalogWidgets.buildDashboardSectionHeader("X", self.content_w):getSize().h
     local browse_row_h = px(42)
@@ -762,21 +947,28 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     local browse_rows = 3
     local hero_h = math.min(px(150), math.max(px(76), math.floor(avail * 0.18)))
 
+    local status_widget
+    if context.stale and not context.loading and context.dashboard then
+        status_widget = self:buildDashboardStatusLine(dashboard)
+    end
+    local status_h = status_widget and (status_widget:getSize().h + compact_gap) or 0
+
     local configs = {}
     local stats_widgets = {}
+    local highlight_heights = {}
     local hidden = {}
     for index = 1, DashboardSections.SLOT_COUNT do
         configs[index] = DashboardSections.at(self.settings, index)
     end
 
     local function isShelf(config)
-        return config.type ~= "stats" and config.type ~= "continue-reading" and config.type ~= "browse"
+        return DashboardSections.isBookSource(config.type)
     end
 
     -- Slots with a native renderer take the height they need; the shelves share
     -- whatever is left of the page.
     local function measureFixed()
-        local fixed = top_gap
+        local fixed = top_gap + status_h
         local shelf_count = 0
         local max_shelf_books = 0
         for index = 1, DashboardSections.SLOT_COUNT do
@@ -790,6 +982,10 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
                     fixed = fixed + header_h + inner_gap + hero_h + section_gap
                 elseif config.type == "browse" then
                     fixed = fixed + header_h + inner_gap + browse_rows * browse_row_h + section_gap
+                elseif config.type == "highlight" then
+                    highlight_heights[index] = highlight_heights[index]
+                        or (highlight and CatalogWidgets.dashboardHighlightCardHeight(highlight, self.content_w) or px(48))
+                    fixed = fixed + header_h + inner_gap + highlight_heights[index] + section_gap
                 else
                     shelf_count = shelf_count + 1
                     max_shelf_books = math.max(max_shelf_books, #self.dashboardSlotBooks(dashboard, index))
@@ -815,10 +1011,14 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     end
 
     -- Too many slots for the page: the stats strip goes first, since it only
-    -- summarises what the reader can reach elsewhere, then shelves bottom-up.
+    -- summarises what the reader can reach elsewhere, then the highlight card,
+    -- then shelves bottom-up.
     local function slotToDrop()
         for index = 1, DashboardSections.SLOT_COUNT do
             if not hidden[index] and configs[index].type == "stats" then return index end
+        end
+        for index = 1, DashboardSections.SLOT_COUNT do
+            if not hidden[index] and configs[index].type == "highlight" then return index end
         end
         for index = DashboardSections.SLOT_COUNT, 1, -1 do
             if not hidden[index] and isShelf(configs[index]) then return index end
@@ -833,6 +1033,10 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     end
 
     self:addDashboardSpacer(top_gap)
+    if status_widget then
+        self:addDashboardInset(status_widget)
+        self:addDashboardSpacer(compact_gap)
+    end
     local function renderStats(index)
         self:addDashboardInset(stats_widgets[index])
     end
@@ -842,12 +1046,14 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
         local hero_pages = #continue_books > 0 and math.max(1, math.ceil(#continue_books / hero_slots)) or 0
         local page_id = "continue" .. tostring(index)
         local hero_page = hero_pages > 0 and self:dashboardPage(page_id, hero_pages) or 1
-        local controls
+        local band_start = self.dash_used
+        local controls, focus_controls
         if hero_pages > 1 then
-            local prev_button, next_button = self:buildDashboardHeaderNav(page_id, hero_page, hero_pages)
-            controls = { prev_button, next_button }
+            local prev_button, next_button, indicator = self:buildDashboardHeaderNav(page_id, hero_page, hero_pages)
+            controls = { prev_button, indicator, next_button }
+            focus_controls = { prev_button, next_button }
         end
-        self:addDashboardHeader(DashboardSections.headerText(config), controls)
+        self:addDashboardHeader(DashboardSections.headerText(config), controls, focus_controls)
         self:addDashboardSpacer(inner_gap)
         if #continue_books > 0 then
             self:addDashboardHeroRow(continue_books, hero_h, hero_slots, hero_page)
@@ -860,12 +1066,31 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
                 self:onMenuSelect({ text = _("All Books"), kind = "books", params = { sort = "title" } })
             end)
         end
+        self.dash_section_bands[page_id] = { y = band_start, h = self.dash_used - band_start }
     end
 
     local function renderBrowse(config)
         self:addDashboardHeader(DashboardSections.headerText(config))
         self:addDashboardSpacer(inner_gap)
         self:addDashboardBrowseList(action_entries, browse_row_h, browse_cols, browse_rows)
+    end
+
+    local function renderHighlight(index, config)
+        self:addDashboardHeader(DashboardSections.headerText(config))
+        self:addDashboardSpacer(inner_gap)
+        if highlight then
+            local card_h = highlight_heights[index]
+                or CatalogWidgets.dashboardHighlightCardHeight(highlight, self.content_w)
+            self:addDashboardInset(BookOrbitDashboardHighlightCard:new{
+                entry = { kind = "dashboard-highlight", book_id = highlight.bookId, highlight = highlight },
+                dimen = Geom:new{ x = 0, y = 0, w = self.content_w, h = card_h },
+                menu = self,
+            }, highlight.bookId ~= nil)
+        elseif context.loading then
+            self:addDashboardEmptyState(_("Loading..."))
+        else
+            self:addDashboardEmptyState(_("No highlights yet."))
+        end
     end
 
     local function renderShelf(index, config)
@@ -875,16 +1100,23 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
         local slots = math.max(1, math.min(shelf_slots, #books))
         local pages = math.max(1, math.ceil(#books / slots))
         local page = self:dashboardPage(page_id, pages)
+        local band_start = self.dash_used
         local controls = {}
+        local focus_controls = {}
         if pages > 1 then
-            local prev_button, next_button = self:buildDashboardHeaderNav(page_id, page, pages)
+            local prev_button, next_button, indicator = self:buildDashboardHeaderNav(page_id, page, pages)
             table.insert(controls, prev_button)
+            table.insert(controls, indicator)
             table.insert(controls, next_button)
+            table.insert(focus_controls, prev_button)
+            table.insert(focus_controls, next_button)
         end
         if not pending and self:dashboardSectionSupportsReroll(config) then
-            table.insert(controls, self:buildDashboardRerollButton(index))
+            local reroll_button = self:buildDashboardRerollButton(index)
+            table.insert(controls, reroll_button)
+            table.insert(focus_controls, reroll_button)
         end
-        self:addDashboardHeader(DashboardSections.headerText(config), controls)
+        self:addDashboardHeader(DashboardSections.headerText(config), controls, focus_controls)
         self:addDashboardSpacer(inner_gap)
         if pending or context.loading then
             self:addDashboardEmptyState(_("Loading..."))
@@ -893,6 +1125,7 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
         else
             self:addDashboardCoverGrid(page_id, books, shelf_row_h, false, false, slots, shelf_card_w, page, 1)
         end
+        self.dash_section_bands[page_id] = { y = band_start, h = self.dash_used - band_start }
     end
 
     for index = 1, DashboardSections.SLOT_COUNT do
@@ -904,6 +1137,8 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
                 renderContinueReading(index, config)
             elseif config.type == "browse" then
                 renderBrowse(config)
+            elseif config.type == "highlight" then
+                renderHighlight(index, config)
             else
                 renderShelf(index, config)
             end
@@ -912,6 +1147,24 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     end
 
     self:addDashboardSpacer(math.max(0, avail - self.dash_used))
+
+    -- A page turn recorded which band changed; hand its rect to the refresh so
+    -- the rest of the page keeps its e-ink state. Anything unexpected falls
+    -- back to the full-region refresh.
+    local refresh_section = self.dash_refresh_section
+    self.dash_refresh_section = nil
+    local band = refresh_section and self.dash_section_bands[refresh_section] or nil
+    if band and band.h > 0 and self.dimen and self.menuChromeHeight then
+        local top_height = self:menuChromeHeight()
+        local pad = px(4)
+        local band_y = self.dimen.y + top_height + math.max(0, band.y - pad)
+        self.custom_refresh_region = Geom:new{
+            x = self.dimen.x,
+            y = band_y,
+            w = self.dimen.w,
+            h = band.h + 2 * pad,
+        }
+    end
     self:finishCustomUpdate(old_dimen, select_number)
 end
 

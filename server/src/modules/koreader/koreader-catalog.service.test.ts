@@ -596,6 +596,7 @@ describe('KoreaderCatalogService', () => {
         id: 10,
         title: 'Dune',
         progressPercentage: 47.4,
+        lastReadAt: '2026-03-01T00:00:00.000Z',
         readStatus: 'reading',
         formats: ['epub', 'pdf'],
         thumbnailUrl: '/api/v1/koreader/plugin/catalog/books/10/thumbnail',

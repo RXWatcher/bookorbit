@@ -19,6 +19,7 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local BookOrbitApi = require("bookorbit_api")
+local BookOrbitCapabilities = require("bookorbit_capabilities")
 local BookOrbitHighlightDiagnostics = require("bookorbit_highlight_diagnostics")
 local BookOrbitSweep = require("bookorbit_sweep")
 local DashboardSections = require("bookorbit_dashboard_sections")
@@ -346,26 +347,44 @@ function MainMenu:chooseDashboardCatalogSource(index, section, catalog, touchmen
     end)
 end
 
+-- The capability list recorded for the configured server, when one is known.
+-- Nil (still unknown) keeps every source on offer; the dashboard downgrades
+-- the capability itself when the server answers 404.
+function MainMenu:knownServerCapabilities(catalog)
+    local client = catalog and catalog.client
+    if not client and self.newClient then
+        local ok, built = pcall(function() return self:newClient() end)
+        client = ok and built or nil
+    end
+    return client and BookOrbitCapabilities.cached(client) or nil
+end
+
 function MainMenu:dashboardSectionItems(index, catalog)
     local items = {}
+    local known_capabilities = self:knownServerCapabilities(catalog)
     for _index, section_type in ipairs(DashboardSections.TYPES) do
+        local unsupported = DashboardSections.usesSectionEndpoint(section_type)
+            and known_capabilities ~= nil
+            and known_capabilities[DashboardSections.SECTION_ENDPOINT_CAPABILITY] ~= true
         local is_selector = DashboardSections.isCatalogSelector(section_type)
-        table.insert(items, {
-            text = DashboardSections.label(section_type),
-            mandatory = is_selector and ">" or nil,
-            help_text = DashboardSections.helpText(section_type),
-            checked_func = is_selector and nil or function()
-                return DashboardSections.at(self.settings, index).type == section_type
-            end,
-            keep_menu_open = is_selector,
-            callback = function(touchmenu_instance)
-                if is_selector then
-                    self:chooseDashboardCatalogSource(index, section_type, catalog, touchmenu_instance)
-                else
-                    self:applyDashboardSection(index, { type = section_type }, catalog, touchmenu_instance)
-                end
-            end,
-        })
+        if not unsupported then
+            table.insert(items, {
+                text = DashboardSections.label(section_type),
+                mandatory = is_selector and ">" or nil,
+                help_text = DashboardSections.helpText(section_type),
+                checked_func = is_selector and nil or function()
+                    return DashboardSections.at(self.settings, index).type == section_type
+                end,
+                keep_menu_open = is_selector,
+                callback = function(touchmenu_instance)
+                    if is_selector then
+                        self:chooseDashboardCatalogSource(index, section_type, catalog, touchmenu_instance)
+                    else
+                        self:applyDashboardSection(index, { type = section_type }, catalog, touchmenu_instance)
+                    end
+                end,
+            })
+        end
     end
     return items
 end
@@ -377,6 +396,16 @@ function MainMenu:dashboardSettingsMenu(catalog)
                 return T(_("Open dashboard on startup (%1)"), self:catalogAutoOpenLabel())
             end,
             sub_item_table = self:catalogAutoOpenMenu(),
+        },
+        {
+            text = _("Tap Continue reading to open the book"),
+            checked_func = function()
+                return self.settings.catalog_dashboard_tap_resumes ~= false
+            end,
+            help_text = _([[Tapping a book under Continue reading opens it directly when it is already on the device; hold for its actions. When disabled, tapping opens the book's details instead.]]),
+            callback = function()
+                self.settings.catalog_dashboard_tap_resumes = self.settings.catalog_dashboard_tap_resumes == false
+            end,
         },
     }
     for index = 1, DashboardSections.SLOT_COUNT do

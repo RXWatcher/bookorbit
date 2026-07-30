@@ -30,8 +30,20 @@ local author_source = {
 
 assertEqual(DashboardSections.normalizeEntry(nil).type, "random", "a missing entry degrades to Discover")
 assertEqual(DashboardSections.normalizeEntry({ type = "not-a-source" }).type, "random", "an unknown type degrades to Discover")
-assertEqual(DashboardSections.normalizeEntry({ type = "want-to-read" }).type, "random", "an obsolete pseudo-source degrades to Discover")
+assertEqual(DashboardSections.normalizeEntry({ type = "smart-scope" }).type, "random", "an obsolete pseudo-source degrades to Discover")
 assertEqual(DashboardSections.normalizeEntry({ type = "authors" }).type, "random", "an unselected catalog type degrades to Discover")
+
+-- Server-composed sources and the highlight card are first-class slot types.
+assertEqual(DashboardSections.normalizeEntry({ type = "want-to-read" }).type, "want-to-read", "Want to read is a supported source again")
+assertEqual(DashboardSections.normalizeEntry({ type = "up-next-in-series" }).type, "up-next-in-series", "Up next in series is a supported source")
+assertEqual(DashboardSections.normalizeEntry({ type = "highlight" }).type, "highlight", "the highlight card is a supported slot")
+assertEqual(DashboardSections.isBookSource("want-to-read"), true, "Want to read renders as a shelf")
+assertEqual(DashboardSections.isBookSource("up-next-in-series"), true, "Up next in series renders as a shelf")
+assertEqual(DashboardSections.isBookSource("highlight"), false, "the highlight card has its own renderer")
+assertEqual(DashboardSections.usesSectionEndpoint("want-to-read"), true, "Want to read is served by the section endpoint")
+assertEqual(DashboardSections.usesSectionEndpoint("up-next-in-series"), true, "Up next in series is served by the section endpoint")
+assertEqual(DashboardSections.usesSectionEndpoint("recently-added"), false, "catalog-books sources skip the section endpoint")
+assertEqual(DashboardSections.label("highlight"), "Highlight of the day", "the highlight slot is labelled for the picker")
 
 local normalized_author = DashboardSections.normalizeEntry(author_source)
 assertEqual(normalized_author.type, "authors", "a selected author source is kept")
@@ -72,7 +84,7 @@ local migrated_two = DashboardSections.normalize({
     author_source,
     schemaVersion = DashboardSections.LEGACY_SCHEMA_VERSION,
 })
-assertEqual(migrated_two[3].type, "random", "an obsolete old row migrates safely to Discover")
+assertEqual(migrated_two[3].type, "want-to-read", "a legacy Want to read row migrates to the supported source")
 assertEqual(migrated_two[4].type, "authors", "a selected catalog source survives migration")
 
 local current = DashboardSections.normalize({

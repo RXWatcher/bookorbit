@@ -54,6 +54,19 @@ local READ_STATUS_BADGE_ICONS = {
 
 local CatalogWidgets = {}
 
+-- Absolute paths to the plugin's own SVG icons, resolved once by the catalog
+-- (widgets cannot know the plugin directory). A missing entry falls back to
+-- the stock KOReader glyph named alongside it.
+local asset_icon_files = {}
+
+function CatalogWidgets.setAssetIconFiles(files)
+    asset_icon_files = type(files) == "table" and files or {}
+end
+
+function CatalogWidgets.assetIconFile(name)
+    return asset_icon_files[name]
+end
+
 local function hasProgress(book)
     return book and book.progressPercentage and book.progressPercentage > 0
 end
@@ -110,16 +123,17 @@ function CatalogWidgets.buildProgressBar(percentage, width)
     return bar
 end
 
-function CatalogWidgets.buildFakeCover(book, width, height, footer, quiet)
-    local inner_w = math.max(1, width - 2 * Size.padding.default - 2 * Size.border.thin)
-    local inner_h = math.max(1, height - 2 * Size.padding.default - 2 * Size.border.thin)
+function CatalogWidgets.buildFakeCover(book, width, height, footer, quiet, bordersize)
+    bordersize = bordersize or Size.border.thin
+    local inner_w = math.max(1, width - 2 * Size.padding.default - 2 * bordersize)
+    local inner_h = math.max(1, height - 2 * Size.padding.default - 2 * bordersize)
     if quiet then
         return FrameContainer:new{
             width = width,
             height = height,
             margin = 0,
             padding = Size.padding.default,
-            bordersize = Size.border.thin,
+            bordersize = bordersize,
             background = Blitbuffer.COLOR_WHITE,
             CenterContainer:new{
                 dimen = Geom:new{ w = inner_w, h = inner_h },
@@ -170,7 +184,7 @@ function CatalogWidgets.buildFakeCover(book, width, height, footer, quiet)
         height = height,
         margin = 0,
         padding = Size.padding.default,
-        bordersize = Size.border.thin,
+        bordersize = bordersize,
         background = Blitbuffer.COLOR_WHITE,
         CenterContainer:new{
             dimen = Geom:new{ w = inner_w, h = inner_h },
@@ -179,18 +193,29 @@ function CatalogWidgets.buildFakeCover(book, width, height, footer, quiet)
     }
 end
 
-function CatalogWidgets.buildCoverWidget(book, width, height, path, state, quiet_placeholder)
+-- opts.no_border drops the cover's own outline for callers that already draw
+-- one around it (the dashboard cards), so a card is not ringed twice.
+-- opts.quiet_placeholder swaps the titled fake cover for a bare one while a
+-- cover is still downloading.
+function CatalogWidgets.buildCoverWidget(book, width, height, path, state, opts)
+    opts = opts or {}
+    local bordersize = opts.no_border and 0 or Size.border.thin
     if path then
-        return CenterContainer:new{
-            dimen = Geom:new{ w = width, h = height },
-            FrameContainer:new{
-                margin = 0,
-                padding = 0,
-                bordersize = Size.border.thin,
+        local inner_w = math.max(1, width - 2 * bordersize)
+        local inner_h = math.max(1, height - 2 * bordersize)
+        return FrameContainer:new{
+            width = width,
+            height = height,
+            margin = 0,
+            padding = 0,
+            bordersize = bordersize,
+            background = Blitbuffer.COLOR_WHITE,
+            CenterContainer:new{
+                dimen = Geom:new{ w = inner_w, h = inner_h },
                 ImageWidget:new{
                     file = path,
-                    width = width,
-                    height = height,
+                    width = inner_w,
+                    height = inner_h,
                     scale_factor = 0,
                 },
             },
@@ -205,38 +230,61 @@ function CatalogWidgets.buildCoverWidget(book, width, height, path, state, quiet
     else
         footer = _("No cover")
     end
-    return CatalogWidgets.buildFakeCover(book, width, height, footer, quiet_placeholder == true)
+    -- Quiet placeholders are reserved for covers still loading; a cover that is
+    -- missing or failed keeps the titled fake cover so the book stays
+    -- identifiable on caption-less shelves.
+    return CatalogWidgets.buildFakeCover(
+        book, width, height, footer, opts.quiet_placeholder == true and state == "loading", bordersize)
+end
+
+-- Badges sit on a small white plate so they stay legible over busy cover art;
+-- a bare glyph disappears against dark covers on e-ink.
+local function badgeChip(icon_widget)
+    return FrameContainer:new{
+        margin = 0,
+        padding = Size.padding.tiny,
+        bordersize = Size.border.thin,
+        radius = Size.radius.default,
+        background = Blitbuffer.COLOR_WHITE,
+        icon_widget,
+    }
 end
 
 function CatalogWidgets.buildReadStatusBadge(book, max_width)
     local icon = readStatusBadgeIcon(book)
     if not icon then return nil end
 
-    local size = math.max(Screen:scaleBySize(12), math.min(max_width, Screen:scaleBySize(20)))
-    return IconWidget:new{
+    local size = math.max(Screen:scaleBySize(10), math.min(max_width, Screen:scaleBySize(16)))
+    return badgeChip(IconWidget:new{
         icon = icon,
         rotation_angle = readStatusBadgeRotation(icon),
         width = size,
         height = size,
-    }
+    })
 end
 
 function CatalogWidgets.buildSelectionBadge(max_width)
-    local size = math.max(Screen:scaleBySize(16), math.min(max_width, Screen:scaleBySize(26)))
-    return IconWidget:new{
+    local size = math.max(Screen:scaleBySize(13), math.min(max_width, Screen:scaleBySize(22)))
+    return badgeChip(IconWidget:new{
         icon = "check",
         width = size,
         height = size,
-    }
+    })
+end
+
+-- IconWidget resolves either a stock glyph name or an absolute file path;
+-- never hand it both.
+local function iconOrFile(icon, file)
+    if file then return { file = file } end
+    return { icon = icon }
 end
 
 function CatalogWidgets.buildDownloadedBadge(max_width)
-    local size = math.max(Screen:scaleBySize(14), math.min(max_width, Screen:scaleBySize(24)))
-    return IconWidget:new{
-        icon = "appbar.filebrowser",
-        width = size,
-        height = size,
-    }
+    local size = math.max(Screen:scaleBySize(11), math.min(max_width, Screen:scaleBySize(18)))
+    local opts = iconOrFile("appbar.filebrowser", CatalogWidgets.assetIconFile("on_device"))
+    opts.width = size
+    opts.height = size
+    return badgeChip(IconWidget:new(opts))
 end
 
 function CatalogWidgets.buildCoverWithStateBadges(book, width, height, path, state, downloaded, selected)
@@ -637,9 +685,15 @@ function CatalogWidgets.buildDetailProgressBar(percentage, width, height)
     }
 end
 
-function CatalogWidgets.buildDashboardCoverWidget(book, width, height, path, state, downloaded, quiet_placeholder)
-    local cover = CatalogWidgets.buildCoverWidget(book, width, height, path, state, quiet_placeholder)
-    local read_badge = CatalogWidgets.buildReadStatusBadge(book, math.floor(math.min(width, height) * 0.18))
+-- Badges sit over the cover art, so they are kept to a smaller share of the
+-- card than the catalog grid's: a dashboard shelf shows several covers at once
+-- and a chunky chip on each one buries the artwork.
+local DASHBOARD_BADGE_RATIO = 0.15
+
+function CatalogWidgets.buildDashboardCoverWidget(book, width, height, path, state, downloaded, cover_opts)
+    local cover = CatalogWidgets.buildCoverWidget(book, width, height, path, state, cover_opts)
+    local badge_w = math.floor(math.min(width, height) * DASHBOARD_BADGE_RATIO)
+    local read_badge = CatalogWidgets.buildReadStatusBadge(book, badge_w)
     if not downloaded and not read_badge then return cover end
 
     local group = OverlapGroup:new{
@@ -648,7 +702,7 @@ function CatalogWidgets.buildDashboardCoverWidget(book, width, height, path, sta
         cover,
     }
     if downloaded then
-        local badge = CatalogWidgets.buildDownloadedBadge(math.floor(math.min(width, height) * 0.18))
+        local badge = CatalogWidgets.buildDownloadedBadge(badge_w)
         badge.overlap_align = "left"
         table.insert(group, badge)
     end
@@ -659,36 +713,49 @@ function CatalogWidgets.buildDashboardCoverWidget(book, width, height, path, sta
     return group
 end
 
+local SECTION_HEADER_FONT_SIZE = 14
+
+-- The height of a section header's label row. Header controls are built at
+-- exactly this size, so a header carrying chevrons or a reroll button is no
+-- taller than a bare one: every section keeps the same label-to-underline
+-- distance, and the dashboard can budget one header height for all of them.
+function CatalogWidgets.dashboardSectionHeaderRowHeight()
+    local probe = TextWidget:new{
+        text = "X",
+        face = Font:getFace("cfont", SECTION_HEADER_FONT_SIZE),
+        bold = true,
+    }
+    local height = probe:getSize().h
+    probe:free()
+    return height
+end
+
 -- A dashboard section header in the detail page's tab idiom: an uppercase
 -- bold label sitting on a thick underline that runs out into a hairline rule.
--- An optional control (e.g. the Discover reroll button) is pinned to the
--- right edge, vertically centered on the label row.
+-- Optional controls (paging chevrons, the Discover reroll) are pinned flush to
+-- the right edge and fill the label row, so they read as part of the header
+-- rather than floating above it.
 function CatalogWidgets.buildDashboardSectionHeader(text, width, right_widget)
-    local face = Font:getFace("cfont", 14)
-    local right
-    if right_widget then
-        right = HorizontalGroup:new{
-            align = "center",
-            right_widget,
-            HorizontalSpan:new{ width = Screen:scaleBySize(6) },
-        }
-    end
-    local right_w = right and right:getSize().w or 0
-    local gap = right and (Size.span.horizontal_default + Screen:scaleBySize(4)) or 0
+    local right_w = right_widget and right_widget:getSize().w or 0
+    local gap = right_widget and Size.span.horizontal_default or 0
     local label = TextWidget:new{
         text = string.upper(text or ""),
-        face = face,
+        face = Font:getFace("cfont", SECTION_HEADER_FONT_SIZE),
         bold = true,
         max_width = math.max(1, width - right_w - gap),
     }
-    local label_h = math.max(label:getSize().h, right and right:getSize().h or 0)
-    local row_dimen = Geom:new{ w = width, h = label_h }
+    -- Controls are sized to the row, but a caller that hands over something
+    -- taller must not have it clipped.
+    local row_h = math.max(
+        CatalogWidgets.dashboardSectionHeaderRowHeight(),
+        right_widget and right_widget:getSize().h or 0)
+    local row_dimen = Geom:new{ w = width, h = row_h }
     local row = OverlapGroup:new{
         dimen = row_dimen:copy(),
         LeftContainer:new{ dimen = row_dimen:copy(), label },
     }
-    if right then
-        table.insert(row, RightContainer:new{ dimen = row_dimen:copy(), right })
+    if right_widget then
+        table.insert(row, RightContainer:new{ dimen = row_dimen:copy(), right_widget })
     end
 
     local underline_w = math.min(width, label:getSize().w + Screen:scaleBySize(8))
@@ -711,26 +778,109 @@ function CatalogWidgets.buildDashboardSectionHeader(text, width, right_widget)
     }
 end
 
+local STAT_VALUE_FONT_SIZE = 18
+local STAT_LABEL_FONT_SIZE = 10
+
+-- The row heights every stats block shares. Measuring once and handing the
+-- same metrics to each block is what keeps the strip on a grid: the value row
+-- and the label row land on the same two baselines whether or not a block
+-- carries a sparkline, instead of each block being centered on its own height.
+function CatalogWidgets.dashboardStatMetrics(spark_h)
+    local value_probe = TextWidget:new{
+        text = "0",
+        face = Font:getFace("cfont", STAT_VALUE_FONT_SIZE),
+        bold = true,
+    }
+    local label_probe = TextWidget:new{
+        text = "X",
+        face = Font:getFace("cfont", STAT_LABEL_FONT_SIZE),
+    }
+    local metrics = {
+        value_h = value_probe:getSize().h,
+        label_h = label_probe:getSize().h,
+        spark_h = spark_h or 0,
+        gap = Size.span.vertical_default,
+    }
+    value_probe:free()
+    label_probe:free()
+    metrics.total_h = metrics.value_h + metrics.gap + metrics.label_h
+        + (metrics.spark_h > 0 and (metrics.spark_h + metrics.gap) or 0)
+    return metrics
+end
+
 -- One block of the dashboard stats strip: a big bold value over a compact
--- muted uppercase label, both centered in the given width.
-function CatalogWidgets.buildDashboardStat(value, label, width)
-    local value_face = Font:getFace("cfont", 18)
-    local label_face = Font:getFace("cfont", 10)
-    return VerticalGroup:new{
+-- muted uppercase label, both centered in the given width. The sparkline row
+-- is reserved in every block, so blocks without one still align.
+function CatalogWidgets.buildDashboardStat(value, label, width, extra, metrics)
+    metrics = metrics or CatalogWidgets.dashboardStatMetrics(extra and extra:getSize().h or 0)
+    local col = VerticalGroup:new{
         align = "center",
         CenterContainer:new{
-            dimen = Geom:new{ w = width, h = lineHeight(value_face) },
-            TextWidget:new{ text = value or "", face = value_face, bold = true, max_width = width },
-        },
-        VerticalSpan:new{ width = Size.span.vertical_default },
-        CenterContainer:new{
-            dimen = Geom:new{ w = width, h = lineHeight(label_face) },
+            dimen = Geom:new{ w = width, h = metrics.value_h },
             TextWidget:new{
-                text = string.upper(label or ""),
-                face = label_face,
-                fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+                text = value or "",
+                face = Font:getFace("cfont", STAT_VALUE_FONT_SIZE),
+                bold = true,
                 max_width = width,
             },
+        },
+    }
+    if metrics.spark_h > 0 then
+        table.insert(col, VerticalSpan:new{ width = metrics.gap })
+        if extra then
+            table.insert(col, CenterContainer:new{
+                dimen = Geom:new{ w = width, h = metrics.spark_h },
+                extra,
+            })
+        else
+            table.insert(col, VerticalSpan:new{ width = metrics.spark_h })
+        end
+    end
+    table.insert(col, VerticalSpan:new{ width = metrics.gap })
+    table.insert(col, CenterContainer:new{
+        dimen = Geom:new{ w = width, h = metrics.label_h },
+        TextWidget:new{
+            text = string.upper(label or ""),
+            face = Font:getFace("cfont", STAT_LABEL_FONT_SIZE),
+            fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+            max_width = width,
+        },
+    })
+    return col
+end
+
+-- One day of the seven-day activity chart. A day with no reading contributes
+-- only its column width: the shared baseline underneath is what shows it as an
+-- empty day, so quiet days do not need marks of their own.
+function CatalogWidgets.buildDashboardWeekBar(width, height, fill_height, is_today)
+    fill_height = math.max(0, math.min(height, fill_height or 0))
+    if fill_height <= 0 then
+        return HorizontalSpan:new{ width = width }
+    end
+    return LineWidget:new{
+        background = is_today and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY,
+        dimen = Geom:new{ w = width, h = fill_height },
+    }
+end
+
+-- The marker a stats block without a sparkline puts in that same row, so all
+-- four blocks carry something between their value and their label instead of
+-- three of them showing a gap. Mirrors the web dashboard's widget icons.
+function CatalogWidgets.buildDashboardStatIcon(asset_name, size)
+    local file = CatalogWidgets.assetIconFile(asset_name)
+    if not file then return nil end
+    return IconWidget:new{ file = file, width = size, height = size }
+end
+
+-- The bars sit on a light rule spanning the whole week, which is what makes the
+-- row read as a chart with an axis rather than as marks floating in the strip.
+function CatalogWidgets.buildDashboardWeekChart(bars)
+    return VerticalGroup:new{
+        align = "center",
+        bars,
+        LineWidget:new{
+            background = Blitbuffer.COLOR_LIGHT_GRAY,
+            dimen = Geom:new{ w = bars:getSize().w, h = Size.line.medium },
         },
     }
 end
@@ -786,8 +936,10 @@ function DashboardCoverCard:init()
     local col = VerticalGroup:new{ align = "center" }
     table.insert(col, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = cover_h },
-        CatalogWidgets.buildDashboardCoverWidget(
-            book, cover_w, cover_h, path, state, downloaded, self.quiet_placeholder == true),
+        CatalogWidgets.buildDashboardCoverWidget(book, cover_w, cover_h, path, state, downloaded, {
+            quiet_placeholder = self.quiet_placeholder == true,
+            no_border = true,
+        }),
     })
     if reserve_progress then
         table.insert(col, VerticalSpan:new{ width = Size.span.vertical_default })
@@ -939,6 +1091,86 @@ function DashboardHeroCard:onHoldSelect()
     return true
 end
 
+local HIGHLIGHT_QUOTE_FONT_SIZE = 15
+local HIGHLIGHT_QUOTE_MAX_LINES = 4
+local HIGHLIGHT_ATTRIBUTION_FONT_SIZE = 11
+
+-- The quote block inside the Highlight of the day card: the highlighted text
+-- over a muted attribution line. Built separately so the layout can measure
+-- the card before committing vertical budget to it.
+function CatalogWidgets.buildDashboardHighlightContent(highlight, width)
+    highlight = highlight or {}
+    local quote_face = Font:getFace("cfont", HIGHLIGHT_QUOTE_FONT_SIZE)
+    local attribution_face = Font:getFace("cfont", HIGHLIGHT_ATTRIBUTION_FONT_SIZE)
+    local content = VerticalGroup:new{ align = "left" }
+    table.insert(content, TextBoxWidget:new{
+        text = BD.auto("“" .. shortText(highlight.text or "", 240) .. "”"),
+        width = width,
+        height = HIGHLIGHT_QUOTE_MAX_LINES * lineHeight(quote_face),
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+        face = quote_face,
+    })
+    local attribution_parts = {}
+    if highlight.bookTitle and highlight.bookTitle ~= "" then
+        table.insert(attribution_parts, shortText(highlight.bookTitle, 60))
+    end
+    if highlight.chapterTitle and highlight.chapterTitle ~= "" then
+        table.insert(attribution_parts, shortText(highlight.chapterTitle, 40))
+    end
+    if #attribution_parts > 0 then
+        table.insert(content, VerticalSpan:new{ width = Size.span.vertical_default })
+        table.insert(content, TextWidget:new{
+            text = BD.auto(table.concat(attribution_parts, " - ")),
+            face = attribution_face,
+            fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+            max_width = width,
+        })
+    end
+    return content
+end
+
+function CatalogWidgets.dashboardHighlightCardHeight(highlight, card_w)
+    local pad = Size.padding.default
+    local inner_w = math.max(1, card_w - 2 * pad - 2 * CARD_BORDER)
+    local content = CatalogWidgets.buildDashboardHighlightContent(highlight, inner_w)
+    return content:getSize().h + 2 * pad + 2 * CARD_BORDER
+end
+
+-- The Highlight of the day card: a quote card in the shared dashboard chrome
+-- that taps through to the highlighted book like any other dashboard card.
+local DashboardHighlightCard = InputContainer:extend{
+    entry = nil,
+    dimen = nil,
+    menu = nil,
+}
+
+function DashboardHighlightCard:init()
+    self.ges_events = {
+        TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        HoldSelect = { GestureRange:new{ ges = "hold", range = self.dimen } },
+    }
+
+    local pad = Size.padding.default
+    local inner_w = math.max(1, self.dimen.w - 2 * pad - 2 * CARD_BORDER)
+    local inner_h = math.max(1, self.dimen.h - 2 * pad - 2 * CARD_BORDER)
+    self[1] = cardFrame(self.dimen.w, self.dimen.h, pad, LeftContainer:new{
+        dimen = Geom:new{ w = inner_w, h = inner_h },
+        CatalogWidgets.buildDashboardHighlightContent(self.entry.highlight, inner_w),
+    })
+end
+
+function DashboardHighlightCard:onTapSelect()
+    if self.entry.book_id then
+        self.menu:onMenuSelect(self.entry)
+    end
+    return true
+end
+
+function DashboardHighlightCard:onHoldSelect()
+    return self:onTapSelect()
+end
+
 -- A compact related-book card for the detail page shelves: cover only, with
 -- the same tap/hold behavior as normal catalog cards.
 local DetailRelatedCard = InputContainer:extend{
@@ -965,7 +1197,8 @@ function DetailRelatedCard:init()
 
     self[1] = cardFrame(self.dimen.w, self.dimen.h, pad, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
-        CatalogWidgets.buildDashboardCoverWidget(book, inner_w, inner_h, path, state, downloaded),
+        CatalogWidgets.buildDashboardCoverWidget(
+            book, inner_w, inner_h, path, state, downloaded, { no_border = true }),
     })
 end
 
@@ -1115,14 +1348,19 @@ function DashboardBrowseRow:init()
             fgcolor = Blitbuffer.COLOR_DARK_GRAY,
         }
     end
-    local count_w = count_widget and count_box_w or 0
+    -- Wide counts (a four-digit library) get the width they measure at instead
+    -- of being clipped to the nominal box.
+    local count_w = count_widget and math.max(count_box_w, count_widget:getSize().w + Size.padding.small) or 0
     local label_w = math.max(1, self.dimen.w - icon_box_w - gap - count_w)
 
     local left = HorizontalGroup:new{ align = "center" }
-    if entry.icon then
+    if entry.icon or entry.icon_file then
+        local icon_opts = iconOrFile(entry.icon, entry.icon_file)
+        icon_opts.width = icon_size
+        icon_opts.height = icon_size
         table.insert(left, CenterContainer:new{
             dimen = Geom:new{ w = icon_box_w, h = inner_h },
-            IconWidget:new{ icon = entry.icon, width = icon_size, height = icon_size },
+            IconWidget:new(icon_opts),
         })
     else
         table.insert(left, HorizontalSpan:new{ width = icon_box_w })
@@ -1142,7 +1380,7 @@ function DashboardBrowseRow:init()
     if count_widget then
         table.insert(row, RightContainer:new{
             dimen = row_dimen:copy(),
-            CenterContainer:new{ dimen = Geom:new{ w = count_box_w, h = inner_h }, count_widget },
+            CenterContainer:new{ dimen = Geom:new{ w = count_w, h = inner_h }, count_widget },
         })
     end
 
@@ -1166,39 +1404,71 @@ function DashboardBrowseRow:onHoldSelect()
     return true
 end
 
--- A small tappable icon button, used for the Discover section's reroll control.
+-- A small tappable icon button, used for the section header controls (paging
+-- chevrons, the Discover reroll). The glyph can stay smaller than the tappable
+-- box via icon_size, and entry.icon_file swaps in one of the plugin's own SVG
+-- icons. A disabled button dims its glyph and swallows the tap.
+--
+-- tap_padding_v grows the tap area above and below the drawn box without
+-- making the widget itself taller, so a header control can sit inside the
+-- label row and still take a finger-sized tap from the surrounding gap.
 local DashboardIconButton = InputContainer:extend{
     entry = nil,
     dimen = nil,
     menu = nil,
+    icon_size = nil,
+    enabled = true,
+    callback = nil,
+    tap_padding_v = 0,
 }
 
 function DashboardIconButton:init()
+    -- Evaluated at gesture time: self.dimen only gets its screen position when
+    -- the widget is painted.
+    local function tapRange()
+        local pad = self.tap_padding_v
+        if pad <= 0 then return self.dimen end
+        return Geom:new{
+            x = self.dimen.x,
+            y = self.dimen.y - pad,
+            w = self.dimen.w,
+            h = self.dimen.h + 2 * pad,
+        }
+    end
     self.ges_events = {
-        TapSelect = { GestureRange:new{ ges = "tap", range = self.dimen } },
-        HoldSelect = { GestureRange:new{ ges = "hold", range = self.dimen } },
+        TapSelect = { GestureRange:new{ ges = "tap", range = tapRange } },
+        HoldSelect = { GestureRange:new{ ges = "hold", range = tapRange } },
     }
-    local icon_size = math.max(1, math.min(self.dimen.w, self.dimen.h) - Size.padding.tiny)
+    local icon_size = self.icon_size or math.max(1, math.min(self.dimen.w, self.dimen.h) - Size.padding.tiny)
+    local icon_opts = iconOrFile(self.entry and self.entry.icon, self.entry and self.entry.icon_file)
+    icon_opts.width = icon_size
+    icon_opts.height = icon_size
+    icon_opts.dim = not self.enabled
     self[1] = CenterContainer:new{
         dimen = Geom:new{ w = self.dimen.w, h = self.dimen.h },
-        IconWidget:new{ icon = self.entry.icon, width = icon_size, height = icon_size },
+        IconWidget:new(icon_opts),
     }
 end
 
 function DashboardIconButton:onTapSelect()
-    self.menu:onMenuSelect(self.entry)
+    if not self.enabled then return true end
+    if self.callback then
+        self.callback()
+    else
+        self.menu:onMenuSelect(self.entry)
+    end
     return true
 end
 
 function DashboardIconButton:onHoldSelect()
-    self.menu:onMenuSelect(self.entry)
-    return true
+    return self:onTapSelect()
 end
 
 CatalogWidgets.MosaicItem = MosaicItem
 CatalogWidgets.ListItem = ListItem
 CatalogWidgets.DashboardCoverCard = DashboardCoverCard
 CatalogWidgets.DashboardHeroCard = DashboardHeroCard
+CatalogWidgets.DashboardHighlightCard = DashboardHighlightCard
 CatalogWidgets.DetailRelatedCard = DetailRelatedCard
 CatalogWidgets.DetailTabButton = DetailTabButton
 CatalogWidgets.DetailRatingStar = DetailRatingStar

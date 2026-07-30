@@ -42,6 +42,7 @@ package.loaded["ui/size"] = {
     span = { horizontal_default = 4, vertical_default = 4 },
 }
 package.loaded["ui/widget/textboxwidget"] = widgetClass()
+package.loaded["ui/widget/textwidget"] = widgetClass()
 package.loaded["ui/uimanager"] = { show = function() end }
 package.loaded["ui/widget/verticalgroup"] = widgetClass(0)
 package.loaded["ui/widget/verticalspan"] = widgetClass()
@@ -52,14 +53,26 @@ package.loaded["bookorbit_stats_reader"] = {
 }
 
 local HEADER_HEIGHT = 20
+local HEADER_ROW_HEIGHT = 14
+local STATUS_LINE_HEIGHT = 16
+local HIGHLIGHT_CARD_HEIGHT = 64
 
 package.loaded["bookorbit_catalog_widgets"] = {
     DashboardCoverCard = widgetClass(),
     DashboardHeroCard = widgetClass(),
+    DashboardHighlightCard = widgetClass(),
     DashboardBrowseRow = widgetClass(),
     DashboardIconButton = widgetClass(),
+    assetIconFile = function() return nil end,
+    dashboardSectionHeaderRowHeight = function() return HEADER_ROW_HEIGHT end,
     buildDashboardSectionHeader = function()
         return { getSize = function() return { w = 100, h = HEADER_HEIGHT } end }
+    end,
+    buildStatusLabel = function()
+        return { getSize = function() return { w = 100, h = STATUS_LINE_HEIGHT } end }
+    end,
+    dashboardHighlightCardHeight = function()
+        return HIGHLIGHT_CARD_HEIGHT
     end,
     coverCardHeight = function(card_w)
         return card_w + 20
@@ -184,5 +197,67 @@ catalog.current_context.section_stale = { [3] = true }
 catalog:updateDashboardItems()
 assertEqual(#catalog.shelves, 0, "a pending shelf renders no cover grid")
 assertEqual(catalog.headers[2], "Discover", "a pending shelf still shows its header")
+
+-- A stale (cached) dashboard announces itself with a status line that takes
+-- part in the vertical budget.
+catalog = newCatalog{ sections = DEFAULTS, avail = 800 }
+catalog.current_context.stale = true
+catalog:updateDashboardItems()
+assertEqual(catalog.dash_used <= 800, true, "the status line stays inside the available height")
+local without_status = newCatalog{ sections = DEFAULTS, avail = 800 }
+without_status:updateDashboardItems()
+assertEqual(catalog.dash_used, without_status.dash_used, "budget accounting is unchanged aside from the trailing spacer")
+
+-- The Highlight of the day slot renders its measured card and drops after
+-- stats but before any shelf when the page gets tight.
+local WITH_HIGHLIGHT = {
+    { type = "stats" }, { type = "continue-reading" }, { type = "highlight" }, { type = "random" },
+}
+catalog = newCatalog{ sections = WITH_HIGHLIGHT, avail = 800 }
+catalog.current_context.dashboard.highlightOfTheDay = { text = "quote", bookId = 7 }
+catalog:updateDashboardItems()
+assertEqual(catalog.headers[2], "Highlight of the day", "the highlight slot renders its header")
+assertEqual(#catalog.shelves, 1, "the shelf renders alongside the highlight card")
+assertEqual(catalog.dash_used <= 800, true, "the highlight card stays inside the available height")
+
+catalog = newCatalog{ sections = WITH_HIGHLIGHT, avail = 340 }
+catalog.current_context.dashboard.highlightOfTheDay = { text = "quote", bookId = 7 }
+catalog:updateDashboardItems()
+local saw_highlight = false
+for _, header in ipairs(catalog.headers) do
+    if header == "Highlight of the day" then saw_highlight = true end
+end
+assertEqual(saw_highlight, false, "a tight page drops the highlight card after stats, before shelves")
+assertEqual(#catalog.shelves, 1, "the shelf survives the tight page")
+
+-- Header controls are built at the header's label-row height, so a section
+-- carrying chevrons or a reroll button is exactly as tall as a bare one. That
+-- is what keeps the single measured header height the budget uses honest, and
+-- what stops the controls from floating above the label.
+catalog = newCatalog{ sections = DEFAULTS, avail = 800 }
+local prev_control, next_control = catalog:buildDashboardHeaderNav("section3", 2, 4)
+local reroll_control = catalog:buildDashboardRerollButton(3)
+for label, control in pairs({ prev = prev_control, next = next_control, reroll = reroll_control }) do
+    assertEqual(control.dimen.h, HEADER_ROW_HEIGHT, label .. " control fills the header row exactly")
+    assertEqual(control.dimen.w, HEADER_ROW_HEIGHT, label .. " control is square")
+    assertEqual(control.tap_padding_v > 0, true, label .. " control takes taps from the gap around it")
+end
+assertEqual(prev_control.enabled, true, "a page-2 back chevron is live")
+assertEqual(catalog:buildDashboardHeaderNav("section3", 1, 4).enabled, false,
+    "the back chevron is disabled on the first page")
+
+-- Page turns record each section's band and narrow the refresh to it.
+catalog = newCatalog{ sections = DEFAULTS, avail = 800 }
+catalog.dimen = { x = 0, y = 0, w = 520, h = 900 }
+function catalog:menuChromeHeight() return 30, 40 end
+catalog.dash_refresh_section = "section3"
+catalog:updateDashboardItems()
+local band = catalog.dash_section_bands["section3"]
+assertEqual(band ~= nil and band.h > 0, true, "the shelf records its rendered band")
+local region = catalog.custom_refresh_region
+assertEqual(region ~= nil, true, "a page turn narrows the refresh to the changed band")
+assertEqual(region.y, 30 + band.y - 4, "the refresh band sits below the title bar with its padding")
+assertEqual(region.h, band.h + 8, "the refresh band covers the section plus padding")
+assertEqual(catalog.dash_refresh_section, nil, "the page-turn hint is consumed by the rebuild")
 
 print("bookorbit_dashboard_layout_test.lua: ok")

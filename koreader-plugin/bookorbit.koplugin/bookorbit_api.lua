@@ -558,6 +558,13 @@ function BookOrbitApi:catalogDiscover()
     return self:request("GET", "/koreader/plugin/catalog/dashboard/discover")
 end
 
+-- One server-composed dashboard section (want-to-read, up-next-in-series).
+-- Only valid against servers advertising the catalogDashboardSections
+-- capability; older ones answer 404.
+function BookOrbitApi:catalogDashboardSection(section_type)
+    return self:request("GET", "/koreader/plugin/catalog/dashboard/sections/" .. util.urlEncode(tostring(section_type)))
+end
+
 function BookOrbitApi:catalogSection(section, params)
     return self:request("GET", self:query("/koreader/plugin/catalog/sections/" .. util.urlEncode(section), params))
 end

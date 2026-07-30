@@ -35,8 +35,11 @@ DashboardSections.TYPES = {
     "continue-reading",
     "random",
     "browse",
+    "highlight",
     "recently-added",
     "in-progress",
+    "want-to-read",
+    "up-next-in-series",
     "libraries",
     "authors",
     "series",
@@ -44,13 +47,29 @@ DashboardSections.TYPES = {
     "smart-scopes",
 }
 
+-- Sources served by the dashboard-section endpoint rather than the catalog
+-- books endpoint; only offered when the server advertises the capability.
+DashboardSections.SECTION_ENDPOINT_CAPABILITY = "catalogDashboardSections"
+
+local SECTION_ENDPOINT_TYPES = {
+    ["want-to-read"] = true,
+    ["up-next-in-series"] = true,
+}
+
+function DashboardSections.usesSectionEndpoint(section_type)
+    return SECTION_ENDPOINT_TYPES[section_type] == true
+end
+
 local LABELS = {
     ["stats"] = function() return _("Stats") end,
     ["continue-reading"] = function() return _("Continue reading") end,
     ["random"] = function() return _("Discover") end,
     ["browse"] = function() return _("Browse") end,
+    ["highlight"] = function() return _("Highlight of the day") end,
     ["recently-added"] = function() return _("Recently added") end,
     ["in-progress"] = function() return _("In progress") end,
+    ["want-to-read"] = function() return _("Want to read") end,
+    ["up-next-in-series"] = function() return _("Up next in series") end,
     ["libraries"] = function() return _("Libraries") end,
     ["authors"] = function() return _("Authors") end,
     ["series"] = function() return _("Series") end,
@@ -63,8 +82,11 @@ local HELP_TEXT = {
     ["continue-reading"] = function() return _("Books currently in progress, shown as the dashboard hero row.") end,
     ["random"] = function() return _("A random selection from your whole library, reshuffled with the button in the section header.") end,
     ["browse"] = function() return _("Dashboard shortcuts for libraries, collections, SmartScopes, authors, series, and books.") end,
+    ["highlight"] = function() return _("One highlight from your library, picked fresh every day.") end,
     ["recently-added"] = function() return _("The books most recently added to your library.") end,
     ["in-progress"] = function() return _("The catalog view for books currently in progress.") end,
+    ["want-to-read"] = function() return _("Books marked Want to read. Needs a server that supports dashboard sections.") end,
+    ["up-next-in-series"] = function() return _("The next unread book of each series you are reading. Needs a server that supports dashboard sections.") end,
     ["libraries"] = function() return _("The existing Libraries catalog, including its normal navigation and back button.") end,
     ["authors"] = function() return _("The existing Authors catalog, including its normal pagination and back button.") end,
     ["series"] = function() return _("The existing Series catalog, including its normal pagination and back button.") end,
@@ -90,6 +112,8 @@ local BOOK_SOURCES = {
     ["random"] = true,
     ["recently-added"] = true,
     ["in-progress"] = true,
+    ["want-to-read"] = true,
+    ["up-next-in-series"] = true,
     ["libraries"] = true,
     ["authors"] = true,
     ["series"] = true,

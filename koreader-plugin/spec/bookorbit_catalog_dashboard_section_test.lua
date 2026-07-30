@@ -71,6 +71,7 @@ package.loaded["ui/size"] = {
     span = { horizontal_default = 4, vertical_default = 4 },
 }
 package.loaded["ui/widget/textboxwidget"] = widgetClass()
+package.loaded["ui/widget/textwidget"] = widgetClass()
 package.loaded["ui/uimanager"] = {
     show = function() end,
 }
@@ -141,6 +142,11 @@ local function newCatalog(opts)
                 table.insert(requests, "discover")
                 if opts.discover_error then return nil, opts.discover_error end
                 return { discover = { { id = 14 } } }
+            end,
+            catalogDashboardSection = function(_, section_type)
+                table.insert(requests, "section:" .. tostring(section_type))
+                if opts.section_endpoint_error then return nil, opts.section_endpoint_error end
+                return { section = { type = section_type, books = { { id = 21 } } } }
             end,
         },
     }
@@ -277,6 +283,50 @@ local _, partial = catalog:dashboardRoot()
 assertEqual(partial.dashboard ~= nil, true, "one shelf failure does not discard the dashboard")
 assertEqual(#partial.dashboard.dashboardSlots[2].books, 0, "the failed shelf degrades to an empty list")
 assertEqual(partial.dashboard.dashboardSlots[3].books[1].id, 12, "later shelves continue loading")
+
+-- Server-composed sources go through the dashboard-section endpoint; distinct
+-- sources cost one request each and land in their slots.
+local Capabilities = require("bookorbit_capabilities")
+Capabilities.reset()
+catalog = newCatalog{
+    sections = {
+        { type = "stats" },
+        { type = "want-to-read" },
+        { type = "up-next-in-series" },
+        { type = "browse" },
+        schemaVersion = DashboardSections.SCHEMA_VERSION,
+    },
+}
+local _, server_sections = catalog:dashboardRoot()
+assertEqual(requests[2], "section:want-to-read", "Want to read fetches through the section endpoint")
+assertEqual(requests[3], "section:up-next-in-series", "Up next in series fetches through the section endpoint")
+assertEqual(server_sections.dashboard.dashboardSlots[2].books[1].id, 21, "the section endpoint's books land in the slot")
+
+-- A 404 from the section endpoint downgrades the capability: the shelf
+-- degrades to empty, and later fetches skip the endpoint entirely.
+Capabilities.reset()
+catalog = newCatalog{
+    sections = {
+        { type = "stats" },
+        { type = "want-to-read" },
+        { type = "random" },
+        { type = "browse" },
+        schemaVersion = DashboardSections.SCHEMA_VERSION,
+    },
+    section_endpoint_error = 404,
+}
+local _, downgraded = catalog:dashboardRoot()
+assertEqual(#downgraded.dashboard.dashboardSlots[2].books, 0, "an unsupported section degrades to an empty shelf")
+assertEqual(Capabilities.cached(catalog.client)[DashboardSections.SECTION_ENDPOINT_CAPABILITY], false,
+    "a confirmed 404 records the missing capability")
+requests = {}
+catalog:dashboardRoot()
+local section_requests = 0
+for _, request in ipairs(requests) do
+    if request:find("^section:") then section_requests = section_requests + 1 end
+end
+assertEqual(section_requests, 0, "a known-missing capability skips the section endpoint")
+Capabilities.reset()
 
 -- A cached body fetched for another four-slot configuration is still shown, but
 -- its grid shelves are marked pending until the refresh lands.
