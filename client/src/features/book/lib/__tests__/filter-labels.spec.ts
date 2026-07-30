@@ -1,31 +1,74 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Rule } from '@bookorbit/types'
-import { FIELD_LABELS, OPERATOR_LABELS, ruleToParts } from '../filter-labels'
+import { RULE_FIELDS, RULE_OPERATORS, SORT_FIELDS } from '@bookorbit/types'
+import { activateI18nLocale, i18n } from '@/i18n'
+import { compileIcuCatalog } from '@/i18n/icu'
+import en from '@/locales/en.json'
+import { fieldLabel, operatorLabel, ruleToParts, sortFieldLabel } from '../filter-labels'
+
+describe('catalog coverage', () => {
+  it('translates every rule field', () => {
+    for (const field of RULE_FIELDS) {
+      expect(fieldLabel(field)).not.toBe(`book.filter.fields.${field}`)
+    }
+  })
+
+  it('translates every rule operator', () => {
+    for (const operator of RULE_OPERATORS) {
+      expect(operatorLabel(operator)).not.toBe(`book.filter.operators.${operator}`)
+    }
+  })
+
+  it('translates every sort field', () => {
+    for (const field of SORT_FIELDS) {
+      expect(sortFieldLabel(field)).not.toBe(`book.sort.fields.${field}`)
+    }
+  })
+})
+
+describe('active locale', () => {
+  afterEach(() => {
+    activateI18nLocale('en')
+  })
+
+  it('resolves labels from the active locale instead of hardcoded English', () => {
+    const catalog = structuredClone(en)
+    catalog.book.filter.fields.title = 'Titel'
+    catalog.book.filter.operators.contains = 'enthält'
+    catalog.book.sort.fields.title = 'Titel'
+    i18n.global.setLocaleMessage('de', compileIcuCatalog(catalog, 'de'))
+    activateI18nLocale('de')
+
+    expect(fieldLabel('title')).toBe('Titel')
+    expect(operatorLabel('contains')).toBe('enthält')
+    expect(sortFieldLabel('title')).toBe('Titel')
+  })
+})
 
 describe('lock status labels', () => {
   it('exposes a Lock Status field label', () => {
-    expect(FIELD_LABELS.lockStatus).toBe('Lock Status')
+    expect(fieldLabel('lockStatus')).toBe('Lock Status')
   })
 
   it('exposes is locked / is unlocked operator labels', () => {
-    expect(OPERATOR_LABELS.isLocked).toBe('is locked')
-    expect(OPERATOR_LABELS.isUnlocked).toBe('is unlocked')
+    expect(operatorLabel('isLocked')).toBe('is locked')
+    expect(operatorLabel('isUnlocked')).toBe('is unlocked')
   })
 })
 
 describe('series status labels', () => {
   it('exposes a Series Status field label', () => {
-    expect(FIELD_LABELS.seriesStatus).toBe('Series Status')
+    expect(fieldLabel('seriesStatus')).toBe('Series Status')
   })
 
   it('exposes an is up next operator label', () => {
-    expect(OPERATOR_LABELS.isUpNext).toBe('is up next')
+    expect(operatorLabel('isUpNext')).toBe('is up next')
   })
 })
 
 describe('community rating labels', () => {
   it('exposes a Community Rating field label', () => {
-    expect(FIELD_LABELS.communityRating).toBe('Community Rating')
+    expect(fieldLabel('communityRating')).toBe('Community Rating')
   })
 })
 

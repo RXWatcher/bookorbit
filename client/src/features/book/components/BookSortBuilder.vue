@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { ArrowDownAZ, ArrowUpAZ, ChevronDown, ChevronUp, Plus, Trash2 } from '@lucide/vue'
 import type { SortField, SortSpec } from '@bookorbit/types'
 import { SORT_FIELDS } from '@bookorbit/types'
-import { SORT_FIELD_LABELS } from '@/features/book/lib/filter-labels'
+import { sortFieldLabel } from '@/features/book/lib/filter-labels'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from 'vue-i18n'
 
@@ -95,7 +95,7 @@ const canAddMore = computed(() => props.modelValue.length < SORT_FIELDS.length)
         class="flex-1 h-8 rounded-md border border-input bg-background text-foreground text-sm px-2 focus:outline-none focus:ring-2 focus:ring-primary"
       >
         <option v-for="field in availableFields(spec.field)" :key="field" :value="field">
-          {{ SORT_FIELD_LABELS[field] }}
+          {{ sortFieldLabel(field) }}
         </option>
       </select>
       <Tooltip>
