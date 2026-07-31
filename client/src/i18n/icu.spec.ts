@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
+import cs from '@/locales/cs.json'
+import da from '@/locales/da.json'
 import de from '@/locales/de.json'
 import en from '@/locales/en.json'
+import fi from '@/locales/fi.json'
 import spanish from '@/locales/es.json'
 import french from '@/locales/fr.json'
+import hu from '@/locales/hu.json'
 import italian from '@/locales/it.json'
+import ko from '@/locales/ko.json'
 import nl from '@/locales/nl.json'
 import polish from '@/locales/pl.json'
 import pt from '@/locales/pt.json'
+import ru from '@/locales/ru.json'
 import sl from '@/locales/sl.json'
+import sv from '@/locales/sv.json'
+import uk from '@/locales/uk.json'
+import zh from '@/locales/zh.json'
 import { compileIcuCatalog, icuCountValues, isIcuPluralMessage, splitIcuCount } from './icu'
 
 function flattenMessages(value: unknown, prefix = '', output = new Map<string, string>()): Map<string, string> {
@@ -293,14 +302,26 @@ describe('ICU message compilation', () => {
 
   it.each([
     ['en', en, [0, 1, 2]],
+    // Czech inverts the Russian mapping: 5 is `other` and `many` is the fraction.
+    ['cs', cs, [0, 1, 2, 5, 1.5]],
+    ['da', da, [0, 1, 2]],
     ['de', de, [0, 1, 2]],
     ['es', spanish, [0, 1, 2, 1_000_000]],
+    ['fi', fi, [0, 1, 2]],
+    ['hu', hu, [0, 1, 2]],
     ['fr', french, [0, 1, 2, 1_000_000]],
     ['it', italian, [0, 1, 2, 1_000_000]],
+    ['ko', ko, [0, 1, 2]],
     ['nl', nl, [0, 1, 2]],
-    ['pl', polish, [0, 1, 2, 5, 1_000_000]],
+    // Polish reserves `other` for fractions, exactly as Czech does.
+    ['pl', polish, [0, 1, 2, 5, 1.5, 1_000_000]],
     ['pt', pt, [0, 1, 2, 1_000_000]],
+    // Russian and Ukrainian reach `other` only through a fraction; 5 is `many`.
+    ['ru', ru, [0, 1, 2, 5, 1.5]],
     ['sl', sl, [0, 1, 2, 3, 5]],
+    ['sv', sv, [0, 1, 2]],
+    ['uk', uk, [0, 1, 2, 5, 1.5]],
+    ['zh', zh, [0, 1, 2]],
   ] as const)('formats every ICU message for all relevant plural categories in %s', (locale, catalog, counts) => {
     const messages = compileIcuCatalog(catalog, locale)
     const testI18n = createI18n({

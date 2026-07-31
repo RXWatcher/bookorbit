@@ -242,6 +242,9 @@ jobs:
           filters: |
             server:
               - 'server/**'
+              # Server tests assert against the plugin sources, so plugin-only
+              # changes can break them.
+              - 'koreader-plugin/**'
               - 'packages/**'
               - 'package.json'
               - 'pnpm-lock.yaml'

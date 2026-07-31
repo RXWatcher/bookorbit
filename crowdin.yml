@@ -1,14 +1,23 @@
 preserve_hierarchy: true
 
 export_languages:
+  - cs
+  - da
   - de
   - es-ES
+  - fi
   - fr
+  - hu
   - it
+  - ko
   - nl
   - pl
   - pt-BR
+  - ru
   - sl
+  - sv-SE
+  - uk
+  - zh-CN
 
 pull_request_title: "i18n(client): sync translations from Crowdin"
 commit_message: |-
