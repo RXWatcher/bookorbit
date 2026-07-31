@@ -1717,7 +1717,8 @@ function BookOrbitCatalog:menuChromeHeight()
     if self:dashboardMode() then
         -- Reserve a deliberate bottom margin so the single-page dashboard does not
         -- run edge-to-edge (the pagination footer that normally fills this is hidden).
-        bottom_height = Screen:scaleBySize(40)
+        -- Kept modest: the rest of the page buys its cover sizes out of this.
+        bottom_height = Screen:scaleBySize(16)
     elseif self:detailMode() then
         local prev_book, next_book, current_idx = self:getAdjacentDetailBooks()
         local parent = self.stack[#self.stack]

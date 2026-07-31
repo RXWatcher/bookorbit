@@ -77,6 +77,9 @@ package.loaded["bookorbit_catalog_widgets"] = {
     coverCardHeight = function(card_w)
         return card_w + 20
     end,
+    dashboardHeroHeightForCoverCard = function(card_w)
+        return card_w + 24
+    end,
 }
 
 package.path = "koreader-plugin/bookorbit.koplugin/?.lua;" .. package.path
@@ -162,7 +165,7 @@ catalog:updateDashboardItems()
 assertEqual(#catalog.shelves, 1, "the default dashboard renders its one shelf")
 assertEqual(#catalog.headers, 3, "Continue reading, the shelf and Browse each get a header")
 assertEqual(catalog.shelves[1].height, catalog.shelves[1].card_w + 20, "a roomy shelf is drawn in aspect")
-assertEqual(catalog.shelves[1].cols, 5, "a roomy shelf keeps its natural slot count")
+assertEqual(catalog.shelves[1].cols, 6, "a roomy shelf keeps its natural slot count")
 assertEqual(catalog.dash_used <= 800, true, "a roomy page stays inside the available height")
 
 -- Four shelves share the page and stay in aspect: the cards get narrower rather
@@ -173,7 +176,7 @@ assertEqual(#catalog.shelves, 4, "four configured shelves all render")
 for _, shelf in ipairs(catalog.shelves) do
     assertEqual(shelf.height, shelf.card_w + 20, "every shelf is drawn in aspect")
 end
-assertEqual(catalog.shelves[1].cols > 5, true, "a crowded page fits more cards per row")
+assertEqual(catalog.shelves[1].cols, 6, "a crowded page still stops at the column cap")
 assertEqual(catalog.dash_used <= 600, true, "four shelves stay inside the available height")
 
 -- Too tight for everything: the stats strip goes before any shelf does.

@@ -180,9 +180,9 @@ catalog = newCatalog{}
 catalog.content_w = 500
 catalog.dash_inner_gap = 9
 local slots, card_w, grid_h = catalog:sectionRowMetrics(12, 6)
-assertEqual(slots, 5, "a wide dashboard budgets five cover slots")
-assertEqual(card_w, 95, "cover width subtracts only the four inter-card gaps")
-assertEqual(grid_h, 115, "grid height follows the measured cover-card height")
+assertEqual(slots, 6, "a wide dashboard budgets six cover slots, the column cap")
+assertEqual(card_w, 78, "cover width subtracts only the five inter-card gaps")
+assertEqual(grid_h, 98, "grid height follows the measured cover-card height")
 
 catalog.content_w = 320
 slots, card_w, grid_h = catalog:sectionRowMetrics(12, 6)
@@ -194,8 +194,8 @@ assertEqual(grid_h, 95, "the narrower grid recomputes its card height")
 -- always the height those cards need, so covers are never drawn out of aspect.
 catalog.content_w = 500
 slots, card_w, grid_h = catalog:shelfRowMetrics(12, 6, 999)
-assertEqual(slots, 5, "a shelf with room to spare keeps its natural row")
-assertEqual(grid_h, 115, "an unconstrained shelf keeps its natural height")
+assertEqual(slots, 6, "a shelf with room to spare keeps its natural row")
+assertEqual(grid_h, 98, "an unconstrained shelf keeps its natural height")
 
 slots, card_w, grid_h = catalog:shelfRowMetrics(12, 6, 100)
 assertEqual(slots, 6, "a tight shelf fits more cards per row")

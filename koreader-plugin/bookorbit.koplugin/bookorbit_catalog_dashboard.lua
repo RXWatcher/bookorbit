@@ -54,7 +54,10 @@ local BookOrbitDashboardIconButton = CatalogWidgets.DashboardIconButton
 -- How long the local reading-stats summary is reused before re-querying
 -- statistics.sqlite3 (the dashboard re-renders on every row page turn).
 local STATS_CACHE_TTL = 120
-local SECTION_TARGET_SLOTS = 5
+-- Six columns is what makes a two-up Continue reading card exactly three shelf
+-- columns wide at any screen size: one for its cover, two for its text. That is
+-- also the width the hero sizes its cover from, so the two rows agree.
+local SECTION_TARGET_SLOTS = 6
 local SECTION_COMPACT_GAP = 6
 local STATS_MIN_BODY_HEIGHT = 56
 local SECTION_PAGE_PREFIX = "section"
@@ -63,6 +66,10 @@ local SECTION_PAGE_PREFIX = "section"
 local SHELF_PAGE_SIZE = 12
 -- Cover cards never get narrower than this, however tight the page is.
 local SHELF_MIN_CARD_WIDTH = 72
+-- Bounds on the Continue reading hero, which is otherwise sized to match the
+-- shelf cover.
+local HERO_MIN_HEIGHT = 76
+local HERO_MAX_HEIGHT = 170
 -- Header controls are drawn inside the section header's label row, so the row
 -- stays as tall as a header without controls; the tap box reaches into the gap
 -- above and below it to stay finger-sized.
@@ -934,8 +941,10 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     local function px(n) return Screen:scaleBySize(n) end
     local avail = self.available_height
     local inner_gap = px(9)
-    local top_gap = px(4)
-    local section_gap = px(18)
+    -- Lets the greeting in the title bar breathe before the first section
+    -- starts, rather than the stats rule sitting right under it.
+    local top_gap = px(10)
+    local section_gap = px(20)
     local compact_gap = px(SECTION_COMPACT_GAP)
     self.dash_inner_gap = inner_gap
     self.dash_used = 0
@@ -945,7 +954,9 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
     local browse_row_h = px(42)
     local browse_cols = 3
     local browse_rows = 3
-    local hero_h = math.min(px(150), math.max(px(76), math.floor(avail * 0.18)))
+    -- A provisional height: once the shelves have settled their column width the
+    -- hero is re-sized from their cover, below.
+    local hero_h = math.min(px(HERO_MAX_HEIGHT), math.max(px(HERO_MIN_HEIGHT), math.floor(avail * 0.18)))
 
     local status_widget
     if context.stale and not context.loading and context.dashboard then
@@ -971,8 +982,10 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
         local fixed = top_gap + status_h
         local shelf_count = 0
         local max_shelf_books = 0
+        local visible = 0
         for index = 1, DashboardSections.SLOT_COUNT do
             if not hidden[index] then
+                visible = visible + 1
                 local config = configs[index]
                 if config.type == "stats" then
                     stats_widgets[index] = stats_widgets[index] or self:buildDashboardStatsStrip(summary, dashboard)
@@ -993,6 +1006,9 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
                 end
             end
         end
+        -- The gap separates sections, so the last one does not carry one: that
+        -- space belongs to the page's bottom margin, not to the section.
+        if visible > 0 then fixed = fixed - section_gap end
         return fixed, shelf_count, max_shelf_books
     end
 
@@ -1025,11 +1041,37 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
         end
     end
 
-    while not pageFits() do
-        local drop = slotToDrop()
-        if not drop then break end
-        hidden[drop] = true
-        fixed_h, shelf_count, max_shelf_books = measureFixed()
+    local function fitPage()
+        while not pageFits() do
+            local drop = slotToDrop()
+            if not drop then break end
+            hidden[drop] = true
+            fixed_h, shelf_count, max_shelf_books = measureFixed()
+        end
+    end
+
+    fitPage()
+
+    -- Now that the shelves have settled their column width, grow Continue
+    -- reading so its cover is the same size as a shelf cover rather than the
+    -- smallest cover on the page. Only taken when it costs nothing: a page too
+    -- tight to absorb it keeps the shelf it already has, since a matching hero
+    -- is not worth a denser row of covers or a dropped section. pageFits() only
+    -- recomputes the shelf metrics, so trying it here changes nothing else.
+    if shelf_card_w > 0 then
+        local settled_slots = shelf_slots
+        local matched = math.min(px(HERO_MAX_HEIGHT),
+            math.max(px(HERO_MIN_HEIGHT), CatalogWidgets.dashboardHeroHeightForCoverCard(shelf_card_w)))
+        if matched ~= hero_h then
+            local provisional = hero_h
+            hero_h = matched
+            fixed_h, shelf_count, max_shelf_books = measureFixed()
+            if not pageFits() or shelf_slots ~= settled_slots then
+                hero_h = provisional
+                fixed_h, shelf_count, max_shelf_books = measureFixed()
+                pageFits()
+            end
+        end
     end
 
     self:addDashboardSpacer(top_gap)
@@ -1128,8 +1170,12 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
         self.dash_section_bands[page_id] = { y = band_start, h = self.dash_used - band_start }
     end
 
+    local rendered = 0
     for index = 1, DashboardSections.SLOT_COUNT do
         if not hidden[index] then
+            if rendered > 0 then
+                self:addDashboardSpacer(section_gap)
+            end
             local config = configs[index]
             if config.type == "stats" then
                 renderStats(index)
@@ -1142,7 +1188,7 @@ function CatalogDashboard:updateDashboardItems(select_number, no_recalculate_dim
             else
                 renderShelf(index, config)
             end
-            self:addDashboardSpacer(section_gap)
+            rendered = rendered + 1
         end
     end
 

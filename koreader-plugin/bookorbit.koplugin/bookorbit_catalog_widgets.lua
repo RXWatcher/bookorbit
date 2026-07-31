@@ -54,6 +54,12 @@ local READ_STATUS_BADGE_ICONS = {
 
 local CatalogWidgets = {}
 
+-- Mirrors TextBoxWidget's own line height math so text blocks can be sized in
+-- whole lines (same helper as the detail page uses).
+local function lineHeight(face)
+    return math.floor(1.3 * face.size + 0.5)
+end
+
 -- Absolute paths to the plugin's own SVG icons, resolved once by the catalog
 -- (widgets cannot know the plugin directory). A missing entry falls back to
 -- the stock KOReader glyph named alongside it.
@@ -128,6 +134,19 @@ function CatalogWidgets.buildFakeCover(book, width, height, footer, quiet, borde
     local inner_w = math.max(1, width - 2 * Size.padding.default - 2 * bordersize)
     local inner_h = math.max(1, height - 2 * Size.padding.default - 2 * bordersize)
     if quiet then
+        local label = TextWidget:new{
+            text = footer or _("No cover"),
+            face = Font:getFace("xx_smallinfofont"),
+            fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+            max_width = inner_w,
+        }
+        -- On a narrow cover the label survives only as an initial and an
+        -- ellipsis, which reads as damage; an empty frame says "no cover"
+        -- better than "C..." does.
+        if label:isTruncated() then
+            label:free()
+            label = HorizontalSpan:new{ width = inner_w }
+        end
         return FrameContainer:new{
             width = width,
             height = height,
@@ -137,47 +156,60 @@ function CatalogWidgets.buildFakeCover(book, width, height, footer, quiet, borde
             background = Blitbuffer.COLOR_WHITE,
             CenterContainer:new{
                 dimen = Geom:new{ w = inner_w, h = inner_h },
-                TextWidget:new{
-                    text = footer or _("No cover"),
-                    face = Font:getFace("xx_smallinfofont"),
-                    fgcolor = Blitbuffer.COLOR_DARK_GRAY,
-                    max_width = inner_w,
-                },
+                label,
             },
         }
     end
 
-    local title_h = math.floor(inner_h * 0.58)
-    local author_h = math.floor(inner_h * 0.22)
-    local footer_h = math.max(1, inner_h - title_h - author_h)
+    -- Blocks are measured in whole lines and each takes only what it needs, so
+    -- the group can be centred in the cover box. Splitting the box into fixed
+    -- proportions instead left a short title floating above a band of white and
+    -- clipped a two-word author to "Arkady...". Anything that still does not fit
+    -- is dropped from the bottom up rather than ellipsized into a fragment.
+    -- Sized explicitly: the face defaults run 22/20/18, so leaving the author
+    -- and footer unsized set them larger than a title asked for at 16 and stood
+    -- the hierarchy on its head.
+    local title_face = Font:getFace("smallinfofont", 17)
+    local author_face = Font:getFace("x_smallinfofont", 14)
+    local footer_face = Font:getFace("xx_smallinfofont", 12)
+    local gap = Size.span.vertical_default
     local author = book and firstAuthor(book) or nil
+    local has_footer = footer ~= nil and footer ~= ""
 
-    local content = VerticalGroup:new{ align = "center" }
-    table.insert(content, VerticalSpan:new{ width = Size.span.vertical_default })
-    table.insert(content, TextBoxWidget:new{
-        text = BD.auto(shortText(book and book.title or _("Untitled"), 60)),
-        width = inner_w,
-        height = title_h,
-        alignment = "center",
-        face = Font:getFace("smallinfofont", 16),
-        height_overflow_show_ellipsis = true,
-    })
-    table.insert(content, TextBoxWidget:new{
-        text = author and BD.auto(shortText(author, 44)) or "",
-        width = inner_w,
-        height = author_h,
-        alignment = "center",
-        face = Font:getFace("x_smallinfofont"),
-        height_overflow_show_ellipsis = true,
-    })
-    table.insert(content, TextBoxWidget:new{
-        text = footer or "",
-        width = inner_w,
-        height = footer_h,
-        alignment = "center",
-        face = Font:getFace("xx_smallinfofont"),
-        height_overflow_show_ellipsis = true,
-    })
+    local function textBlock(text, face, max_lines)
+        return TextBoxWidget:new{
+            text = text,
+            width = inner_w,
+            height = max_lines * lineHeight(face),
+            height_adjust = true,
+            alignment = "center",
+            face = face,
+            height_overflow_show_ellipsis = true,
+        }
+    end
+
+    local function buildContent(with_author, with_footer)
+        local group = VerticalGroup:new{ align = "center" }
+        table.insert(group, textBlock(
+            BD.auto(shortText(book and book.title or _("Untitled"), 60)), title_face, 3))
+        if with_author then
+            table.insert(group, VerticalSpan:new{ width = gap })
+            table.insert(group, textBlock(BD.auto(shortText(author, 44)), author_face, 2))
+        end
+        if with_footer then
+            table.insert(group, VerticalSpan:new{ width = gap })
+            table.insert(group, textBlock(footer, footer_face, 2))
+        end
+        return group
+    end
+
+    local content = buildContent(author ~= nil, has_footer)
+    if content:getSize().h > inner_h and has_footer then
+        content = buildContent(author ~= nil, false)
+    end
+    if content:getSize().h > inner_h and author then
+        content = buildContent(false, false)
+    end
 
     return FrameContainer:new{
         width = width,
@@ -232,9 +264,12 @@ function CatalogWidgets.buildCoverWidget(book, width, height, path, state, opts)
     end
     -- Quiet placeholders are reserved for covers still loading; a cover that is
     -- missing or failed keeps the titled fake cover so the book stays
-    -- identifiable on caption-less shelves.
-    return CatalogWidgets.buildFakeCover(
-        book, width, height, footer, opts.quiet_placeholder == true and state == "loading", bordersize)
+    -- identifiable on caption-less shelves. always_quiet is for callers whose
+    -- own row already names the book, where a titled placeholder would only
+    -- repeat it - badly, since those covers are far too narrow to set it in.
+    local quiet = opts.always_quiet == true
+        or (opts.quiet_placeholder == true and state == "loading")
+    return CatalogWidgets.buildFakeCover(book, width, height, footer, quiet, bordersize)
 end
 
 -- Badges sit on a small white plate so they stay legible over busy cover art;
@@ -287,8 +322,8 @@ function CatalogWidgets.buildDownloadedBadge(max_width)
     return badgeChip(IconWidget:new(opts))
 end
 
-function CatalogWidgets.buildCoverWithStateBadges(book, width, height, path, state, downloaded, selected)
-    local cover = CatalogWidgets.buildCoverWidget(book, width, height, path, state)
+function CatalogWidgets.buildCoverWithStateBadges(book, width, height, path, state, downloaded, selected, cover_opts)
+    local cover = CatalogWidgets.buildCoverWidget(book, width, height, path, state, cover_opts)
     if not downloaded and not selected then return cover end
 
     local group = OverlapGroup:new{
@@ -346,7 +381,10 @@ function MosaicItem:init()
 
     local book = self.entry.book
     local show_label = self.menu.mosaic_show_titles == true
-    local bar_reserve = hasProgress(book) and (PROGRESS_BAR_HEIGHT + Size.span.vertical_default) or 0
+    -- Reserved for every cell, drawn only where there is progress: sizing the
+    -- cell from whether this particular book has a bar left covers in the same
+    -- row sitting a few pixels off each other.
+    local bar_reserve = PROGRESS_BAR_HEIGHT + Size.span.vertical_default
     local label_h = show_label and math.max(Screen:scaleBySize(44), math.floor(self.dimen.h * 0.24)) or 0
     local label_gap = show_label and Size.span.vertical_default or 0
     local max_cover_w = math.max(1, self.dimen.w - 2 * Size.padding.default)
@@ -361,12 +399,14 @@ function MosaicItem:init()
     local content = VerticalGroup:new{ align = "center" }
     table.insert(
         content,
-        CatalogWidgets.buildCoverWithStateBadges(book, cover_w, cover_h, path, state, downloaded, selected))
+        -- With labels on, the cell already names the book below the cover, so a
+        -- titled placeholder would just say it twice.
+        CatalogWidgets.buildCoverWithStateBadges(
+            book, cover_w, cover_h, path, state, downloaded, selected,
+            { always_quiet = show_label }))
     local bar = CatalogWidgets.buildProgressBar(book and book.progressPercentage, cover_w)
-    if bar then
-        table.insert(content, VerticalSpan:new{ width = Size.span.vertical_default })
-        table.insert(content, bar)
-    end
+    table.insert(content, VerticalSpan:new{ width = Size.span.vertical_default })
+    table.insert(content, bar or VerticalSpan:new{ width = PROGRESS_BAR_HEIGHT })
     if show_label then
         local label_text = shortText(book and book.title or _("Untitled"), 30)
         local label_w = math.max(1, self.dimen.w - 2 * Size.padding.tiny)
@@ -442,7 +482,9 @@ function ListItem:init()
     local content_h = math.max(1, inner_h - 2 * Size.padding.small)
     local cover_h = math.max(Screen:scaleBySize(38), math.min(Screen:scaleBySize(74), content_h))
     local cover_w = math.floor(cover_h * 0.68)
-    local bar_reserve = hasProgress(book) and (PROGRESS_BAR_HEIGHT + Size.span.vertical_default) or 0
+    -- Reserved on every row so the title and subtitle sit on the same lines
+    -- whether or not this book has a progress bar under them.
+    local bar_reserve = PROGRESS_BAR_HEIGHT + Size.span.vertical_default
     local left_w = cover_w + 2 * pad
     local side_meta_text = self.menu:listSideMetaText(book)
     local show_side_meta = side_meta_text ~= "" and self.dimen.w >= Screen:scaleBySize(520)
@@ -492,10 +534,8 @@ function ListItem:init()
     local body_col = VerticalGroup:new{ align = "left" }
     table.insert(body_col, text_col)
     local bar = CatalogWidgets.buildProgressBar(book and book.progressPercentage, main_w)
-    if bar then
-        table.insert(body_col, VerticalSpan:new{ width = Size.span.vertical_default })
-        table.insert(body_col, bar)
-    end
+    table.insert(body_col, VerticalSpan:new{ width = Size.span.vertical_default })
+    table.insert(body_col, bar or VerticalSpan:new{ width = PROGRESS_BAR_HEIGHT })
 
     local row_dimen = Geom:new{ w = self.dimen.w, h = inner_h }
     local row = OverlapGroup:new{
@@ -504,7 +544,13 @@ function ListItem:init()
             dimen = row_dimen:copy(),
             CenterContainer:new{
                 dimen = Geom:new{ w = left_w, h = inner_h },
-                CatalogWidgets.buildCoverWithStateBadges(book, cover_w, cover_h, path, state, downloaded, selected),
+                -- The meta column already spells out "On device", so the badge
+                -- would only repeat it on a cover far too small to spare the
+                -- room; it stays for the narrow layouts that hide that column.
+                CatalogWidgets.buildCoverWithStateBadges(
+                    book, cover_w, cover_h, path, state,
+                    downloaded and not show_side_meta, selected,
+                    { always_quiet = true }),
             },
         },
         LeftContainer:new{
@@ -587,12 +633,6 @@ local function cardFrame(width, height, padding, child)
     }
 end
 
--- Mirrors TextBoxWidget's own line height math so single-line boxes can be
--- sized exactly (same helper as the detail page uses).
-local function lineHeight(face)
-    return math.floor(1.3 * face.size + 0.5)
-end
-
 -- Caption fonts under captioned dashboard cover cards (title + author/percent).
 local CAPTION_TITLE_FONT_SIZE = 13
 local CAPTION_SUB_FONT_SIZE = 11
@@ -627,6 +667,16 @@ function CatalogWidgets.coverCardHeight(card_w, with_progress, with_caption)
     local bar_h = with_progress and (PROGRESS_BAR_HEIGHT + Size.span.vertical_default) or 0
     local caption_h = with_caption and (CatalogWidgets.coverCaptionHeight() + Size.span.vertical_default) or 0
     return cover_h + bar_h + caption_h + 2 * COVER_CARD_PAD + 2 * CARD_BORDER
+end
+
+-- The Continue reading hero card height whose cover comes out the same size as
+-- a shelf cover card of the given width. The hero is otherwise sized from a
+-- share of the page, which left the featured row showing a smaller cover than
+-- the browse shelf under it.
+function CatalogWidgets.dashboardHeroHeightForCoverCard(card_w)
+    local cover_h = coverCardCoverHeight(
+        CatalogWidgets.coverCardHeight(card_w, false, false), false, false)
+    return cover_h + 2 * Size.padding.default + 2 * CARD_BORDER
 end
 
 function CatalogWidgets.detailRelatedCardWidth(card_h)
@@ -1278,6 +1328,22 @@ function DetailTabButton:onHoldSelect()
     return self:onTapSelect()
 end
 
+local DETAIL_STAR_FONT_SIZE = 22
+
+-- The width a star cell needs to hold its glyph. Sizing cells to the glyph
+-- rather than to the row height keeps the first star flush with the title and
+-- author above it; a square cell would centre the glyph and indent the row.
+function CatalogWidgets.detailRatingStarWidth()
+    local probe = TextWidget:new{
+        text = "★",
+        face = Font:getFace("cfont", DETAIL_STAR_FONT_SIZE),
+        bold = true,
+    }
+    local width = probe:getSize().w
+    probe:free()
+    return width + 2 * Size.padding.tiny
+end
+
 local DetailRatingStar = InputContainer:extend{
     entry = nil,
     dimen = nil,
@@ -1299,7 +1365,7 @@ function DetailRatingStar:init()
             height = self.dimen.h,
             alignment = "center",
             bold = true,
-            face = Font:getFace("cfont", 22),
+            face = Font:getFace("cfont", DETAIL_STAR_FONT_SIZE),
             height_overflow_show_ellipsis = true,
         },
     }
