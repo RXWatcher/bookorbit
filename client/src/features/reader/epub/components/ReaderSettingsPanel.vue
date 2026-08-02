@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BookOpen, LayoutGrid, Moon, Palette, ScrollText, Sun, Type } from '@lucide/vue'
 import type { ReaderState } from '../composables/useReaderState'
-import type { useCustomFonts } from '../composables/useCustomFonts'
+import type { FontFamily, useCustomFonts } from '../composables/useCustomFonts'
 import { themes } from '../constants/themes'
 import { BUILTIN_READER_FONT_OPTIONS } from '@/features/reader/shared/constants/font-options'
 import { formatFontFamilyLabel } from '@/features/reader/shared/lib/font-display'
@@ -104,7 +104,7 @@ function removePreviewStyles() {
 }
 
 watch(
-  () => props.customFonts?.fonts.value,
+  () => [props.customFonts?.fonts.value, props.customFonts?.serverFonts.value],
   () => {
     injectPreviewStyles(props.customFonts?.generateFontFaceCSS() ?? '')
   },
@@ -120,15 +120,25 @@ watch(
   },
 )
 
-function selectCustomFont(familyName: string) {
+/** Server fonts first: they are the curated set an administrator chose for everyone. */
+const customFontSections = computed(() => {
+  const customFonts = props.customFonts
+  if (!customFonts) return []
+  return [
+    { key: 'server', label: t('reader.settings.text.serverFonts'), families: customFonts.visibleServerFamilies.value },
+    { key: 'user', label: t('reader.settings.text.yourFonts'), families: customFonts.families.value },
+  ].filter((section) => section.families.length > 0)
+})
+
+function selectCustomFont(family: FontFamily) {
   if (!props.customFonts) return
-  const cssFamilyName = props.customFonts.getCssFamilyForDisplay(familyName)
+  const cssFamilyName = props.customFonts.getCssFamilyForDisplay(family.name, family.scope)
   if (cssFamilyName) emit('update', { fontFamily: cssFamilyName })
 }
 
-function isCustomFontSelected(familyName: string): boolean {
+function isCustomFontSelected(family: FontFamily): boolean {
   if (!props.customFonts) return false
-  return props.customFonts.isFontFamilySelected(familyName, props.state.fontFamily)
+  return props.customFonts.isFontFamilySelected(family.name, props.state.fontFamily, family.scope)
 }
 
 function setFixedLayoutSpreadAuto() {
@@ -277,22 +287,22 @@ function setFixedLayoutSpreadNone() {
               </div>
             </div>
 
-            <template v-if="customFonts && customFonts.families.value.length > 0">
+            <template v-for="section in customFontSections" :key="section.key">
               <div class="h-px bg-border/70" />
               <div class="space-y-2">
-                <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{{ t('reader.settings.text.yourFonts') }}</p>
+                <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{{ section.label }}</p>
                 <div class="flex flex-wrap gap-2">
                   <button
-                    v-for="family in customFonts.families.value"
-                    :key="family.name"
+                    v-for="family in section.families"
+                    :key="family.cssFamilyName"
                     class="rounded-lg border px-3 py-1.5 text-sm transition-colors"
                     :class="
-                      isCustomFontSelected(family.name)
+                      isCustomFontSelected(family)
                         ? 'border-primary bg-primary text-primary-foreground'
                         : 'border-border hover:border-muted-foreground/40 hover:bg-muted'
                     "
                     :style="{ fontFamily: `'${family.cssFamilyName}', sans-serif` }"
-                    @click="selectCustomFont(family.name)"
+                    @click="selectCustomFont(family)"
                   >
                     {{ formatFontFamilyLabel(family.name) }}
                   </button>

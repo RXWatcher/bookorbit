@@ -1133,7 +1133,15 @@
         "users": "Utenti",
         "account-activity": "Attività dell'account",
         "magic-links": "Collegamenti magici",
-        "oidc": "OIDC /SSO"
+        "oidc": "OIDC /SSO",
+        "server-fonts": "Server Fonts"
+      },
+      "serverFonts": {
+        "title": "Server Fonts",
+        "subtitle": "Upload fonts that every user can pick in the eBook reader, without uploading their own.",
+        "listLabel": "Server fonts",
+        "noFontsYet": "No server fonts yet",
+        "noFontsHint": "Fonts you add here appear in every user's reader."
       }
     },
     "common": {
@@ -1668,7 +1676,12 @@
         "deleteFamilyFailed": "Impossibile eliminare la famiglia di caratteri",
         "demoCannotManage": "L'account con limitazioni demo non può gestire i caratteri",
         "fileAdded": "\"{name}\" aggiunto",
-        "uploadFailed": "Caricamento non riuscito"
+        "uploadFailed": "Caricamento non riuscito",
+        "serverFontsTitle": "Server fonts (shared by admin)",
+        "serverFontsHint": "These fonts come from your server administrator. Turn one off to keep it out of your reader.",
+        "serverFontsShown": "{count} of {total} shown",
+        "serverFontsAllHidden": "All server fonts are hidden. Your reader will only offer built-in and your own fonts.",
+        "serverFontVisibilityFailed": "Failed to update server font visibility"
       },
       "bookDock": {
         "title": "Book Dock",
@@ -5958,7 +5971,8 @@
         "fontFamily": "Famiglia di caratteri",
         "fontFamilyDescription": "Scegli i caratteri incorporati o caricati per il corpo del testo.",
         "builtIn": "Integrato",
-        "yourFonts": "I tuoi caratteri"
+        "yourFonts": "I tuoi caratteri",
+        "serverFonts": "Server fonts"
       },
       "layout": {
         "pageSpreads": "La pagina si allarga",
@@ -6965,7 +6979,8 @@
       "users": "Utenti",
       "account-activity": "Attività dell'account",
       "magic-links": "Collegamenti magici",
-      "oidc": "OIDC /SSO"
+      "oidc": "OIDC /SSO",
+      "server-fonts": "Server Fonts"
     },
     "system": {
       "file-naming": "Denominazione dei file",

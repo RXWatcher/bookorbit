@@ -1133,7 +1133,15 @@
         "users": "Пользователи",
         "account-activity": "Активность аккаунта",
         "magic-links": "Волшебные ссылки",
-        "oidc": "OIDC / ССО"
+        "oidc": "OIDC / ССО",
+        "server-fonts": "Server Fonts"
+      },
+      "serverFonts": {
+        "title": "Server Fonts",
+        "subtitle": "Upload fonts that every user can pick in the eBook reader, without uploading their own.",
+        "listLabel": "Server fonts",
+        "noFontsYet": "No server fonts yet",
+        "noFontsHint": "Fonts you add here appear in every user's reader."
       }
     },
     "common": {
@@ -1668,7 +1676,12 @@
         "deleteFamilyFailed": "Не удалось удалить семейство шрифтов",
         "demoCannotManage": "Ограниченный демо-аккаунт не может управлять шрифтами",
         "fileAdded": "\"{name}\" добавлен",
-        "uploadFailed": "Загрузка не удалась"
+        "uploadFailed": "Загрузка не удалась",
+        "serverFontsTitle": "Server fonts (shared by admin)",
+        "serverFontsHint": "These fonts come from your server administrator. Turn one off to keep it out of your reader.",
+        "serverFontsShown": "{count} of {total} shown",
+        "serverFontsAllHidden": "All server fonts are hidden. Your reader will only offer built-in and your own fonts.",
+        "serverFontVisibilityFailed": "Failed to update server font visibility"
       },
       "bookDock": {
         "title": "Книжный док-бар",
@@ -5958,7 +5971,8 @@
         "fontFamily": "Семейство шрифтов",
         "fontFamilyDescription": "Выберите встроенные или загруженные шрифты для текста тела.",
         "builtIn": "Встроенный",
-        "yourFonts": "Ваши шрифты"
+        "yourFonts": "Ваши шрифты",
+        "serverFonts": "Server fonts"
       },
       "layout": {
         "pageSpreads": "Спреды страниц",
@@ -6965,7 +6979,8 @@
       "users": "Пользователи",
       "account-activity": "Активность аккаунта",
       "magic-links": "Волшебные ссылки",
-      "oidc": "OIDC / ССО"
+      "oidc": "OIDC / ССО",
+      "server-fonts": "Server Fonts"
     },
     "system": {
       "file-naming": "Именование файлов",

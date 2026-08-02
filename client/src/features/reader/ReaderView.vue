@@ -282,7 +282,7 @@ onMounted(async () => {
   // Specialized readers own their own progress/settings/loading lifecycle.
   if (isAudioFormat || isPdfFormat || isComicFormat) return
 
-  await customFonts.fetchFonts()
+  await customFonts.fetchAllFonts()
   await refreshFontFaces()
 
   await progress.load()
@@ -407,7 +407,7 @@ async function refreshFontFaces() {
   if (renderer && shouldApplyStyles.value) applyToRenderer(renderer, isFixedLayout.value ? { flow: 'paginated' } : undefined)
 }
 
-watch(() => customFonts.fonts.value, refreshFontFaces)
+watch(() => [customFonts.fonts.value, customFonts.serverFonts.value], refreshFontFaces)
 
 watch(() => state.value.fontFamily, refreshFontFaces)
 

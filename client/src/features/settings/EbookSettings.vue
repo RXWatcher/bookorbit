@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { EpubReaderSettings } from '@bookorbit/types'
-import { fontCssFamilyGroupName } from '@bookorbit/types'
+import { isCustomFontCssFamily } from '@bookorbit/types'
 import { useReaderDefaultSettings } from '@/features/reader/shared/composables/useReaderSettings'
 import { useCustomFonts } from '@/features/reader/epub/composables/useCustomFonts'
 import { themes } from '@/features/reader/epub/constants/themes'
@@ -29,7 +29,14 @@ const customFonts = useCustomFonts()
 
 const customFontOptions = computed(() =>
   customFonts.families.value.map((f) => ({
-    id: fontCssFamilyGroupName(f.name),
+    id: f.cssFamilyName,
+    label: formatFontFamilyLabel(f.name),
+  })),
+)
+
+const serverFontOptions = computed(() =>
+  customFonts.visibleServerFamilies.value.map((f) => ({
+    id: f.cssFamilyName,
     label: formatFontFamilyLabel(f.name),
   })),
 )
@@ -50,15 +57,15 @@ function injectPreviewStyles(css: string) {
 }
 
 watch(
-  () => customFonts.fonts.value,
+  () => [customFonts.fonts.value, customFonts.serverFonts.value, customFonts.hiddenServerFamilies.value],
   () => {
     injectPreviewStyles(customFonts.generateFontFaceCSS())
 
-    // If the saved font family is a custom font that no longer exists, reset it.
+    // Reset a saved font that is no longer on offer: deleted by its owner, removed by an
+    // administrator, or a server font this reader has since hidden.
     const saved = effective.value.fontFamily
-    if (saved?.startsWith('__userfont_')) {
-      const stillExists = customFonts.families.value.some((f) => fontCssFamilyGroupName(f.name) === saved)
-      if (!stillExists) update({ fontFamily: null })
+    if (isCustomFontCssFamily(saved) && !customFonts.cssFamilyAvailable(saved)) {
+      update({ fontFamily: null })
     }
   },
   { immediate: true },
@@ -66,7 +73,7 @@ watch(
 
 onMounted(async () => {
   await load()
-  await customFonts.fetchFonts()
+  await customFonts.fetchAllFonts()
 })
 
 onUnmounted(() => {
@@ -293,6 +300,9 @@ function setFixedLayoutSpreadNone() {
           >
             <optgroup :label="t('settings.reader.ebook.builtInFonts')">
               <option v-for="f in BUILTIN_READER_FONT_OPTIONS" :key="String(f.value)" :value="f.value ?? ''">{{ f.label }}</option>
+            </optgroup>
+            <optgroup v-if="serverFontOptions.length > 0" :label="t('reader.settings.text.serverFonts')">
+              <option v-for="f in serverFontOptions" :key="f.id" :value="f.id">{{ f.label }}</option>
             </optgroup>
             <optgroup v-if="customFontOptions.length > 0" :label="t('settings.reader.ebook.yourFonts')">
               <option v-for="f in customFontOptions" :key="f.id" :value="f.id">{{ f.label }}</option>

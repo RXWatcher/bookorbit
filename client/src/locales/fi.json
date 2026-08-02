@@ -1133,7 +1133,15 @@
         "users": "Käyttäjät",
         "account-activity": "Tilin Toiminta",
         "magic-links": "Magic Linkit",
-        "oidc": "OIDC / SSO"
+        "oidc": "OIDC / SSO",
+        "server-fonts": "Server Fonts"
+      },
+      "serverFonts": {
+        "title": "Server Fonts",
+        "subtitle": "Upload fonts that every user can pick in the eBook reader, without uploading their own.",
+        "listLabel": "Server fonts",
+        "noFontsYet": "No server fonts yet",
+        "noFontsHint": "Fonts you add here appear in every user's reader."
       }
     },
     "common": {
@@ -1668,7 +1676,12 @@
         "deleteFamilyFailed": "Kirjasinperheen poistaminen epäonnistui",
         "demoCannotManage": "Demo-rajoitettu tili ei voi hallita kirjasimia",
         "fileAdded": "\"{name}\" lisätty",
-        "uploadFailed": "Lähetys epäonnistui"
+        "uploadFailed": "Lähetys epäonnistui",
+        "serverFontsTitle": "Server fonts (shared by admin)",
+        "serverFontsHint": "These fonts come from your server administrator. Turn one off to keep it out of your reader.",
+        "serverFontsShown": "{count} of {total} shown",
+        "serverFontsAllHidden": "All server fonts are hidden. Your reader will only offer built-in and your own fonts.",
+        "serverFontVisibilityFailed": "Failed to update server font visibility"
       },
       "bookDock": {
         "title": "Kirja Telakka",
@@ -5958,7 +5971,8 @@
         "fontFamily": "Kirjasinperhe",
         "fontFamilyDescription": "Valitse sisäänrakennetut tai ladatut kirjasimet vartalotekstille.",
         "builtIn": "Sisäänrakennettu",
-        "yourFonts": "Kirjasimesi"
+        "yourFonts": "Kirjasimesi",
+        "serverFonts": "Server fonts"
       },
       "layout": {
         "pageSpreads": "Sivun levitykset",
@@ -6965,7 +6979,8 @@
       "users": "Käyttäjät",
       "account-activity": "Tilin Toiminta",
       "magic-links": "Magic Linkit",
-      "oidc": "OIDC / SSO"
+      "oidc": "OIDC / SSO",
+      "server-fonts": "Server Fonts"
     },
     "system": {
       "file-naming": "Tiedoston Nimeäminen",

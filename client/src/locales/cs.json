@@ -1133,7 +1133,15 @@
         "users": "Uživatelé",
         "account-activity": "Aktivita účtu",
         "magic-links": "Kouzelné odkazy",
-        "oidc": "OIDC / SSO"
+        "oidc": "OIDC / SSO",
+        "server-fonts": "Server Fonts"
+      },
+      "serverFonts": {
+        "title": "Server Fonts",
+        "subtitle": "Upload fonts that every user can pick in the eBook reader, without uploading their own.",
+        "listLabel": "Server fonts",
+        "noFontsYet": "No server fonts yet",
+        "noFontsHint": "Fonts you add here appear in every user's reader."
       }
     },
     "common": {
@@ -1668,7 +1676,12 @@
         "deleteFamilyFailed": "Nepodařilo se odstranit rodinu písem",
         "demoCannotManage": "Demo-limitovaný účet nemůže spravovat písma",
         "fileAdded": "\"{name}\" přidáno",
-        "uploadFailed": "Nahrávání se nezdařilo"
+        "uploadFailed": "Nahrávání se nezdařilo",
+        "serverFontsTitle": "Server fonts (shared by admin)",
+        "serverFontsHint": "These fonts come from your server administrator. Turn one off to keep it out of your reader.",
+        "serverFontsShown": "{count} of {total} shown",
+        "serverFontsAllHidden": "All server fonts are hidden. Your reader will only offer built-in and your own fonts.",
+        "serverFontVisibilityFailed": "Failed to update server font visibility"
       },
       "bookDock": {
         "title": "Dok knihy",
@@ -5958,7 +5971,8 @@
         "fontFamily": "Rodina písma",
         "fontFamilyDescription": "Vyberte vestavěná nebo nahraná písma pro text těla.",
         "builtIn": "Vestavěné",
-        "yourFonts": "Vaše písma"
+        "yourFonts": "Vaše písma",
+        "serverFonts": "Server fonts"
       },
       "layout": {
         "pageSpreads": "Rozložení stránky",
@@ -6965,7 +6979,8 @@
       "users": "Uživatelé",
       "account-activity": "Aktivita účtu",
       "magic-links": "Kouzelné odkazy",
-      "oidc": "OIDC / SSO"
+      "oidc": "OIDC / SSO",
+      "server-fonts": "Server Fonts"
     },
     "system": {
       "file-naming": "Pojmenování souborů",
