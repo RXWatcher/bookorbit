@@ -868,6 +868,17 @@ describe('KoreaderCatalogService', () => {
     expect(res).toEqual({ readStatus: 'reading' });
   });
 
+  it('resets read status to unread over the same manual path', async () => {
+    const { service, bookService, userBookStatusService } = makeService();
+    const user = makeUser({ id: 7 });
+
+    const res = await service.setReadStatus(user, 10, 'unread');
+
+    expect(bookService.verifyBookAccess).toHaveBeenCalledWith(10, user);
+    expect(userBookStatusService.setManual).toHaveBeenCalledWith(7, 10, 'unread');
+    expect(res).toEqual({ readStatus: 'unread' });
+  });
+
   it('sets and clears rating through the book service', async () => {
     const { service, bookService } = makeService();
     const user = makeUser({ id: 7 });

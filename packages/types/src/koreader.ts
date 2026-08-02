@@ -148,8 +148,10 @@ export type KoreaderCatalogSortOrder = "asc" | "desc";
 export type KoreaderCatalogReadStatusFilter = "unread" | "reading" | "finished";
 
 // Read statuses the catalog detail page can set on a book. A subset of the
-// full ReadStatus enum, chosen for reading-device ergonomics.
-export type KoreaderCatalogSettableReadStatus = "want_to_read" | "reading" | "on_hold" | "read" | "abandoned";
+// full ReadStatus enum, chosen for reading-device ergonomics. "unread" is the
+// default state, so it has to stay settable or a device write becomes a one-way
+// door that only the web dashboard can undo.
+export type KoreaderCatalogSettableReadStatus = "unread" | "want_to_read" | "reading" | "on_hold" | "read" | "abandoned";
 
 export interface KoreaderCatalogSeriesSummary {
   total: number;

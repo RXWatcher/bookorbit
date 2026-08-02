@@ -84,6 +84,7 @@ CatalogUtil.READ_STATUS_LABELS = {
 -- Read statuses the user can set from the catalog detail page. Kept in sync
 -- with the server's manual read-status enum.
 CatalogUtil.SETTABLE_READ_STATUSES = {
+    { id = "unread", text = _("Unread") },
     { id = "want_to_read", text = _("To read") },
     { id = "reading", text = _("Reading") },
     { id = "on_hold", text = _("On hold") },
