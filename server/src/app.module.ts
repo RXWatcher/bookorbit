@@ -73,6 +73,7 @@ import { CustomIconModule } from './modules/custom-icon/custom-icon.module';
 import { AccountActivityModule } from './modules/account-activity/account-activity.module';
 import { SharedReadingInsightsModule } from './modules/shared-reading-insights/shared-reading-insights.module';
 import { BookDuplicatesModule } from './modules/book-duplicates/book-duplicates.module';
+import { BookMoveModule } from './modules/book-move/book-move.module';
 
 @Module({
   imports: [
@@ -152,6 +153,7 @@ import { BookDuplicatesModule } from './modules/book-duplicates/book-duplicates.
     AccountActivityModule,
     SharedReadingInsightsModule,
     BookDuplicatesModule,
+    BookMoveModule,
     BrowseCountsModule,
   ],
   providers: [

@@ -2866,7 +2866,6 @@
       "BookDelete": "删除书",
       "BookBulkMetadataRefresh": "刷新书籍元数据",
       "BookBulkDelete": "删除书",
-      "BookBulkMove": "Move books",
       "BookBulkCoverReextract": "重新提取书封面",
       "BookBulkSetStatus": "设置书状状态",
       "BookBulkSetRating": "设置书评分数",
@@ -2874,6 +2873,7 @@
       "BookBulkUpdateTags": "更新书签标签",
       "BookBulkSetMetadataLock": "设置元数据锁",
       "BookBulkEditMetadata": "编辑书籍元数据",
+      "BookBulkMoveLibrary": "Move books to another library",
       "BookReadingStateReset": "重置阅读状态",
       "BookWriteAndRename": "写元数据并重命名文件",
       "CollectionCreate": "创建收藏",
@@ -3365,31 +3365,6 @@
       "title": "删除书？",
       "description": "这将永久删除该书及其所有元数据、文件、阅读进度和书签。无法撤消。"
     },
-    "moveDialog": {
-      "title": "{count, plural, =0 {Move # books to library} other {Move # books to library}}",
-      "description": "Files are moved into the target library's folder. Reading progress, annotations, and collections stay with the books.",
-      "multiLibraryHint": "Books that are already in the selected library are skipped.",
-      "targetLibrary": "Target library",
-      "targetFolder": "Target folder",
-      "selectLibrary": "Select a library…",
-      "selectFolder": "Select a folder…",
-      "move": "Move"
-    },
-    "moveOutcomes": {
-      "book_not_found": "Book not found",
-      "no_source_access": "No access to the source library",
-      "source_access_check_failed": "The source library access check failed",
-      "book_processing": "The book is still processing",
-      "book_missing": "The book's files are missing",
-      "already_in_target": "The book is already in the target library",
-      "format_not_allowed": "The book's format is not allowed in the target library",
-      "target_path_taken": "The target path is already used by another book",
-      "target_path_exists": "A file already exists at the target path",
-      "path_escapes_target": "The resolved file path leaves the target folder",
-      "database_update_failed": "The database update failed",
-      "file_move_failed": "Moving the files failed",
-      "file_move_failed_rollback_incomplete": "Moving the files failed and the rollback was incomplete, please verify the book"
-    },
     "bulkEdit": {
       "title": "{count, plural, =0 {编辑元数据-# 书} one {编辑元数据-# 书} other {编辑元数据-# 书}}",
       "instructions": "切换要编辑的字段，然后配置值。仅切换的字段将被更改。",
@@ -3654,11 +3629,6 @@
         "primary": "主要的",
         "peek": "佩克",
         "sendViaEmail": "通过电子邮件发送",
-        "moveToLibrary": "Move to Library",
-        "moveSuccess": "Book moved",
-        "moveFailed": "Failed to move book",
-        "moveNotMoved": "Book was not moved",
-        "moveNotMovedWithReason": "Book was not moved: {reason}",
         "personalReview": {
           "title": "个人评论",
           "toggleAria": "切换个人评论",
@@ -4189,6 +4159,69 @@
       "text": {
         "openDetails": "打开详情"
       }
+    },
+    "move": {
+      "title": "{count, plural, other {Move # books}}",
+      "subtitle": "Files move on disk into the destination library. This can change who can see these books.",
+      "searchPlaceholder": "Search libraries",
+      "currentLibrary": "Current",
+      "folderCount": "{count, plural, other {# folders}}",
+      "continue": "Continue",
+      "back": "Back",
+      "confirm": "{count, plural, other {Move # books}}",
+      "action": "Move to library",
+      "review": {
+        "ready": "{count} ready",
+        "collisions": "{count, plural, other {# name conflicts}}",
+        "ineligible": "{count} cannot move",
+        "alreadyThere": "{count} already there",
+        "collisionsHeading": "Name conflicts",
+        "ineligibleHeading": "Cannot be moved",
+        "moreCollisions": "and {count} more"
+      },
+      "policy": {
+        "suggested": "Use suggested",
+        "keep_both": "Keep both",
+        "merge": "Merge",
+        "skip": "Skip"
+      },
+      "collision": {
+        "folder_path": "A book already uses this folder name",
+        "file_path": "A file already uses this path",
+        "hash_duplicate": "An identical copy is already in this library"
+      },
+      "ineligible": {
+        "book_not_present": "The files for this book are missing",
+        "no_content_file": "This book has no readable file",
+        "multi_file_target_per_file": "The destination stores one file per book, and this book has {detail} files",
+        "no_source_access": "You cannot edit the library this book is in",
+        "pattern_unresolved": "The destination library has no usable naming pattern",
+        "path_too_long": "The destination path would be too long",
+        "path_outside_target_root": "The destination path would fall outside the library folder"
+      },
+      "warning": {
+        "accessLoss": "{user} will stop seeing {count} of these books",
+        "koboImpact": "{count} books will leave {user}'s Kobo on the next sync",
+        "layout": {
+          "wrap_into_folder": "{count} books will each be placed in their own folder",
+          "dissolve_folder": "{count} book folders will be dissolved into single files"
+        },
+        "crossDevice": "Files move to another drive, so they are copied, verified, then removed."
+      },
+      "progress": {
+        "label": "Moving books to {library}",
+        "failed": "{count} failed"
+      },
+      "done": {
+        "summary": "Moved {count} books to {library}",
+        "merged": "{count} merged with copies already there",
+        "skipped": "{count} skipped",
+        "failed": "{count} failed"
+      },
+      "toast": {
+        "success": "Moved {count} books to {library}",
+        "partial": "Moved {moved} books, {failed} failed"
+      }
     }
   },
   "bookMetadataFetch": {
@@ -4545,7 +4578,6 @@
       "lockAll": "锁定所有",
       "unlockAll": "解锁所有",
       "exportMetadata": "导出元数据",
-      "moveToLibrary": "Move to library",
       "deleteSelected": "删除选中的",
       "exitSelection": "退出选择",
       "downloadFilesZipLabel": "以ZIP下载文件：",
@@ -4722,6 +4754,14 @@
         "upNextInSeries": "上一系列中的下一个",
         "random": "发现新鲜事",
         "smartScope": "智能瞄准镜"
+      },
+      "shelfLayout": {
+        "title": "Shelf layout",
+        "description": "Choose how shelves are arranged on larger screens.",
+        "wide": "Wide rows",
+        "wideDescription": "Show one shelf per row.",
+        "twoColumns": "Two columns",
+        "twoColumnsDescription": "Show two shelves per row."
       },
       "reorderHintWidget": "拖动以重新排序。切换以显示或隐藏部件。",
       "reorderHintShelf": "拖动以重新排序。切换以显示或隐藏架。",

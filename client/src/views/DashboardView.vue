@@ -12,7 +12,7 @@ import DashboardScroller from '@/features/dashboard/components/DashboardScroller
 import DashboardSettingsSheet from '@/features/dashboard/components/DashboardSettingsSheet.vue'
 import DashboardWelcome from '@/features/dashboard/components/DashboardWelcome.vue'
 import DashboardWidgetRow from '@/features/dashboard/components/DashboardWidgetRow.vue'
-import { useDashboardConfig } from '@/features/dashboard/composables/useDashboardConfig'
+import { SHELF_LAYOUT, useDashboardConfig } from '@/features/dashboard/composables/useDashboardConfig'
 import { useDashboardLabels } from '@/features/dashboard/composables/useDashboardLabels'
 import { useOnboardingTour } from '@/features/onboarding/composables/useOnboardingTour'
 import { useSmartScopes } from '@/features/smart-scope/composables/useSmartScopes'
@@ -21,7 +21,7 @@ const { t } = useI18n()
 const { hasPermission } = usePermissions()
 const { user } = useAuth()
 const { libraries, loading: librariesLoading, fetchLibraries } = useLibraries()
-const { scrollers, pruneDeletedSmartScopeScrollers } = useDashboardConfig()
+const { scrollers, shelfLayout, pruneDeletedSmartScopeScrollers } = useDashboardConfig()
 const { shelfTitle } = useDashboardLabels()
 const { maybeStartTour } = useOnboardingTour()
 const { smartScopes, loaded: smartScopesLoaded, fetchSmartScopes } = useSmartScopes()
@@ -32,6 +32,10 @@ let greetingTimer: number | null = null
 
 const enabledScrollers = computed(() =>
   (Array.isArray(scrollers.value) ? scrollers.value : []).filter((s) => s.enabled).sort((a, b) => a.order - b.order),
+)
+
+const shelfLayoutClass = computed(() =>
+  shelfLayout.value === SHELF_LAYOUT.TWO_COLUMNS ? 'grid min-w-0 items-start gap-5 xl:grid-cols-2' : 'space-y-5',
 )
 
 const hasNoLibraries = computed(() => !librariesLoading.value && libraries.value.length === 0)
@@ -106,16 +110,18 @@ onUnmounted(() => {
           </div>
 
           <DashboardWidgetRow class="animate-fade-up" />
-          <DashboardScroller
-            v-for="(scroller, index) in enabledScrollers"
-            :key="`${scroller.id}-${scroller.type}-${scroller.smartScopeId ?? 0}`"
-            :type="scroller.type"
-            :title="shelfTitle(scroller)"
-            :limit="scroller.limit"
-            :smartScope-id="scroller.smartScopeId"
-            class="animate-fade-up"
-            :style="{ animationDelay: `${index * 100}ms` }"
-          />
+          <div v-if="enabledScrollers.length > 0" :class="shelfLayoutClass">
+            <DashboardScroller
+              v-for="(scroller, index) in enabledScrollers"
+              :key="`${scroller.id}-${scroller.type}-${scroller.smartScopeId ?? 0}`"
+              :type="scroller.type"
+              :title="shelfTitle(scroller)"
+              :limit="scroller.limit"
+              :smartScope-id="scroller.smartScopeId"
+              class="min-w-0 animate-fade-up"
+              :style="{ animationDelay: `${index * 100}ms` }"
+            />
+          </div>
           <div v-if="enabledScrollers.length === 0" class="px-2 py-12 text-center">
             <p class="text-sm text-muted-foreground">{{ t('views.dashboard.allShelvesHidden') }}</p>
             <button class="mt-2 text-sm text-primary hover:underline" @click="settingsOpen = true">{{ t('views.dashboard.customize') }}</button>

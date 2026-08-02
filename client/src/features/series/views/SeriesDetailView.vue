@@ -136,7 +136,9 @@ const leadMetaItems = computed(() => {
   return items
 })
 
-type BookActionType = 'quick-view' | 'add-to-collection' | 'delete'
+// 'move-to-library' is part of the shared card contract; this view does not
+// opt in, so it never fires here.
+type BookActionType = 'quick-view' | 'add-to-collection' | 'move-to-library' | 'delete'
 
 function loadGroupByMediaPreference(): boolean {
   try {

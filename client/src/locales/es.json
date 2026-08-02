@@ -2866,7 +2866,6 @@
       "BookDelete": "Eliminar libro",
       "BookBulkMetadataRefresh": "Actualizar metadatos del libro",
       "BookBulkDelete": "Eliminar libros",
-      "BookBulkMove": "Move books",
       "BookBulkCoverReextract": "Volver a extraer portadas de libros",
       "BookBulkSetStatus": "Establecer estado del libro",
       "BookBulkSetRating": "Establecer calificación de libro",
@@ -2874,6 +2873,7 @@
       "BookBulkUpdateTags": "Actualizar etiquetas de libros",
       "BookBulkSetMetadataLock": "Establecer bloqueos de metadatos",
       "BookBulkEditMetadata": "Editar metadatos del libro",
+      "BookBulkMoveLibrary": "Move books to another library",
       "BookReadingStateReset": "Restablecer el estado de lectura",
       "BookWriteAndRename": "Escribir metadatos y cambiar el nombre del archivo.",
       "CollectionCreate": "Crear colección",
@@ -3365,31 +3365,6 @@
       "title": "¿Eliminar libro?",
       "description": "Esto eliminará permanentemente el libro y todos sus metadatos, archivos, progreso de lectura y marcadores. Esto no se puede deshacer."
     },
-    "moveDialog": {
-      "title": "{count, plural, =0 {Move # book to library} many {Move # books to library} one {Move # book to library} other {Move # books to library}}",
-      "description": "Files are moved into the target library's folder. Reading progress, annotations, and collections stay with the books.",
-      "multiLibraryHint": "Books that are already in the selected library are skipped.",
-      "targetLibrary": "Target library",
-      "targetFolder": "Target folder",
-      "selectLibrary": "Select a library…",
-      "selectFolder": "Select a folder…",
-      "move": "Move"
-    },
-    "moveOutcomes": {
-      "book_not_found": "Book not found",
-      "no_source_access": "No access to the source library",
-      "source_access_check_failed": "The source library access check failed",
-      "book_processing": "The book is still processing",
-      "book_missing": "The book's files are missing",
-      "already_in_target": "The book is already in the target library",
-      "format_not_allowed": "The book's format is not allowed in the target library",
-      "target_path_taken": "The target path is already used by another book",
-      "target_path_exists": "A file already exists at the target path",
-      "path_escapes_target": "The resolved file path leaves the target folder",
-      "database_update_failed": "The database update failed",
-      "file_move_failed": "Moving the files failed",
-      "file_move_failed_rollback_incomplete": "Moving the files failed and the rollback was incomplete, please verify the book"
-    },
     "bulkEdit": {
       "title": "{count, plural, =0 {Editar metadatos - # libro} one {Editar metadatos - # libro} other {Editar metadatos - # libros} many {Editar metadatos - # libros}}",
       "instructions": "Cambie los campos para editar y luego configure los valores. Sólo se cambiarán los campos alternados.",
@@ -3654,11 +3629,6 @@
         "primary": "Principal",
         "peek": "vistazo",
         "sendViaEmail": "Enviar por correo electrónico",
-        "moveToLibrary": "Move to Library",
-        "moveSuccess": "Book moved",
-        "moveFailed": "Failed to move book",
-        "moveNotMoved": "Book was not moved",
-        "moveNotMovedWithReason": "Book was not moved: {reason}",
         "personalReview": {
           "title": "Opinión personal",
           "toggleAria": "Alternar revisión personal",
@@ -4189,6 +4159,69 @@
       "text": {
         "openDetails": "Abrir detalles"
       }
+    },
+    "move": {
+      "title": "{count, plural, one {Move # book} many {Move # books} other {Move # books}}",
+      "subtitle": "Files move on disk into the destination library. This can change who can see these books.",
+      "searchPlaceholder": "Search libraries",
+      "currentLibrary": "Current",
+      "folderCount": "{count, plural, one {# folder} many {# folders} other {# folders}}",
+      "continue": "Continue",
+      "back": "Back",
+      "confirm": "{count, plural, one {Move # book} many {Move # books} other {Move # books}}",
+      "action": "Move to library",
+      "review": {
+        "ready": "{count} ready",
+        "collisions": "{count, plural, one {# name conflict} many {# name conflicts} other {# name conflicts}}",
+        "ineligible": "{count} cannot move",
+        "alreadyThere": "{count} already there",
+        "collisionsHeading": "Name conflicts",
+        "ineligibleHeading": "Cannot be moved",
+        "moreCollisions": "and {count} more"
+      },
+      "policy": {
+        "suggested": "Use suggested",
+        "keep_both": "Keep both",
+        "merge": "Merge",
+        "skip": "Skip"
+      },
+      "collision": {
+        "folder_path": "A book already uses this folder name",
+        "file_path": "A file already uses this path",
+        "hash_duplicate": "An identical copy is already in this library"
+      },
+      "ineligible": {
+        "book_not_present": "The files for this book are missing",
+        "no_content_file": "This book has no readable file",
+        "multi_file_target_per_file": "The destination stores one file per book, and this book has {detail} files",
+        "no_source_access": "You cannot edit the library this book is in",
+        "pattern_unresolved": "The destination library has no usable naming pattern",
+        "path_too_long": "The destination path would be too long",
+        "path_outside_target_root": "The destination path would fall outside the library folder"
+      },
+      "warning": {
+        "accessLoss": "{user} will stop seeing {count} of these books",
+        "koboImpact": "{count} books will leave {user}'s Kobo on the next sync",
+        "layout": {
+          "wrap_into_folder": "{count} books will each be placed in their own folder",
+          "dissolve_folder": "{count} book folders will be dissolved into single files"
+        },
+        "crossDevice": "Files move to another drive, so they are copied, verified, then removed."
+      },
+      "progress": {
+        "label": "Moving books to {library}",
+        "failed": "{count} failed"
+      },
+      "done": {
+        "summary": "Moved {count} books to {library}",
+        "merged": "{count} merged with copies already there",
+        "skipped": "{count} skipped",
+        "failed": "{count} failed"
+      },
+      "toast": {
+        "success": "Moved {count} books to {library}",
+        "partial": "Moved {moved} books, {failed} failed"
+      }
     }
   },
   "bookMetadataFetch": {
@@ -4545,7 +4578,6 @@
       "lockAll": "bloquear todo",
       "unlockAll": "Desbloquear todo",
       "exportMetadata": "Exportar metadatos",
-      "moveToLibrary": "Move to library",
       "deleteSelected": "Eliminar seleccionado",
       "exitSelection": "Salir de la selección",
       "downloadFilesZipLabel": "Descargar archivos como ZIP:",
@@ -4722,6 +4754,14 @@
         "upNextInSeries": "Siguiente en la Serie",
         "random": "Descubre Algo Nuevo",
         "smartScope": "Alcance Inteligente"
+      },
+      "shelfLayout": {
+        "title": "Shelf layout",
+        "description": "Choose how shelves are arranged on larger screens.",
+        "wide": "Wide rows",
+        "wideDescription": "Show one shelf per row.",
+        "twoColumns": "Two columns",
+        "twoColumnsDescription": "Show two shelves per row."
       },
       "reorderHintWidget": "Arrastre para reordenar. Alternar para mostrar u ocultar un widget.",
       "reorderHintShelf": "Arrastre para reordenar. Alternar para mostrar u ocultar un estante.",

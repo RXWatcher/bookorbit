@@ -1,575 +1,644 @@
-import { ForbiddenException, BadRequestException } from '@nestjs/common';
-import type { MockedFunction } from 'vitest';
-import { access, constants as fsConstants, copyFile, link, mkdir, readdir, rmdir, unlink } from 'fs/promises';
-
-vi.mock('fs/promises', async () => {
-  const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
-  return {
-    ...actual,
-    access: vi.fn(),
-    copyFile: vi.fn(),
-    mkdir: vi.fn(),
-    readdir: vi.fn(),
-    link: vi.fn(),
-    rmdir: vi.fn(),
-    unlink: vi.fn(),
-  };
-});
+import type { Mock } from 'vitest';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
 import type { RequestUser } from '../../common/types/request-user';
-import type { BookMoveBookData, BookMoveFolder, BookMoveLibrary } from './book-move.repository';
+import { BookMovePlannerService } from './book-move-planner.service';
 import { BookMoveService } from './book-move.service';
+import type { MoveBookData, MoveTargetLibrary } from './book-move.repository';
+import type { MoveBooksDto } from './dto/move-books.dto';
 
-const mockAccess = access as MockedFunction<typeof access>;
-const mockCopyFile = copyFile as MockedFunction<typeof copyFile>;
-const mockMkdir = mkdir as MockedFunction<typeof mkdir>;
-const mockReaddir = readdir as MockedFunction<typeof readdir>;
-const mockLink = link as MockedFunction<typeof link>;
-const mockRmdir = rmdir as MockedFunction<typeof rmdir>;
-const mockUnlink = unlink as MockedFunction<typeof unlink>;
+const USER: RequestUser = { id: 7, username: 'reader', isSuperuser: false } as RequestUser;
+const SUPERUSER: RequestUser = { id: 1, username: 'admin', isSuperuser: true } as RequestUser;
 
-type BookOverrides = Partial<Omit<BookMoveBookData, 'files'>> & { files?: BookMoveBookData['files'] };
-
-function makeBook(overrides: BookOverrides = {}): BookMoveBookData {
+function makeTarget(overrides: Partial<MoveTargetLibrary> = {}): MoveTargetLibrary {
   return {
-    id: 5,
-    libraryId: 1,
-    libraryFolderId: 2,
-    libraryFolderPath: '/src-lib',
-    folderPath: '/src-lib/Frank Herbert/Dune',
-    status: 'present',
-    files: overrides.files ?? [
-      {
-        id: 10,
-        absolutePath: '/src-lib/Frank Herbert/Dune/Dune.epub',
-        relPath: 'Frank Herbert/Dune/Dune.epub',
-        format: 'epub',
-        role: 'primary',
-      },
-      {
-        id: 11,
-        absolutePath: '/src-lib/Frank Herbert/Dune/cover.jpg',
-        relPath: 'Frank Herbert/Dune/cover.jpg',
-        format: null,
-        role: 'extra',
-      },
-    ],
+    libraryId: 2,
+    libraryName: 'Manga',
+    organizationMode: 'book_per_folder',
+    fileNamingPattern: '<{title}>/<{title}>',
+    allowedFormats: [],
+    folderId: 22,
+    folderPath: '/libB',
+    watch: true,
     ...overrides,
   };
 }
 
-function makeUser(): RequestUser {
+function makeBook(overrides: Partial<MoveBookData> = {}): MoveBookData {
   return {
-    id: 7,
-    username: 'reader',
-    name: 'Reader',
-    email: null,
-    active: true,
-    isSuperuser: false,
-    isDefaultPassword: false,
-    tokenVersion: 1,
-    settings: {},
-    avatarUrl: null,
-    provisioningMethod: 'local',
-    permissions: [],
-    contentFilters: null as unknown as RequestUser['contentFilters'],
-  } as RequestUser;
+    bookId: 1,
+    status: 'present',
+    libraryId: 1,
+    libraryFolderId: 11,
+    libraryFolderPath: '/libA',
+    organizationMode: 'book_per_folder',
+    folderPath: '/libA/Dune',
+    primaryFileId: 10,
+    title: 'Dune',
+    metadata: {
+      title: 'Dune',
+      subtitle: null,
+      publisher: null,
+      language: null,
+      isbn13: null,
+      publishedYear: null,
+      seriesName: null,
+      seriesIndex: null,
+    },
+    authors: [],
+    files: [{ id: 10, absolutePath: '/libA/Dune/Dune.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+    ...overrides,
+  };
 }
 
-const TARGET_LIBRARY: BookMoveLibrary = { id: 3, allowedFormats: [] };
-const TARGET_FOLDER: BookMoveFolder = { id: 9, libraryId: 3, path: '/dst-lib' };
+function makeDto(overrides: Partial<MoveBooksDto> = {}): MoveBooksDto {
+  return {
+    selection: { bookIds: [1] },
+    targetLibraryId: 2,
+    targetFolderId: 22,
+    collisionPolicy: 'keep_both',
+    ...overrides,
+  } as MoveBooksDto;
+}
 
-function makeService() {
-  const repo = {
-    findBookForMove: vi.fn().mockResolvedValue(makeBook()),
-    findLibrary: vi.fn().mockResolvedValue(TARGET_LIBRARY),
-    findFolder: vi.fn().mockResolvedValue(TARGET_FOLDER),
-    findFoldersByLibrary: vi.fn().mockResolvedValue([TARGET_FOLDER]),
-    findExistingPaths: vi.fn().mockResolvedValue(new Map()),
-    applyMove: vi.fn().mockResolvedValue(undefined),
-  };
-  const libraryService = { verifyUserAccess: vi.fn().mockResolvedValue(undefined), verifyUserAccessLevel: vi.fn().mockResolvedValue(undefined) };
-  const lockService = { withLock: vi.fn((_key: string, fn: () => unknown) => fn()) };
-  const fileRenameService = { scheduleRename: vi.fn() };
-  const scanGateway = { emitBookTransferred: vi.fn() };
-  const scannerService = { cancelBooksUnavailableNotification: vi.fn() };
-  const selfWriteRegistry = { begin: vi.fn(), end: vi.fn() };
+let moveRepo: Record<string, Mock<(...args: unknown[]) => unknown>>;
+type ExecuteResult = { status: string; crossDevice?: boolean; reason?: string; mergedBookId?: number | null };
+let executor: { execute: Mock<(input: unknown) => Promise<ExecuteResult>> };
+let bookService: { resolveSelectionToIds: ReturnType<typeof vi.fn> };
+let appSettings: Record<string, ReturnType<typeof vi.fn>>;
+let scannerService: { isScanRunning: ReturnType<typeof vi.fn>; startScanAsync: ReturnType<typeof vi.fn> };
+let fileWatcherService: { stopWatcher: ReturnType<typeof vi.fn>; startWatcher: ReturnType<typeof vi.fn> };
+let scanGateway: { emitBookTransferred: ReturnType<typeof vi.fn> };
+let notificationService: { notify: ReturnType<typeof vi.fn> };
+let service: BookMoveService;
 
-  const service = new BookMoveService(
-    repo as never,
-    libraryService as never,
-    lockService as never,
-    fileRenameService as never,
-    scanGateway as never,
+function buildService(): BookMoveService {
+  return new BookMoveService(
+    moveRepo as never,
+    new BookMovePlannerService(),
+    executor as never,
+    bookService as never,
+    appSettings as never,
     scannerService as never,
-    selfWriteRegistry as never,
+    fileWatcherService as never,
+    scanGateway as never,
+    notificationService as never,
   );
+}
 
-  return { service, repo, libraryService, lockService, fileRenameService, scanGateway, scannerService, selfWriteRegistry };
+function collectProgress() {
+  const events: unknown[] = [];
+  return {
+    events,
+    options: { onProgress: (event: unknown) => events.push(event), isCancelled: () => false },
+  };
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  // Default disk state: no target paths exist, source dirs empty after move.
-  mockAccess.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-  mockMkdir.mockResolvedValue(undefined);
-  mockLink.mockResolvedValue(undefined);
-  mockReaddir.mockResolvedValue([] as never);
-  mockRmdir.mockResolvedValue(undefined);
+  moveRepo = {
+    findTargetLibrary: vi.fn().mockResolvedValue(makeTarget()),
+    findMoveBookData: vi.fn().mockResolvedValue([makeBook()]),
+    findFolderPathOwners: vi.fn().mockResolvedValue(new Map()),
+    findFilePathOwners: vi.fn().mockResolvedValue(new Map()),
+    findHashOwnersInLibrary: vi.fn().mockResolvedValue(new Map()),
+    findLibraryAccess: vi.fn().mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'editor' },
+      { libraryId: 2, userId: 7, accessLevel: 'editor' },
+    ]),
+    findUsers: vi.fn().mockResolvedValue([]),
+    countKoboDevicesByUser: vi.fn().mockResolvedValue(new Map()),
+    createJob: vi.fn().mockResolvedValue(101),
+    finishJob: vi.fn().mockResolvedValue(undefined),
+    markInterruptedJobs: vi.fn().mockResolvedValue([]),
+    findLibraryFolders: vi.fn().mockResolvedValue([
+      { libraryId: 1, path: '/libA' },
+      { libraryId: 2, path: '/libB' },
+    ]),
+    findWatchedLibraryIds: vi.fn().mockResolvedValue([1, 2]),
+    applyBookMove: vi.fn(),
+  };
+  executor = { execute: vi.fn<(input: unknown) => Promise<ExecuteResult>>().mockResolvedValue({ status: 'success', crossDevice: false }) };
+  bookService = { resolveSelectionToIds: vi.fn().mockResolvedValue([1]) };
+  appSettings = {
+    getUploadPattern: vi.fn().mockResolvedValue('<{title}>'),
+    getUploadPatternBookPerFolder: vi.fn().mockResolvedValue('<{title}>/<{title}>'),
+    isCrossPlatformPathSanitizationEnabled: vi.fn().mockResolvedValue(false),
+  };
+  scannerService = { isScanRunning: vi.fn().mockReturnValue(false), startScanAsync: vi.fn() };
+  fileWatcherService = { stopWatcher: vi.fn().mockResolvedValue(undefined), startWatcher: vi.fn().mockResolvedValue(undefined) };
+  scanGateway = { emitBookTransferred: vi.fn() };
+  notificationService = { notify: vi.fn().mockResolvedValue(undefined) };
+  service = buildService();
 });
 
-describe('BookMoveService', () => {
-  describe('moveBooks', () => {
-    it('re-parents the book in the DB and physically moves its files into the target folder', async () => {
-      const { service, repo } = makeService();
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'moved' }]);
-      expect(repo.applyMove).toHaveBeenCalledWith(5, { libraryId: 3, libraryFolderId: 9, folderPath: '/dst-lib/Frank Herbert/Dune' }, [
-        { id: 10, absolutePath: '/dst-lib/Frank Herbert/Dune/Dune.epub', relPath: 'Frank Herbert/Dune/Dune.epub' },
-        { id: 11, absolutePath: '/dst-lib/Frank Herbert/Dune/cover.jpg', relPath: 'Frank Herbert/Dune/cover.jpg' },
-      ]);
-      expect(mockLink).toHaveBeenCalledWith('/src-lib/Frank Herbert/Dune/Dune.epub', '/dst-lib/Frank Herbert/Dune/Dune.epub');
-      expect(mockLink).toHaveBeenCalledWith('/src-lib/Frank Herbert/Dune/cover.jpg', '/dst-lib/Frank Herbert/Dune/cover.jpg');
-    });
-
-    it('schedules a pattern rename in the target library after a successful move', async () => {
-      const { service, fileRenameService } = makeService();
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(fileRenameService.scheduleRename).toHaveBeenCalledWith(5, 7);
-    });
-
-    it('requires editor access on the target library and viewer access on the source', async () => {
-      const { service, libraryService } = makeService();
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(libraryService.verifyUserAccessLevel).toHaveBeenCalledWith(7, 3, 'editor', false);
-      expect(libraryService.verifyUserAccess).toHaveBeenCalledWith(7, 1, false);
-    });
-
-    it('rejects the whole request when the user lacks editor access to the target library', async () => {
-      const { service, libraryService, repo } = makeService();
-      libraryService.verifyUserAccessLevel.mockRejectedValueOnce(new ForbiddenException('Insufficient library access level'));
-
-      await expect(service.moveBooks([5], 3, 9, makeUser())).rejects.toBeInstanceOf(ForbiddenException);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-    });
-
-    it('fails a single book (not the batch) when the user has no access to its source library', async () => {
-      const { service, libraryService } = makeService();
-      libraryService.verifyUserAccess.mockRejectedValueOnce(new ForbiddenException()); // source library
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'failed', reason: 'no_source_access' }]);
-    });
-
-    it('skips books whose files are missing without touching the database', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook({ status: 'missing' }));
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'skipped', reason: 'book_missing' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-      expect(mockLink).not.toHaveBeenCalled();
-    });
-
-    it('fails a book whose resolved target path escapes the target folder', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(
-        makeBook({
-          files: [
-            {
-              id: 10,
-              absolutePath: '/elsewhere/Dune.epub',
-              relPath: '../../elsewhere/Dune.epub',
-              format: 'epub',
-              role: 'primary',
-            },
-          ],
-        }),
-      );
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'failed', reason: 'path_escapes_target' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-      expect(mockLink).not.toHaveBeenCalled();
-    });
-
-    it('never removes the library folder root when cleaning up a flat book', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(
-        makeBook({
-          folderPath: '/src-lib',
-          files: [
-            {
-              id: 10,
-              absolutePath: '/src-lib/Dune.epub',
-              relPath: 'Dune.epub',
-              format: 'epub',
-              role: 'primary',
-            },
-          ],
-        }),
-      );
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'moved' }]);
-      expect(mockRmdir).not.toHaveBeenCalled();
-    });
-
-    it('cleans up nested empty directories up to but excluding the folder root', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook());
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'moved' }]);
-      expect(mockRmdir).toHaveBeenCalledWith('/src-lib/Frank Herbert/Dune');
-      expect(mockRmdir).toHaveBeenCalledWith('/src-lib/Frank Herbert');
-      expect(mockRmdir).not.toHaveBeenCalledWith('/src-lib');
-    });
-
-    it('fails a single book with a distinct reason when the source access check errors unexpectedly', async () => {
-      const { service, libraryService } = makeService();
-      libraryService.verifyUserAccess.mockRejectedValueOnce(new Error('connection reset')); // source library, infra error
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'failed', reason: 'source_access_check_failed' }]);
-    });
-
-    it('fails a single book (not the batch) when the database re-parent throws', async () => {
-      const { service, repo, scanGateway } = makeService();
-      repo.findBookForMove.mockResolvedValueOnce(makeBook()).mockResolvedValueOnce(makeBook({ id: 6 }));
-      repo.applyMove.mockRejectedValueOnce(new Error('connection terminated'));
-
-      const results = await service.moveBooks([5, 6], 3, 9, makeUser());
-
-      expect(results).toEqual([
-        { bookId: 5, status: 'failed', reason: 'database_update_failed' },
-        { bookId: 6, status: 'moved' },
-      ]);
-      expect(scanGateway.emitBookTransferred).toHaveBeenCalledWith({ fromLibraryId: 1, toLibraryId: 3, bookIds: [6] });
-    });
-
-    it('rejects when the target folder does not belong to the target library', async () => {
-      const { service, repo } = makeService();
-      repo.findFolder.mockResolvedValue({ id: 9, libraryId: 999, path: '/other' });
-
-      await expect(service.moveBooks([5], 3, 9, makeUser())).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('rejects when the target library does not exist', async () => {
-      const { service, repo } = makeService();
-      repo.findLibrary.mockResolvedValue(null);
-
-      await expect(service.moveBooks([5], 3, 9, makeUser())).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('uses the sole folder of the target library when no folder id is given', async () => {
-      const { service, repo } = makeService();
-
-      const results = await service.moveBooks([5], 3, undefined, makeUser());
-
-      expect(repo.findFoldersByLibrary).toHaveBeenCalledWith(3);
-      expect(results).toEqual([{ bookId: 5, status: 'moved' }]);
-    });
-
-    it('rejects when no folder id is given and the target library has several folders', async () => {
-      const { service, repo } = makeService();
-      repo.findFoldersByLibrary.mockResolvedValue([TARGET_FOLDER, { id: 12, libraryId: 3, path: '/dst-lib-2' }]);
-
-      await expect(service.moveBooks([5], 3, undefined, makeUser())).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('reports a missing book as failed and keeps processing the rest', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValueOnce(null).mockResolvedValueOnce(makeBook());
-
-      const results = await service.moveBooks([404, 5], 3, 9, makeUser());
-
-      expect(results).toEqual([
-        { bookId: 404, status: 'failed', reason: 'book_not_found' },
-        { bookId: 5, status: 'moved' },
-      ]);
-    });
-
-    it('skips books that are still processing', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook({ status: 'processing' }));
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'skipped', reason: 'book_processing' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-    });
-
-    it('skips books already in the target folder', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook({ libraryId: 3, libraryFolderId: 9 }));
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'skipped', reason: 'already_in_target' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-    });
-
-    it('skips books whose content format is not allowed in the target library', async () => {
-      const { service, repo } = makeService();
-      repo.findLibrary.mockResolvedValue({ id: 3, allowedFormats: ['pdf', 'cbz'] });
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'skipped', reason: 'format_not_allowed' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-    });
-
-    it('skips when a target path is already registered to another book', async () => {
-      const { service, repo } = makeService();
-      repo.findExistingPaths.mockResolvedValue(new Map([['/dst-lib/Frank Herbert/Dune/Dune.epub', 77]]));
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'skipped', reason: 'target_path_taken' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-    });
-
-    it('skips when a target path already exists on disk', async () => {
-      const { service, repo } = makeService();
-      mockAccess.mockResolvedValue(undefined); // everything "exists"
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'skipped', reason: 'target_path_exists' }]);
-      expect(repo.applyMove).not.toHaveBeenCalled();
-    });
-
-    it('falls back to exclusive copy+unlink when hardlinking fails with EXDEV (cross-device move)', async () => {
-      const { service } = makeService();
-      mockLink.mockRejectedValue(Object.assign(new Error('cross-device'), { code: 'EXDEV' }));
-      mockCopyFile.mockResolvedValue(undefined);
-      mockUnlink.mockResolvedValue(undefined);
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'moved' }]);
-      expect(mockCopyFile).toHaveBeenCalledWith(
-        '/src-lib/Frank Herbert/Dune/Dune.epub',
-        '/dst-lib/Frank Herbert/Dune/Dune.epub',
-        fsConstants.COPYFILE_EXCL,
-      );
-      expect(mockUnlink).toHaveBeenCalledWith('/src-lib/Frank Herbert/Dune/Dune.epub');
-    });
-
-    it('fails the book instead of overwriting when a concurrent move already created the target file', async () => {
-      const { service } = makeService();
-      mockLink.mockRejectedValueOnce(Object.assign(new Error('file exists'), { code: 'EEXIST' }));
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'failed', reason: 'file_move_failed' }]);
-      expect(mockCopyFile).not.toHaveBeenCalled();
-    });
-
-    it('suppresses watcher events for all touched paths during the physical move', async () => {
-      const { service, selfWriteRegistry } = makeService();
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(selfWriteRegistry.begin).toHaveBeenCalledTimes(1);
-      const paths = selfWriteRegistry.begin.mock.calls[0][0] as string[];
-      expect(paths).toEqual(
-        expect.arrayContaining([
-          '/src-lib/Frank Herbert/Dune/Dune.epub',
-          '/dst-lib/Frank Herbert/Dune/Dune.epub',
-          '/src-lib/Frank Herbert/Dune',
-          '/src-lib/Frank Herbert',
-          '/dst-lib/Frank Herbert/Dune',
-          '/dst-lib/Frank Herbert',
-        ]),
-      );
-      expect(paths).not.toContain('/src-lib');
-      expect(paths).not.toContain('/dst-lib');
-      expect(selfWriteRegistry.end).toHaveBeenCalledWith(paths);
-    });
-
-    it('emits one progress event per processed book', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValueOnce(makeBook()).mockResolvedValueOnce(makeBook({ id: 6, status: 'missing' }));
-      const events: unknown[] = [];
-
-      await service.moveBooks([5, 6], 3, 9, makeUser(), (event) => events.push(event));
-
-      expect(events).toEqual([
-        { bookId: 5, status: 'moved' },
-        { bookId: 6, status: 'skipped', reason: 'book_missing' },
-      ]);
-    });
-
-    it('stops processing when the cancellation callback reports a closed stream', async () => {
-      const { service, repo } = makeService();
-      let calls = 0;
-
-      const results = await service.moveBooks([5, 6, 7], 3, 9, makeUser(), undefined, { isCancelled: () => ++calls > 1 });
-
-      expect(results).toHaveLength(1);
-      expect(repo.findBookForMove).toHaveBeenCalledTimes(1);
-    });
-
-    it('stops processing and keeps prior outcomes when the progress callback throws', async () => {
-      const { service, repo, scanGateway } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook());
-      const onProgress = vi
-        .fn()
-        .mockImplementationOnce(() => undefined)
-        .mockImplementationOnce(() => {
-          throw new Error('stream closed');
-        });
-
-      const results = await service.moveBooks([5, 6, 7], 3, 9, makeUser(), onProgress);
-
-      expect(results).toHaveLength(2);
-      expect(scanGateway.emitBookTransferred).toHaveBeenCalled();
-    });
-
-    it('cancels the source library unavailable notification for moved books', async () => {
-      const { service, scannerService } = makeService();
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(scannerService.cancelBooksUnavailableNotification).toHaveBeenCalledWith(1, [5]);
-    });
-
-    it('rolls back the DB update and already-moved files when a physical move fails', async () => {
-      const { service, repo } = makeService();
-      const book = makeBook();
-      repo.findBookForMove.mockResolvedValue(book);
-      mockLink
-        .mockResolvedValueOnce(undefined) // first file moves fine
-        .mockRejectedValueOnce(Object.assign(new Error('disk full'), { code: 'ENOSPC' })) // second file fails
-        .mockResolvedValueOnce(undefined); // rollback of first file
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'failed', reason: 'file_move_failed' }]);
-      // Rollback: file 10 moved back.
-      expect(mockLink).toHaveBeenCalledWith('/dst-lib/Frank Herbert/Dune/Dune.epub', '/src-lib/Frank Herbert/Dune/Dune.epub');
-      // Rollback: DB restored to source library values.
-      expect(repo.applyMove).toHaveBeenLastCalledWith(5, { libraryId: 1, libraryFolderId: 2, folderPath: '/src-lib/Frank Herbert/Dune' }, [
-        { id: 10, absolutePath: '/src-lib/Frank Herbert/Dune/Dune.epub', relPath: 'Frank Herbert/Dune/Dune.epub' },
-        { id: 11, absolutePath: '/src-lib/Frank Herbert/Dune/cover.jpg', relPath: 'Frank Herbert/Dune/cover.jpg' },
-      ]);
-    });
-
-    it('flags the outcome when the rollback itself fails and the book may be inconsistent', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook());
-      mockLink
-        .mockResolvedValueOnce(undefined) // first file moves fine
-        .mockRejectedValueOnce(Object.assign(new Error('disk full'), { code: 'ENOSPC' })) // second file fails
-        .mockRejectedValueOnce(new Error('permission denied')); // rollback of first file fails too
-
-      const results = await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(results).toEqual([{ bookId: 5, status: 'failed', reason: 'file_move_failed_rollback_incomplete' }]);
-    });
-
-    it('computes relPath from absolute paths when a file has no stored relPath', async () => {
-      const { service, repo } = makeService();
-      repo.findBookForMove.mockResolvedValue(
-        makeBook({
-          files: [
-            {
-              id: 10,
-              absolutePath: '/src-lib/Frank Herbert/Dune/Dune.epub',
-              relPath: null,
-              format: 'epub',
-              role: 'primary',
-            },
-          ],
-        }),
-      );
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(repo.applyMove).toHaveBeenCalledWith(5, { libraryId: 3, libraryFolderId: 9, folderPath: '/dst-lib/Frank Herbert/Dune' }, [
-        { id: 10, absolutePath: '/dst-lib/Frank Herbert/Dune/Dune.epub', relPath: 'Frank Herbert/Dune/Dune.epub' },
-      ]);
-    });
-
-    it('emits a book:transferred event per source library so open views refresh', async () => {
-      const { service, repo, scanGateway } = makeService();
-      repo.findBookForMove.mockResolvedValueOnce(makeBook()).mockResolvedValueOnce(
-        makeBook({
-          id: 6,
-          libraryId: 2,
-          libraryFolderId: 4,
-          libraryFolderPath: '/other-lib',
-          folderPath: '/other-lib/Solo/Book',
-          files: [{ id: 20, absolutePath: '/other-lib/Solo/Book/Book.epub', relPath: 'Solo/Book/Book.epub', format: 'epub', role: 'primary' }],
-        }),
-      );
-
-      await service.moveBooks([5, 6], 3, 9, makeUser());
-
-      expect(scanGateway.emitBookTransferred).toHaveBeenCalledTimes(2);
-      expect(scanGateway.emitBookTransferred).toHaveBeenCalledWith({ fromLibraryId: 1, toLibraryId: 3, bookIds: [5] });
-      expect(scanGateway.emitBookTransferred).toHaveBeenCalledWith({ fromLibraryId: 2, toLibraryId: 3, bookIds: [6] });
-    });
-
-    it('does not emit a transfer event when no book was moved', async () => {
-      const { service, repo, scanGateway } = makeService();
-      repo.findBookForMove.mockResolvedValue(makeBook({ status: 'processing' }));
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(scanGateway.emitBookTransferred).not.toHaveBeenCalled();
-    });
-
-    it('serializes each book move behind the shared book operation lock', async () => {
-      const { service, lockService } = makeService();
-
-      await service.moveBooks([5], 3, 9, makeUser());
-
-      expect(lockService.withLock).toHaveBeenCalledWith('book:5', expect.any(Function));
+describe('access control', () => {
+  it('requires editor access on the target library', async () => {
+    moveRepo.findLibraryAccess.mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'editor' },
+      { libraryId: 2, userId: 7, accessLevel: 'viewer' },
+    ]);
+
+    await expect(service.preview(makeDto(), USER)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('requires editor access on every source library', async () => {
+    moveRepo.findLibraryAccess.mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'viewer' },
+      { libraryId: 2, userId: 7, accessLevel: 'owner' },
+    ]);
+
+    await expect(service.preview(makeDto(), USER)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('accepts owner access as sufficient', async () => {
+    moveRepo.findLibraryAccess.mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'owner' },
+      { libraryId: 2, userId: 7, accessLevel: 'owner' },
+    ]);
+
+    await expect(service.preview(makeDto(), USER)).resolves.toBeDefined();
+  });
+
+  it('lets a superuser bypass per-library access', async () => {
+    moveRepo.findLibraryAccess.mockResolvedValue([]);
+
+    await expect(service.preview(makeDto(), SUPERUSER)).resolves.toBeDefined();
+  });
+
+  it('rejects an unknown target folder', async () => {
+    moveRepo.findTargetLibrary.mockResolvedValue(null);
+
+    await expect(service.preview(makeDto(), USER)).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('preview', () => {
+  it('summarises a clean move without demanding review', async () => {
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result).toMatchObject({
+      targetLibraryId: 2,
+      targetFolderId: 22,
+      readyCount: 1,
+      collisionCount: 0,
+      ineligibleCount: 0,
+      requiresReview: false,
     });
   });
 
-  describe('validateTarget', () => {
-    it('passes for an accessible target library and folder', async () => {
-      const { service, libraryService } = makeService();
+  it('demands review when a book is ineligible', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([makeBook({ status: 'missing' })]);
 
-      await expect(service.validateTarget(3, 9, makeUser())).resolves.toBeUndefined();
-      expect(libraryService.verifyUserAccessLevel).toHaveBeenCalledWith(7, 3, 'editor', false);
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result.ineligibleCount).toBe(1);
+    expect(result.requiresReview).toBe(true);
+  });
+
+  it('demands review when a destination collides', async () => {
+    moveRepo.findFolderPathOwners.mockResolvedValue(new Map([['/libB/Dune', 99]]));
+
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result.collisionCount).toBe(1);
+    expect(result.collisions[0]).toMatchObject({ kind: 'folder_path', existingBookId: 99, suggestedPolicy: 'keep_both' });
+    expect(result.requiresReview).toBe(true);
+  });
+
+  it('counts books already in the target library separately', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([makeBook({ libraryId: 2, libraryFolderId: 22 })]);
+
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result).toMatchObject({ alreadyInTargetCount: 1, readyCount: 0 });
+  });
+
+  it('names the users who lose visibility, ignoring superusers', async () => {
+    moveRepo.findLibraryAccess.mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'editor' },
+      { libraryId: 2, userId: 7, accessLevel: 'editor' },
+      { libraryId: 1, userId: 8, accessLevel: 'viewer' },
+      { libraryId: 1, userId: 9, accessLevel: 'viewer' },
+    ]);
+    moveRepo.findUsers.mockResolvedValue([
+      { id: 8, username: 'sarah', isSuperuser: false },
+      { id: 9, username: 'root', isSuperuser: true },
+    ]);
+
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result.warnings.accessLosers).toEqual([{ userId: 8, username: 'sarah', bookCount: 1 }]);
+    expect(result.requiresReview).toBe(true);
+  });
+
+  it('reports Kobo impact only for affected users who own devices', async () => {
+    moveRepo.findLibraryAccess.mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'editor' },
+      { libraryId: 2, userId: 7, accessLevel: 'editor' },
+      { libraryId: 1, userId: 8, accessLevel: 'viewer' },
+    ]);
+    moveRepo.findUsers.mockResolvedValue([{ id: 8, username: 'sarah', isSuperuser: false }]);
+    moveRepo.countKoboDevicesByUser.mockResolvedValue(new Map([[8, 2]]));
+
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result.warnings.koboImpact).toEqual([{ userId: 8, username: 'sarah', deviceCount: 2, bookCount: 1 }]);
+  });
+
+  it('flags a format the target library does not allow', async () => {
+    moveRepo.findTargetLibrary.mockResolvedValue(makeTarget({ allowedFormats: ['pdf'] }));
+
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result.warnings.formatMismatches).toEqual([{ bookId: 1, title: 'Dune', format: 'epub' }]);
+  });
+
+  it('reports the layout change when organization modes differ', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        organizationMode: 'book_per_file',
+        folderPath: '/libA/Dune.epub',
+        files: [{ id: 10, absolutePath: '/libA/Dune.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+    ]);
+
+    const result = await service.preview(makeDto(), USER);
+
+    expect(result.warnings.layout).toEqual({ change: 'wrap_into_folder', bookCount: 1 });
+    expect(result.requiresReview).toBe(true);
+  });
+
+  it('rejects an empty selection', async () => {
+    bookService.resolveSelectionToIds.mockResolvedValue([]);
+
+    await expect(service.preview(makeDto(), USER)).rejects.toThrow(/No books matched/);
+  });
+});
+
+describe('execute guards', () => {
+  it('refuses when a scan is running on any involved library', async () => {
+    scannerService.isScanRunning.mockImplementation((libraryId: number) => libraryId === 1);
+
+    await expect(service.execute(makeDto(), USER, collectProgress().options)).rejects.toBeInstanceOf(ConflictException);
+    expect(fileWatcherService.stopWatcher).not.toHaveBeenCalled();
+  });
+
+  it('refuses a second concurrent move touching the same library', async () => {
+    let releaseFirst: () => void = () => {};
+    executor.execute.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve({ status: 'success', crossDevice: false });
+        }),
+    );
+
+    const first = service.execute(makeDto(), USER, collectProgress().options);
+    await vi.waitFor(() => expect(executor.execute).toHaveBeenCalled());
+
+    await expect(service.execute(makeDto(), USER, collectProgress().options)).rejects.toBeInstanceOf(ConflictException);
+
+    releaseFirst();
+    await first;
+
+    // The guard is released once the job finishes.
+    expect(service.isBusy(1)).toBe(false);
+    expect(service.isBusy(2)).toBe(false);
+  });
+});
+
+describe('execute', () => {
+  it('stops and restarts watchers for every involved library', async () => {
+    await service.execute(makeDto(), USER, collectProgress().options);
+
+    expect(fileWatcherService.stopWatcher.mock.calls.map((call) => call[0]).sort()).toEqual([1, 2]);
+    expect(fileWatcherService.startWatcher).toHaveBeenCalledWith(1, ['/libA']);
+    expect(fileWatcherService.startWatcher).toHaveBeenCalledWith(2, ['/libB']);
+  });
+
+  it('restarts watchers even when the job throws', async () => {
+    moveRepo.finishJob.mockRejectedValueOnce(new Error('db gone'));
+
+    await expect(service.execute(makeDto(), USER, collectProgress().options)).rejects.toThrow('db gone');
+
+    expect(fileWatcherService.startWatcher).toHaveBeenCalledWith(1, ['/libA']);
+    expect(fileWatcherService.startWatcher).toHaveBeenCalledWith(2, ['/libB']);
+  });
+
+  it('only stops watchers for libraries that are actually watched', async () => {
+    moveRepo.findWatchedLibraryIds.mockResolvedValue([2]);
+
+    await service.execute(makeDto(), USER, collectProgress().options);
+
+    expect(fileWatcherService.stopWatcher).toHaveBeenCalledTimes(1);
+    expect(fileWatcherService.stopWatcher).toHaveBeenCalledWith(2);
+  });
+
+  it('emits one transfer event per source library', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        bookId: 1,
+        libraryId: 1,
+        folderPath: '/libA/One',
+        files: [{ id: 10, absolutePath: '/libA/One/a.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+      makeBook({
+        bookId: 2,
+        libraryId: 3,
+        libraryFolderId: 33,
+        libraryFolderPath: '/libC',
+        folderPath: '/libC/Two',
+        metadata: { ...makeBook().metadata, title: 'Other' },
+        files: [{ id: 20, absolutePath: '/libC/Two/b.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+    ]);
+    bookService.resolveSelectionToIds.mockResolvedValue([1, 2]);
+    moveRepo.findLibraryAccess.mockResolvedValue([
+      { libraryId: 1, userId: 7, accessLevel: 'editor' },
+      { libraryId: 2, userId: 7, accessLevel: 'editor' },
+      { libraryId: 3, userId: 7, accessLevel: 'editor' },
+    ]);
+
+    await service.execute(makeDto(), USER, collectProgress().options);
+
+    expect(scanGateway.emitBookTransferred).toHaveBeenCalledTimes(2);
+    expect(scanGateway.emitBookTransferred).toHaveBeenCalledWith({ fromLibraryId: 1, toLibraryId: 2, bookIds: [1] });
+    expect(scanGateway.emitBookTransferred).toHaveBeenCalledWith({ fromLibraryId: 3, toLibraryId: 2, bookIds: [2] });
+  });
+
+  it('reports per-book progress and a final summary', async () => {
+    const progress = collectProgress();
+
+    const summary = await service.execute(makeDto(), USER, progress.options);
+
+    expect(progress.events).toEqual([{ bookId: 1, status: 'success' }]);
+    expect(summary).toMatchObject({ processed: 1, succeeded: 1, merged: 0, failed: 0, skipped: 0, cancelled: false });
+  });
+
+  it('records a failure without aborting the rest of the job', async () => {
+    bookService.resolveSelectionToIds.mockResolvedValue([1, 2]);
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        bookId: 1,
+        folderPath: '/libA/One',
+        files: [{ id: 10, absolutePath: '/libA/One/a.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+      makeBook({
+        bookId: 2,
+        folderPath: '/libA/Two',
+        metadata: { ...makeBook().metadata, title: 'Two' },
+        files: [{ id: 20, absolutePath: '/libA/Two/b.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+    ]);
+    executor.execute
+      .mockResolvedValueOnce({ status: 'failed', reason: 'disk full' })
+      .mockResolvedValueOnce({ status: 'success', crossDevice: false });
+
+    const progress = collectProgress();
+    const summary = await service.execute(makeDto(), USER, progress.options);
+
+    expect(progress.events).toEqual([
+      { bookId: 1, status: 'failed', reason: 'disk full' },
+      { bookId: 2, status: 'success' },
+    ]);
+    expect(summary).toMatchObject({ succeeded: 1, failed: 1 });
+  });
+
+  it('turns an executor throw into a failed book rather than a dead job', async () => {
+    executor.execute.mockRejectedValue(new Error('unexpected'));
+
+    const progress = collectProgress();
+    const summary = await service.execute(makeDto(), USER, progress.options);
+
+    expect(progress.events).toEqual([{ bookId: 1, status: 'failed', reason: 'unexpected' }]);
+    expect(summary.failed).toBe(1);
+  });
+
+  it('stops early when the client disconnects', async () => {
+    bookService.resolveSelectionToIds.mockResolvedValue([1, 2]);
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        bookId: 1,
+        folderPath: '/libA/One',
+        files: [{ id: 10, absolutePath: '/libA/One/a.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+      makeBook({
+        bookId: 2,
+        folderPath: '/libA/Two',
+        metadata: { ...makeBook().metadata, title: 'Two' },
+        files: [{ id: 20, absolutePath: '/libA/Two/b.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+    ]);
+
+    let cancelled = false;
+    const events: unknown[] = [];
+    executor.execute.mockImplementation(() => {
+      cancelled = true;
+      return Promise.resolve({ status: 'success', crossDevice: false });
     });
 
-    it('rejects an unknown target library', async () => {
-      const { service, repo } = makeService();
-      repo.findLibrary.mockResolvedValue(null);
-
-      await expect(service.validateTarget(99, undefined, makeUser())).rejects.toBeInstanceOf(BadRequestException);
+    const summary = await service.execute(makeDto(), USER, {
+      onProgress: (event) => events.push(event),
+      isCancelled: () => cancelled,
     });
 
-    it('rejects a folder belonging to another library', async () => {
-      const { service, repo } = makeService();
-      repo.findFolder.mockResolvedValue({ id: 9, libraryId: 999, path: '/other' });
+    expect(executor.execute).toHaveBeenCalledTimes(1);
+    expect(summary).toMatchObject({ succeeded: 1, cancelled: true });
+  });
 
-      await expect(service.validateTarget(3, 9, makeUser())).rejects.toBeInstanceOf(BadRequestException);
+  it('records the job and closes it out', async () => {
+    await service.execute(makeDto(), USER, collectProgress().options);
+
+    expect(moveRepo.createJob).toHaveBeenCalledWith({
+      startedBy: 7,
+      targetLibraryId: 2,
+      targetFolderId: 22,
+      sourceLibraryIds: [1],
+      totalBooks: 1,
+    });
+    expect(moveRepo.finishJob).toHaveBeenCalledWith(101, 'completed', { succeeded: 1, merged: 0, failed: 0, skipped: 0 });
+  });
+
+  it('marks the job failed when the run throws', async () => {
+    moveRepo.finishJob.mockRejectedValueOnce(new Error('db gone'));
+
+    await expect(service.execute(makeDto(), USER, collectProgress().options)).rejects.toThrow('db gone');
+
+    expect(moveRepo.finishJob).toHaveBeenLastCalledWith(101, 'failed', { succeeded: 1, merged: 0, failed: 0, skipped: 0 }, 'db gone');
+  });
+});
+
+describe('destination lookup', () => {
+  it('checks suffixed names against the database before offering them', async () => {
+    // "Dune (2)" is only invented while resolving the first collision, so a single
+    // lookup pass would hand out a name another book already owns.
+    const taken = new Map([
+      ['/libB/Dune', 99],
+      ['/libB/Dune (2)', 98],
+    ]);
+    moveRepo.findFolderPathOwners.mockImplementation((...args: unknown[]) => {
+      const paths = args[1] as string[];
+      return Promise.resolve(new Map(paths.filter((path) => taken.has(path)).map((path) => [path, taken.get(path)!])));
     });
 
-    it('propagates missing editor access', async () => {
-      const { service, libraryService } = makeService();
-      libraryService.verifyUserAccessLevel.mockRejectedValueOnce(new ForbiddenException('Insufficient library access level'));
+    const result = await service.preview(makeDto(), USER);
 
-      await expect(service.validateTarget(3, 9, makeUser())).rejects.toBeInstanceOf(ForbiddenException);
-    });
+    expect(result.collisions[0].keepBothPath).toBe('/libB/Dune (3)/Dune.epub');
+  });
+
+  it('stops querying once no new destination is proposed', async () => {
+    await service.preview(makeDto(), USER);
+
+    // One round to check the base paths, one to confirm nothing new appeared.
+    expect(moveRepo.findFolderPathOwners.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('collision policies', () => {
+  beforeEach(() => {
+    moveRepo.findFolderPathOwners.mockResolvedValue(new Map([['/libB/Dune', 99]]));
+  });
+
+  it('merges an identical copy but keeps both for a name-only clash under suggested', async () => {
+    bookService.resolveSelectionToIds.mockResolvedValue([1, 2]);
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        bookId: 1,
+        folderPath: '/libA/Dune',
+        files: [{ id: 10, absolutePath: '/libA/Dune/Dune.epub', relPath: null, role: 'content', format: 'epub', fileHash: 'abc', sortOrder: null }],
+      }),
+      makeBook({
+        bookId: 2,
+        folderPath: '/libA/Other',
+        metadata: { ...makeBook().metadata, title: 'Other' },
+        files: [{ id: 20, absolutePath: '/libA/Other/Other.epub', relPath: null, role: 'content', format: 'epub', fileHash: null, sortOrder: null }],
+      }),
+    ]);
+    // Book 1 is byte-identical to something already there; book 2 only clashes on name.
+    moveRepo.findHashOwnersInLibrary.mockResolvedValue(new Map([['abc', 55]]));
+    moveRepo.findFolderPathOwners.mockResolvedValue(
+      new Map([
+        ['/libB/Dune', 55],
+        ['/libB/Other', 66],
+      ]),
+    );
+
+    await service.execute(makeDto({ collisionPolicy: 'suggested' }), USER, collectProgress().options);
+
+    const byBook = new Map(executor.execute.mock.calls.map((call) => [call[0].plan.bookId, call[0]]));
+    expect(byBook.get(1)?.mergeDuplicateBookId).toBe(55);
+    expect(byBook.get(1)?.plan.targetFolderPathKey).toBe('/libB/Dune');
+    expect(byBook.get(2)?.mergeDuplicateBookId).toBeNull();
+    expect(byBook.get(2)?.plan.targetFolderPathKey).toBe('/libB/Other (2)');
+  });
+
+  it('lets an explicit job policy override the per-collision suggestion', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        files: [{ id: 10, absolutePath: '/libA/Dune/Dune.epub', relPath: null, role: 'content', format: 'epub', fileHash: 'abc', sortOrder: null }],
+      }),
+    ]);
+    moveRepo.findHashOwnersInLibrary.mockResolvedValue(new Map([['abc', 55]]));
+
+    await service.execute(makeDto({ collisionPolicy: 'keep_both' }), USER, collectProgress().options);
+
+    // Suggested would have merged this one; the user asked for keep_both instead.
+    expect(executor.execute.mock.calls[0][0].mergeDuplicateBookId).toBeNull();
+  });
+
+  it('lets a per-book override beat the suggestion', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        files: [{ id: 10, absolutePath: '/libA/Dune/Dune.epub', relPath: null, role: 'content', format: 'epub', fileHash: 'abc', sortOrder: null }],
+      }),
+    ]);
+    moveRepo.findHashOwnersInLibrary.mockResolvedValue(new Map([['abc', 55]]));
+
+    const summary = await service.execute(
+      makeDto({ collisionPolicy: 'suggested', overrides: [{ bookId: 1, policy: 'skip' }] }),
+      USER,
+      collectProgress().options,
+    );
+
+    expect(executor.execute).not.toHaveBeenCalled();
+    expect(summary.processed).toBe(0);
+  });
+
+  it('moves to a suffixed destination under keep_both', async () => {
+    await service.execute(makeDto({ collisionPolicy: 'keep_both' }), USER, collectProgress().options);
+
+    expect(executor.execute).toHaveBeenCalledTimes(1);
+    expect(executor.execute.mock.calls[0][0].plan.targetFolderPathKey).toBe('/libB/Dune (2)');
+  });
+
+  it('leaves colliding books untouched under skip', async () => {
+    const summary = await service.execute(makeDto({ collisionPolicy: 'skip' }), USER, collectProgress().options);
+
+    expect(executor.execute).not.toHaveBeenCalled();
+    expect(summary.processed).toBe(0);
+  });
+
+  it('merges into the duplicate when content is identical', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([
+      makeBook({
+        files: [{ id: 10, absolutePath: '/libA/Dune/Dune.epub', relPath: null, role: 'content', format: 'epub', fileHash: 'abc', sortOrder: null }],
+      }),
+    ]);
+    moveRepo.findHashOwnersInLibrary.mockResolvedValue(new Map([['abc', 55]]));
+    executor.execute.mockResolvedValue({ status: 'merged', crossDevice: false, mergedBookId: 55 });
+
+    const summary = await service.execute(makeDto({ collisionPolicy: 'merge' }), USER, collectProgress().options);
+
+    expect(executor.execute.mock.calls[0][0].mergeDuplicateBookId).toBe(55);
+    expect(summary).toMatchObject({ merged: 1, succeeded: 0 });
+  });
+
+  it('refuses to merge a name-only collision instead of deleting an unrelated book', async () => {
+    const progress = collectProgress();
+
+    const summary = await service.execute(makeDto({ collisionPolicy: 'merge' }), USER, progress.options);
+
+    expect(executor.execute).not.toHaveBeenCalled();
+    expect(progress.events).toEqual([{ bookId: 1, status: 'skipped', reason: 'merge only applies to identical copies' }]);
+    expect(summary.skipped).toBe(1);
+  });
+
+  it('lets a per-book override beat the job policy', async () => {
+    await service.execute(makeDto({ collisionPolicy: 'skip', overrides: [{ bookId: 1, policy: 'keep_both' }] }), USER, collectProgress().options);
+
+    expect(executor.execute).toHaveBeenCalledTimes(1);
+    expect(executor.execute.mock.calls[0][0].plan.targetFolderPathKey).toBe('/libB/Dune (2)');
+  });
+
+  it('never moves an ineligible book even when a policy is set', async () => {
+    moveRepo.findMoveBookData.mockResolvedValue([makeBook({ status: 'missing' })]);
+
+    const summary = await service.execute(makeDto(), USER, collectProgress().options);
+
+    expect(executor.execute).not.toHaveBeenCalled();
+    expect(summary.processed).toBe(0);
+  });
+});
+
+describe('crash recovery', () => {
+  it('rescans libraries touched by a job that never finished', async () => {
+    moveRepo.markInterruptedJobs.mockResolvedValue([{ id: 5, libraryIds: [1, 2] }]);
+
+    await service.onApplicationBootstrap();
+
+    expect(scannerService.startScanAsync).toHaveBeenCalledWith(1);
+    expect(scannerService.startScanAsync).toHaveBeenCalledWith(2);
+  });
+
+  it('does nothing when no job was interrupted', async () => {
+    await service.onApplicationBootstrap();
+
+    expect(scannerService.startScanAsync).not.toHaveBeenCalled();
+  });
+
+  it('survives a database error during recovery', async () => {
+    moveRepo.markInterruptedJobs.mockRejectedValue(new Error('db down'));
+
+    await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+    expect(scannerService.startScanAsync).not.toHaveBeenCalled();
   });
 });

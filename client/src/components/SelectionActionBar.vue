@@ -85,7 +85,7 @@ const emit = defineEmits<{
   'set-rating': [rating: number | null]
   'set-field': [field: BulkEditableField, value: BulkEditableValue]
   'lock-metadata': [locked: boolean]
-  move: []
+  'move-to-library': []
   delete: []
   exit: []
 }>()
@@ -107,9 +107,8 @@ const hasCustomContent = computed(() => Boolean(slots.content))
 const canBulkActions = computed(() => !isDemoRestrictedAccount.value)
 const canDownload = computed(() => hasPermission('library_download') && canBulkActions.value)
 const canEditMetadata = computed(() => hasPermission('library_edit_metadata') && canBulkActions.value)
-// Gated like delete below: only on the permission, not on the demo restriction.
-const canMove = computed(() => hasPermission('library_delete_books'))
-const canShowMoreMenu = computed(() => canDownload.value || canEditMetadata.value)
+const canMoveToLibrary = computed(() => hasPermission('library_edit_metadata') && canBulkActions.value)
+const canShowMoreMenu = computed(() => canDownload.value || canEditMetadata.value || canMoveToLibrary.value)
 const canShare = computed(() => hasPermission('email_send') || canDownload.value)
 const numericFieldSelected = computed(() => bulkField.value === 'publishedYear')
 const arrayFieldSelected = computed(() => (BULK_EDITABLE_ARRAY_FIELDS as readonly string[]).includes(bulkField.value))
@@ -181,6 +180,11 @@ function onRefreshMetadata() {
 function onReExtractCover() {
   if (props.count === 0) return
   emit('re-extract-cover')
+}
+
+function onMoveToLibrary() {
+  if (props.count === 0) return
+  emit('move-to-library')
 }
 
 function resetFieldEditor() {
@@ -446,6 +450,13 @@ watch(
                           <span>{{ t('components.selectionActionBar.exportMetadata') }}</span>
                         </DropdownMenuItem>
                       </template>
+                      <template v-if="canMoveToLibrary">
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem data-testid="action-move-to-library" @click="onMoveToLibrary">
+                          <FolderInput :size="14" />
+                          <span>{{ t('book.move.action') }}</span>
+                        </DropdownMenuItem>
+                      </template>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </span>
@@ -453,21 +464,7 @@ watch(
               <TooltipContent side="top">{{ t('components.selectionActionBar.moreActions') }}</TooltipContent>
             </Tooltip>
 
-            <div v-if="canMove || hasPermission('library_delete_books')" :class="DIVIDER" />
-
-            <Tooltip v-if="canMove">
-              <TooltipTrigger as-child>
-                <button
-                  data-testid="action-bulk-move"
-                  :disabled="count === 0"
-                  :class="[BTN_ICON, count > 0 ? BTN_PRIMARY : BTN_DISABLED]"
-                  @click="emit('move')"
-                >
-                  <FolderInput :size="ICON_SIZE" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{{ t('components.selectionActionBar.moveToLibrary') }}</TooltipContent>
-            </Tooltip>
+            <div v-if="hasPermission('library_delete_books')" :class="DIVIDER" />
 
             <Tooltip v-if="hasPermission('library_delete_books')">
               <TooltipTrigger as-child>

@@ -421,6 +421,13 @@
       "when": 1785272589212,
       "tag": "0059_add_smart_scope_kobo_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1785645905307,
+      "tag": "0060_add_book_move_jobs",
+      "breakpoints": true
     }
   ]
 }

@@ -7,9 +7,6 @@ import {
   type BookCard,
   type BookDetail,
   type BookMetadataLockField,
-  type MoveBookOutcome,
-  type MoveBooksProgressEvent,
-  type MoveBooksSummary,
   type ReadStatus,
   type UserBookStatus,
 } from '@bookorbit/types'
@@ -396,83 +393,6 @@ export function useBookBulkActions(
     toast.success(`${locked ? 'Locked' : 'Unlocked'} metadata for ${count} book${count === 1 ? '' : 's'}`)
   }
 
-  async function handleBulkMove(targetLibraryId: number, targetFolderId?: number): Promise<boolean> {
-    if (!hasSelection()) {
-      toast.error('No books selected to move')
-      return false
-    }
-    const total = querySelection?.value ? querySelection.value.total : selectedIds.value.size
-    inFlight.value = { label: 'Moving books', processed: 0, total, failed: 0 }
-    let moved = 0
-    let skipped = 0
-    let failed = 0
-    let summary: MoveBooksSummary | null = null
-    try {
-      const res = await api('/api/v1/books/move', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...getSelectionPayload(), targetLibraryId, ...(targetFolderId !== undefined ? { targetFolderId } : {}) }),
-      })
-      if (!res.ok) {
-        toast.error('Failed to move books')
-        return false
-      }
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value, { stream: true }).split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const data = JSON.parse(line.slice(6)) as MoveBooksProgressEvent
-            if ('done' in data && data.done) {
-              summary = data
-              continue
-            }
-            const outcome = data as MoveBookOutcome
-            if (outcome.status === 'moved') {
-              moved++
-              onDeleted([outcome.bookId])
-            } else if (outcome.status === 'skipped') {
-              skipped++
-            } else {
-              failed++
-            }
-            const prev: InFlightOp = inFlight.value ?? { label: 'Moving books', processed: 0, total, failed: 0 }
-            inFlight.value = {
-              label: 'Moving books',
-              processed: prev.processed + 1,
-              total,
-              failed: (prev.failed ?? 0) + (outcome.status === 'failed' ? 1 : 0),
-            }
-          } catch {
-            // Ignore malformed stream lines; the done event carries the authoritative counts.
-          }
-        }
-      }
-    } catch {
-      toast.error('Failed to move books')
-      return false
-    } finally {
-      inFlight.value = null
-    }
-    const counts = summary ?? { total, moved, skipped, failed, cancelled: false }
-    const parts = [counts.skipped > 0 ? `${counts.skipped} skipped` : null, counts.failed > 0 ? `${counts.failed} failed` : null]
-      .filter(Boolean)
-      .join(', ')
-    if (counts.moved === counts.total) {
-      toast.success(`Moved ${counts.moved} book${counts.moved === 1 ? '' : 's'}`)
-      return true
-    }
-    if (counts.moved === 0) {
-      toast.error(`No books were moved${parts ? ` (${parts})` : ''}`)
-      return true
-    }
-    toast.warning(`Moved ${counts.moved} of ${counts.total} books${parts ? ` (${parts})` : ''}`)
-    return true
-  }
-
   async function handleDeleteSelected() {
     if (!hasSelection()) return
     const ids = querySelection?.value ? [] : [...selectedIds.value]
@@ -499,7 +419,6 @@ export function useBookBulkActions(
     handleBulkSetRating,
     handleBulkSetField,
     handleBulkSetMetadataLock,
-    handleBulkMove,
     handleDeleteSelected,
     getSelectionPayload,
   }

@@ -32,11 +32,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import SmartScopeEditorPanel from '@/features/smart-scope/components/SmartScopeEditorPanel.vue'
 import SelectionActionBar from '@/components/SelectionActionBar.vue'
 import AddToCollectionSheet from '@/features/collection/components/AddToCollectionSheet.vue'
+import MoveToLibrarySheet from '@/features/book/components/MoveToLibrarySheet.vue'
+import { useMoveToLibraryTarget } from '@/features/book/composables/useMoveToLibraryTarget'
 import BulkEditMetadataDialog from '@/features/book/components/BulkEditMetadataDialog.vue'
 import MetadataExportDialog from '@/features/book/components/MetadataExportDialog.vue'
 import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import DeleteBookDialog from '@/features/book/components/DeleteBookDialog.vue'
-import MoveBooksDialog from '@/features/book/components/MoveBooksDialog.vue'
 import JumpRail from '@/features/book/components/JumpRail.vue'
 import { toast } from 'vue-sonner'
 import { useBookViewWindow } from '@/features/book/composables/useBookViewWindow'
@@ -236,9 +237,6 @@ const {
   handleBulkSetField,
   handleBulkSetMetadataLock,
   handleDeleteSelected,
-  moveBooksOpen,
-  movingBooks,
-  confirmMoveBooks,
   addToCollectionOpen,
   bulkEditOpen,
   sendBookOpen,
@@ -249,11 +247,26 @@ const {
   handleEditIndividually,
 } = useBookTableShell({
   books,
-  onBooksMoved: () => {
-    resetBooks()
-    refreshBuckets()
-  },
+  onMoveToLibrary: (bookId) => openMoveForBook(bookId),
 })
+
+const {
+  open: moveToLibraryOpen,
+  payload: movePayload,
+  count: moveCount,
+  openForSelection: openMoveForSelection,
+  openForBook: openMoveForBook,
+  setOpen: setMoveOpen,
+} = useMoveToLibraryTarget({
+  getSelectionPayload: () => ({ bookIds: [...selectedIds.value] }),
+  selectedCount,
+})
+
+// A moved book keeps its collection and scope membership, so only the stale
+// selection needs clearing here.
+function handleBooksMoved() {
+  exitSelectionMode()
+}
 
 const metadataExportOpen = ref(false)
 const visibleExportColumns = computed(() => {
@@ -458,18 +471,9 @@ defineOptions({ name: 'SmartScopeView' })
       @set-rating="handleBulkSetRating"
       @set-field="handleBulkSetField"
       @lock-metadata="handleBulkSetMetadataLock"
-      @move="moveBooksOpen = true"
       @delete="handleDeleteSelected"
+      @move-to-library="openMoveForSelection"
       @exit="exitSelectionMode"
-    />
-
-    <MoveBooksDialog
-      :open="moveBooksOpen"
-      :count="selectedCount"
-      :current-library-id="null"
-      :moving="movingBooks"
-      @confirm="confirmMoveBooks"
-      @cancel="moveBooksOpen = false"
     />
 
     <MetadataExportDialog
@@ -490,6 +494,14 @@ defineOptions({ name: 'SmartScopeView' })
       :selected-count="selectedCount"
       @update:open="addToCollectionOpen = $event"
       @done="exitSelectionMode"
+    />
+
+    <MoveToLibrarySheet
+      :open="moveToLibraryOpen"
+      :selection-payload="movePayload"
+      :selected-count="moveCount"
+      @update:open="setMoveOpen"
+      @moved="handleBooksMoved"
     />
     <BulkEditMetadataDialog
       :open="bulkEditOpen"
@@ -837,6 +849,7 @@ defineOptions({ name: 'SmartScopeView' })
             :rail-gutter-kind="bucketKind"
             @range="handleRange"
             @first-visible-index="handleFirstVisibleIndex"
+            :allow-move-to-library="true"
             @action="handleBookAction"
             @select="handleSelect"
           />
@@ -850,6 +863,7 @@ defineOptions({ name: 'SmartScopeView' })
               :selection-mode="selectionMode"
               :selected="isSelected(book.id)"
               @select="handleSelect(book.id, $event)"
+              :allow-move-to-library="true"
               @action="handleBookAction(book, $event)"
             />
           </div>
@@ -869,6 +883,7 @@ defineOptions({ name: 'SmartScopeView' })
             :selected-count="selectedCount"
             :initialized="booksInitialized"
             @update:sort="tableSort = $event"
+            :allow-move-to-library="true"
             @action="handleBookAction"
             @select="handleSelect"
             @update:book="handleTableBookUpdate"

@@ -1,362 +1,576 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { access, constants as fsConstants, copyFile, link, mkdir, readdir, rmdir, unlink } from 'fs/promises';
-import { dirname, extname, isAbsolute, join, relative } from 'path';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
+import { stat } from 'fs/promises';
 
-import type { MoveBookOutcome } from '@bookorbit/types';
-import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
+import type {
+  BookMoveCollisionPolicy,
+  BookMoveJobCollisionPolicy,
+  BookMoveLayoutChange,
+  BookMovePreviewCollisionItem,
+  BookMovePreviewIneligibleItem,
+  BookMovePreviewReadyItem,
+  BookMovePreviewResult,
+  BookMoveProgressEvent,
+  BookMoveSummary,
+  BookMoveWarnings,
+  OrganizationMode,
+} from '@bookorbit/types';
+import { BOOK_MOVE_DETAIL_LIMIT, BOOK_MOVE_PREVIEW_SAMPLE_LIMIT, NotificationType } from '@bookorbit/types';
+
 import type { RequestUser } from '../../common/types/request-user';
-import { FileLockService, bookOperationLockKey } from '../file-write/file-lock.service';
-import { FileRenameService } from '../file-write/file-rename.service';
-import { LibraryService } from '../library/library.service';
+import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
+import { AppSettingsService } from '../app-settings/app-settings.service';
+import { BookService } from '../book/book.service';
+import { NotificationService } from '../notification/notification.service';
+import { FileWatcherService } from '../scanner/file-watcher.service';
 import { ScanGateway } from '../scanner/scan.gateway';
 import { ScannerService } from '../scanner/scanner.service';
-import { SelfWriteRegistry } from '../../common/services/self-write-registry.service';
-import type { BookMoveBookData, BookMoveFileUpdate, BookMoveFolder, BookMoveLibrary } from './book-move.repository';
+import { BookMoveExecutorService } from './book-move-executor.service';
+import type { BookMovePlan, BookMovePlanOutcome, PlanCollision } from './book-move-planner.service';
+import { BookMovePlannerService } from './book-move-planner.service';
+import type { MoveTargetLibrary } from './book-move.repository';
 import { BookMoveRepository } from './book-move.repository';
+import type { MoveBooksDto, MovePreviewDto } from './dto/move-books.dto';
 
-const BOOK_MOVE_EVENT = 'book.move';
+const MOVE_EVENT = 'book_move.job';
+const EDITOR_LEVELS = new Set(['editor', 'owner']);
+const MAX_PLAN_ROUNDS = 5;
+
+export interface BookMoveStreamOptions {
+  onProgress: (event: BookMoveProgressEvent) => void;
+  isCancelled: () => boolean;
+}
+
+interface ResolvedPlan {
+  target: MoveTargetLibrary;
+  outcomes: BookMovePlanOutcome[];
+  totalSelected: number;
+  sourceLibraryIds: number[];
+}
 
 @Injectable()
-export class BookMoveService {
+export class BookMoveService implements OnApplicationBootstrap {
   private readonly logger = new Logger(BookMoveService.name);
+  private readonly busyLibraries = new Set<number>();
 
   constructor(
     private readonly moveRepo: BookMoveRepository,
-    private readonly libraryService: LibraryService,
-    private readonly lockService: FileLockService,
-    private readonly fileRenameService: FileRenameService,
-    private readonly scanGateway: ScanGateway,
+    private readonly planner: BookMovePlannerService,
+    private readonly executor: BookMoveExecutorService,
+    private readonly bookService: BookService,
+    private readonly appSettings: AppSettingsService,
     private readonly scannerService: ScannerService,
-    private readonly selfWriteRegistry: SelfWriteRegistry,
+    private readonly fileWatcherService: FileWatcherService,
+    private readonly scanGateway: ScanGateway,
+    private readonly notificationService: NotificationService,
   ) {}
 
-  // Validates the target before the controller opens the SSE stream, so user
-  // errors surface as regular JSON error responses instead of a broken stream.
-  async validateTarget(targetLibraryId: number, targetFolderId: number | undefined, user: RequestUser): Promise<void> {
-    const library = await this.moveRepo.findLibrary(targetLibraryId);
-    if (!library) throw new BadRequestException(`Library ${targetLibraryId} not found`);
-
-    // Moving writes files into the target library, so viewer access is not
-    // enough; every other write path requires editor level.
-    await this.libraryService.verifyUserAccessLevel(user.id, targetLibraryId, 'editor', user.isSuperuser);
-    await this.resolveTargetFolder(targetLibraryId, targetFolderId);
-  }
-
-  async moveBooks(
-    bookIds: number[],
-    targetLibraryId: number,
-    targetFolderId: number | undefined,
-    user: RequestUser,
-    onProgress?: (event: MoveBookOutcome) => void,
-    options?: { isCancelled?: () => boolean },
-  ): Promise<MoveBookOutcome[]> {
-    const startedAt = Date.now();
-    const library = await this.moveRepo.findLibrary(targetLibraryId);
-    if (!library) throw new BadRequestException(`Library ${targetLibraryId} not found`);
-
-    await this.libraryService.verifyUserAccessLevel(user.id, targetLibraryId, 'editor', user.isSuperuser);
-    const folder = await this.resolveTargetFolder(targetLibraryId, targetFolderId);
-
-    this.logger.log(
-      `[${BOOK_MOVE_EVENT}] [start] userId=${user.id} toLibraryId=${library.id} toFolderId=${folder.id} total=${bookIds.length} - bulk move started`,
-    );
-
-    const results: MoveBookOutcome[] = [];
-    const movedBySourceLibrary = new Map<number, number[]>();
-    let cancelled = false;
-    let callbackInterrupted = false;
-    for (const bookId of bookIds) {
-      if (options?.isCancelled?.()) {
-        cancelled = true;
-        break;
-      }
-      const outcome = await this.lockService.withLock(bookOperationLockKey(bookId), () =>
-        this.moveBook(bookId, library, folder, user, movedBySourceLibrary),
-      );
-      results.push(outcome);
-      if (onProgress) {
-        try {
-          onProgress(outcome);
-        } catch {
-          // The client went away mid-stream; stop working but keep the
-          // outcomes so far for events and auditing.
-          callbackInterrupted = true;
-          break;
-        }
-      }
-    }
-
-    for (const [fromLibraryId, movedIds] of movedBySourceLibrary) {
-      // A move can race the source library's unavailable-books debounce; the
-      // scanner's own transfer path cancels the pending notification too.
-      this.scannerService.cancelBooksUnavailableNotification(fromLibraryId, movedIds);
-      this.scanGateway.emitBookTransferred({ fromLibraryId, toLibraryId: library.id, bookIds: movedIds });
-    }
-
-    const moved = results.filter((entry) => entry.status === 'moved').length;
-    const skipped = results.filter((entry) => entry.status === 'skipped').length;
-    const failed = results.filter((entry) => entry.status === 'failed').length;
-    this.logger.log(
-      `[${BOOK_MOVE_EVENT}] [end] userId=${user.id} toLibraryId=${library.id} durationMs=${Date.now() - startedAt} total=${bookIds.length} moved=${moved} skipped=${skipped} failed=${failed} cancelled=${cancelled} callbackInterrupted=${callbackInterrupted} - bulk move completed`,
-    );
-    return results;
-  }
-
-  private async resolveTargetFolder(libraryId: number, folderId: number | undefined): Promise<BookMoveFolder> {
-    if (folderId !== undefined) {
-      const folder = await this.moveRepo.findFolder(folderId);
-      if (!folder || folder.libraryId !== libraryId) {
-        throw new BadRequestException(`Folder ${folderId} does not belong to library ${libraryId}`);
-      }
-      return folder;
-    }
-
-    const folders = await this.moveRepo.findFoldersByLibrary(libraryId);
-    if (folders.length !== 1) {
-      throw new BadRequestException('targetFolderId is required when the target library does not have exactly one folder');
-    }
-    return folders[0];
-  }
-
-  private async moveBook(
-    bookId: number,
-    library: BookMoveLibrary,
-    folder: BookMoveFolder,
-    user: RequestUser,
-    movedBySourceLibrary: Map<number, number[]>,
-  ): Promise<MoveBookOutcome> {
-    const book = await this.moveRepo.findBookForMove(bookId);
-    if (!book) return { bookId, status: 'failed', reason: 'book_not_found' };
-
-    try {
-      await this.libraryService.verifyUserAccess(user.id, book.libraryId, user.isSuperuser);
-    } catch (error) {
-      if (error instanceof ForbiddenException) {
-        return { bookId, status: 'failed', reason: 'no_source_access' };
-      }
-      const message = sanitizeLogValue(error instanceof Error ? error.message : String(error));
-      this.logger.error(
-        `[${BOOK_MOVE_EVENT}] bookId=${bookId} userId=${user.id} errorClass=${error instanceof Error ? error.constructor.name : 'unknown'} error="${message}" - source library access check failed`,
-      );
-      return { bookId, status: 'failed', reason: 'source_access_check_failed' };
-    }
-
-    if (book.status === 'processing') return { bookId, status: 'skipped', reason: 'book_processing' };
-    if (book.status === 'missing') return { bookId, status: 'skipped', reason: 'book_missing' };
-    if (book.libraryId === library.id && book.libraryFolderId === folder.id) {
-      return { bookId, status: 'skipped', reason: 'already_in_target' };
-    }
-
-    if (library.allowedFormats.length > 0) {
-      for (const file of book.files) {
-        if (file.role !== 'primary' && file.role !== 'content') continue;
-        const format = (file.format ?? extname(file.absolutePath).slice(1)).toLowerCase();
-        if (!library.allowedFormats.includes(format)) {
-          this.logger.log(
-            `[${BOOK_MOVE_EVENT}] bookId=${bookId} toLibraryId=${library.id} format=${sanitizeLogValue(format)} - format not allowed in target library`,
-          );
-          return { bookId, status: 'skipped', reason: 'format_not_allowed' };
-        }
-      }
-    }
-
-    const fileUpdates: BookMoveFileUpdate[] = book.files.map((file) => {
-      const relPath = file.relPath ?? relative(book.libraryFolderPath, file.absolutePath);
-      return { id: file.id, absolutePath: join(folder.path, relPath), relPath };
+  /**
+   * Job progress is in-memory like every other bulk job, so a crash leaves a row
+   * behind. Repair the affected libraries immediately rather than waiting for the
+   * watcher's half-hourly reconcile.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    const interrupted = await this.moveRepo.markInterruptedJobs().catch((error: Error) => {
+      this.logger.warn(`[${MOVE_EVENT}] [fail] error="${sanitizeLogValue(error.message)}" - could not check for interrupted move jobs`);
+      return [];
     });
-    const newFolderPath = join(folder.path, relative(book.libraryFolderPath, book.folderPath));
 
-    // A stored relPath (or a file row outside its folder root) can resolve to
-    // "../..", which would make the move write outside the target library. The
-    // folder path may equal the folder root itself (flat libraries), file
-    // paths must be strictly inside it.
-    const escapes =
-      fileUpdates.some((update) => !this.isContainedIn(folder.path, update.absolutePath)) || !this.isAtOrContainedIn(folder.path, newFolderPath);
-    if (escapes) {
-      this.logger.error(`[${BOOK_MOVE_EVENT}] bookId=${bookId} toFolderId=${folder.id} - resolved target path escapes the target folder`);
-      return { bookId, status: 'failed', reason: 'path_escapes_target' };
-    }
+    if (interrupted.length === 0) return;
 
-    const existingPaths = await this.moveRepo.findExistingPaths(fileUpdates.map((update) => update.absolutePath));
-    for (const update of fileUpdates) {
-      const owner = existingPaths.get(update.absolutePath);
-      if (owner !== undefined && owner !== bookId) {
-        return { bookId, status: 'skipped', reason: 'target_path_taken' };
-      }
-    }
-
-    for (const update of fileUpdates) {
-      if (await this.pathExists(update.absolutePath)) {
-        return { bookId, status: 'skipped', reason: 'target_path_exists' };
-      }
-    }
-
-    try {
-      await this.moveRepo.applyMove(bookId, { libraryId: library.id, libraryFolderId: folder.id, folderPath: newFolderPath }, fileUpdates);
-    } catch (error) {
-      const message = sanitizeLogValue(error instanceof Error ? error.message : String(error));
-      this.logger.error(
-        `[${BOOK_MOVE_EVENT}] bookId=${bookId} errorClass=${error instanceof Error ? error.constructor.name : 'unknown'} error="${message}" - database re-parent failed`,
-      );
-      return { bookId, status: 'failed', reason: 'database_update_failed' };
-    }
-
-    const moved: Array<{ from: string; to: string }> = [];
-    // Suppress watcher events for every touched path: without this the source
-    // library's watcher sees unlinks and the target's sees adds for a book
-    // whose row has already been re-parented, racing missing-marking and
-    // duplicate detection.
-    const suppressPaths = this.buildSuppressedMovePaths(book, fileUpdates, folder.path, newFolderPath);
-    this.selfWriteRegistry.begin(suppressPaths);
-    try {
-      try {
-        for (let i = 0; i < book.files.length; i++) {
-          const from = book.files[i].absolutePath;
-          const to = fileUpdates[i].absolutePath;
-          if (from === to) continue;
-          await mkdir(dirname(to), { recursive: true });
-          await this.moveFile(from, to);
-          moved.push({ from, to });
-        }
-      } catch (error) {
-        const rolledBack = await this.rollback(bookId, book, moved, error);
-        const message = sanitizeLogValue(error instanceof Error ? error.message : String(error));
-        this.logger.error(
-          `[${BOOK_MOVE_EVENT}] bookId=${bookId} rolledBack=${rolledBack} errorClass=${error instanceof Error ? error.constructor.name : 'unknown'} error="${message}" - physical file move failed`,
-        );
-        return { bookId, status: 'failed', reason: rolledBack ? 'file_move_failed' : 'file_move_failed_rollback_incomplete' };
-      }
-
-      for (const { from } of moved) {
-        await this.cleanupEmptyDirsUpTo(dirname(from), book.libraryFolderPath);
-      }
-      await this.cleanupEmptyDirsUpTo(book.folderPath, book.libraryFolderPath);
-    } finally {
-      this.selfWriteRegistry.end(suppressPaths);
-    }
-
-    const movedFromSource = movedBySourceLibrary.get(book.libraryId) ?? [];
-    movedFromSource.push(bookId);
-    movedBySourceLibrary.set(book.libraryId, movedFromSource);
-
-    this.fileRenameService.scheduleRename(bookId, user.id);
-    this.logger.log(
-      `[${BOOK_MOVE_EVENT}] bookId=${bookId} userId=${user.id} fromLibraryId=${book.libraryId} toLibraryId=${library.id} toFolderId=${folder.id} - book moved`,
+    const libraryIds = [...new Set(interrupted.flatMap((job) => job.libraryIds))];
+    this.logger.warn(
+      `[${MOVE_EVENT}] [fail] jobCount=${interrupted.length} libraryIds=${libraryIds.join(',')} - move jobs interrupted by restart, rescanning affected libraries`,
     );
-    return { bookId, status: 'moved' };
+
+    for (const libraryId of libraryIds) {
+      this.scannerService.startScanAsync(libraryId);
+    }
   }
 
-  private async rollback(bookId: number, book: BookMoveBookData, moved: Array<{ from: string; to: string }>, cause: unknown): Promise<boolean> {
-    let rollbackOk = true;
-    for (const { from, to } of [...moved].reverse()) {
-      try {
-        await this.moveFile(to, from);
-      } catch (rollbackError) {
-        rollbackOk = false;
-        const causeMessage = sanitizeLogValue(cause instanceof Error ? cause.message : String(cause));
-        const rollbackMessage = sanitizeLogValue(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
-        this.logger.error(
-          `[${BOOK_MOVE_EVENT}] bookId=${bookId} error="${causeMessage}" rollbackError="${rollbackMessage}" - failed to move file back during rollback`,
-        );
-      }
-    }
+  isBusy(libraryId: number): boolean {
+    return this.busyLibraries.has(libraryId);
+  }
 
-    const fileUpdates: BookMoveFileUpdate[] = book.files.map((file) => ({
-      id: file.id,
-      absolutePath: file.absolutePath,
-      relPath: file.relPath ?? relative(book.libraryFolderPath, file.absolutePath),
-    }));
+  async preview(dto: MovePreviewDto, user: RequestUser): Promise<BookMovePreviewResult> {
+    const resolved = await this.resolvePlan(dto, user);
+    return this.buildPreview(resolved);
+  }
+
+  async execute(dto: MoveBooksDto, user: RequestUser, options: BookMoveStreamOptions): Promise<BookMoveSummary> {
+    const startedAt = Date.now();
+    const resolved = await this.resolvePlan(dto, user);
+    const { target } = resolved;
+
+    const involvedLibraryIds = [...new Set([target.libraryId, ...resolved.sourceLibraryIds])];
+    this.assertLibrariesAvailable(involvedLibraryIds);
+
+    const overrides = new Map((dto.overrides ?? []).map((override) => [override.bookId, override.policy]));
+    const work = this.selectWork(resolved.outcomes, dto.collisionPolicy, overrides);
+
+    for (const libraryId of involvedLibraryIds) this.busyLibraries.add(libraryId);
+
+    const jobId = await this.moveRepo.createJob({
+      startedBy: user.id,
+      targetLibraryId: target.libraryId,
+      targetFolderId: target.folderId,
+      sourceLibraryIds: resolved.sourceLibraryIds,
+      totalBooks: work.length,
+    });
+
+    this.logger.log(
+      `[${MOVE_EVENT}] [start] jobId=${jobId} userId=${user.id} toLibraryId=${target.libraryId} toFolderId=${target.folderId} ` +
+        `sourceLibraryIds=${resolved.sourceLibraryIds.join(',')} bookCount=${work.length} - book move started`,
+    );
+
+    const stoppedWatchers = await this.stopWatchers(involvedLibraryIds);
+
+    let succeeded = 0;
+    let merged = 0;
+    let failed = 0;
+    let skipped = 0;
+    const movedByLibrary = new Map<number, number[]>();
+
     try {
-      await this.moveRepo.applyMove(
-        bookId,
-        { libraryId: book.libraryId, libraryFolderId: book.libraryFolderId, folderPath: book.folderPath },
-        fileUpdates,
+      for (const item of work) {
+        if (options.isCancelled()) break;
+
+        if (item.skipReason) {
+          skipped++;
+          options.onProgress({ bookId: item.plan.bookId, status: 'skipped', reason: item.skipReason });
+          continue;
+        }
+
+        try {
+          const result = await this.executor.execute({
+            plan: item.plan,
+            target,
+            mergeDuplicateBookId: item.mergeDuplicateBookId,
+          });
+
+          if (result.status === 'success' || result.status === 'merged') {
+            if (result.status === 'merged') merged++;
+            else succeeded++;
+
+            const list = movedByLibrary.get(item.plan.sourceLibraryId);
+            if (list) list.push(item.plan.bookId);
+            else movedByLibrary.set(item.plan.sourceLibraryId, [item.plan.bookId]);
+
+            options.onProgress({ bookId: item.plan.bookId, status: result.status });
+          } else if (result.status === 'skipped') {
+            skipped++;
+            options.onProgress({ bookId: item.plan.bookId, status: 'skipped', reason: result.reason });
+          } else {
+            failed++;
+            options.onProgress({ bookId: item.plan.bookId, status: 'failed', reason: result.reason });
+          }
+        } catch (error) {
+          failed++;
+          options.onProgress({ bookId: item.plan.bookId, status: 'failed', reason: getErrorMessage(error) });
+        }
+      }
+
+      const cancelled = options.isCancelled();
+      await this.moveRepo.finishJob(jobId, 'completed', { succeeded, merged, failed, skipped });
+
+      this.logger.log(
+        `[${MOVE_EVENT}] [end] jobId=${jobId} userId=${user.id} durationMs=${Date.now() - startedAt} succeeded=${succeeded} ` +
+          `merged=${merged} failed=${failed} skipped=${skipped} cancelled=${cancelled} - book move completed`,
       );
-    } catch (rollbackError) {
-      rollbackOk = false;
-      const rollbackMessage = sanitizeLogValue(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
-      this.logger.error(`[${BOOK_MOVE_EVENT}] bookId=${bookId} rollbackError="${rollbackMessage}" - failed to restore book rows during rollback`);
+
+      this.emitTransfers(movedByLibrary, target.libraryId);
+      await this.notifyCompletion(user.id, target, succeeded + merged, failed);
+
+      return { processed: succeeded + merged + failed + skipped, succeeded, merged, failed, skipped, cancelled };
+    } catch (error) {
+      await this.moveRepo.finishJob(jobId, 'failed', { succeeded, merged, failed, skipped }, getErrorMessage(error));
+      this.logger.error(
+        `[${MOVE_EVENT}] [fail] jobId=${jobId} userId=${user.id} durationMs=${Date.now() - startedAt} ` +
+          `errorClass=${error instanceof Error ? error.name : 'Error'} error="${sanitizeLogValue(getErrorMessage(error))}" - book move failed`,
+      );
+      this.emitTransfers(movedByLibrary, target.libraryId);
+      throw error;
+    } finally {
+      for (const libraryId of involvedLibraryIds) this.busyLibraries.delete(libraryId);
+      await this.restartWatchers(stoppedWatchers);
     }
-    return rollbackOk;
   }
 
-  private async moveFile(from: string, to: string): Promise<void> {
-    // rename(2) silently overwrites the destination. link+unlink (or
-    // COPYFILE_EXCL on filesystems without hardlinks) makes a concurrent move
-    // that resolved the same target path fail with EEXIST instead of
-    // clobbering the other book's file.
-    try {
-      await link(from, to);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'EXDEV' || code === 'EPERM' || code === 'ENOTSUP' || code === 'EACCES') {
-        await copyFile(from, to, fsConstants.COPYFILE_EXCL);
-      } else {
-        throw err;
+  private assertLibrariesAvailable(libraryIds: number[]): void {
+    for (const libraryId of libraryIds) {
+      if (this.busyLibraries.has(libraryId)) {
+        throw new ConflictException(`A move is already running for library ${libraryId}.`);
+      }
+      if (this.scannerService.isScanRunning(libraryId)) {
+        throw new ConflictException(`A scan is running for library ${libraryId}. Wait for it to finish before moving books.`);
       }
     }
-    await unlink(from);
   }
 
-  private buildSuppressedMovePaths(book: BookMoveBookData, fileUpdates: BookMoveFileUpdate[], targetRoot: string, newFolderPath: string): string[] {
-    const paths = new Set<string>();
-    const addWithParents = (path: string, root: string) => {
-      paths.add(path);
-      let current = dirname(path);
-      while (this.isContainedIn(root, current)) {
-        paths.add(current);
-        current = dirname(current);
+  private async stopWatchers(libraryIds: number[]): Promise<number[]> {
+    const watched = await this.moveRepo.findWatchedLibraryIds(libraryIds);
+    for (const libraryId of watched) {
+      await this.fileWatcherService.stopWatcher(libraryId);
+    }
+    return watched;
+  }
+
+  private async restartWatchers(libraryIds: number[]): Promise<void> {
+    if (libraryIds.length === 0) return;
+
+    const folders = await this.moveRepo.findLibraryFolders(libraryIds);
+    const pathsByLibrary = new Map<number, string[]>();
+    for (const folder of folders) {
+      const list = pathsByLibrary.get(folder.libraryId);
+      if (list) list.push(folder.path);
+      else pathsByLibrary.set(folder.libraryId, [folder.path]);
+    }
+
+    for (const libraryId of libraryIds) {
+      await this.fileWatcherService.startWatcher(libraryId, pathsByLibrary.get(libraryId) ?? []).catch((error: Error) => {
+        this.logger.error(
+          `[${MOVE_EVENT}] [fail] libraryId=${libraryId} error="${sanitizeLogValue(error.message)}" - could not restart watcher after move`,
+        );
+      });
+    }
+  }
+
+  private emitTransfers(movedByLibrary: Map<number, number[]>, targetLibraryId: number): void {
+    for (const [sourceLibraryId, bookIds] of movedByLibrary) {
+      if (bookIds.length === 0) continue;
+      this.scanGateway.emitBookTransferred({ fromLibraryId: sourceLibraryId, toLibraryId: targetLibraryId, bookIds });
+    }
+  }
+
+  private async resolvePlan(dto: MovePreviewDto, user: RequestUser): Promise<ResolvedPlan> {
+    const target = await this.moveRepo.findTargetLibrary(dto.targetLibraryId, dto.targetFolderId);
+    if (!target) {
+      throw new NotFoundException('Target library folder not found');
+    }
+
+    const bookIds = await this.bookService.resolveSelectionToIds(dto.selection, user);
+    if (bookIds.length === 0) {
+      throw new BadRequestException('No books matched the selection');
+    }
+
+    const books = await this.moveRepo.findMoveBookData(bookIds);
+    const sourceLibraryIds = [...new Set(books.map((book) => book.libraryId))].filter((id) => id !== target.libraryId);
+
+    await this.assertEditorAccess(user, [...new Set([...sourceLibraryIds, target.libraryId])]);
+
+    const pattern =
+      target.fileNamingPattern ??
+      (target.organizationMode === 'book_per_folder'
+        ? await this.appSettings.getUploadPatternBookPerFolder()
+        : await this.appSettings.getUploadPattern());
+
+    const sanitizeForCrossPlatform = await this.appSettings.isCrossPlatformPathSanitizationEnabled();
+
+    const candidateHashes: string[] = [];
+    for (const book of books) {
+      for (const file of book.files) {
+        if (file.role === 'content' && file.fileHash) candidateHashes.push(file.fileHash);
       }
+    }
+    const hashOwners = await this.moveRepo.findHashOwnersInLibrary(target.libraryId, [...new Set(candidateHashes)]);
+
+    // Planning is iterative because resolving a collision invents new destination
+    // names ("Dune (2)") that were never looked up. Each round feeds the newly
+    // proposed paths back through the database until no unchecked path remains,
+    // which normally settles in two rounds.
+    const folderPathOwners = new Map<string, number>();
+    const filePathOwners = new Map<string, number>();
+    const checkedFolderPaths = new Set<string>();
+    const checkedFilePaths = new Set<string>();
+
+    let outcomes = this.planner.plan({ books, target, pattern, sanitizeForCrossPlatform, folderPathOwners, filePathOwners, hashOwners });
+
+    for (let round = 0; round < MAX_PLAN_ROUNDS; round++) {
+      const newFolderPaths = new Set<string>();
+      const newFilePaths = new Set<string>();
+
+      const collect = (plan: BookMovePlan): void => {
+        if (!checkedFolderPaths.has(plan.targetFolderPathKey)) newFolderPaths.add(plan.targetFolderPathKey);
+        for (const file of plan.files) {
+          if (!checkedFilePaths.has(file.to)) newFilePaths.add(file.to);
+        }
+      };
+
+      for (const outcome of outcomes) {
+        if (outcome.kind === 'ready') collect(outcome.plan);
+        else if (outcome.kind === 'collision') {
+          collect(outcome.plan);
+          collect(outcome.collision.keepBothPlan);
+        }
+      }
+
+      if (newFolderPaths.size === 0 && newFilePaths.size === 0) break;
+
+      const [folderOwners, fileOwners] = await Promise.all([
+        this.moveRepo.findFolderPathOwners(target.libraryId, [...newFolderPaths]),
+        this.moveRepo.findFilePathOwners([...newFilePaths]),
+      ]);
+
+      for (const path of newFolderPaths) checkedFolderPaths.add(path);
+      for (const path of newFilePaths) checkedFilePaths.add(path);
+      for (const [path, bookId] of folderOwners) folderPathOwners.set(path, bookId);
+      for (const [path, bookId] of fileOwners) filePathOwners.set(path, bookId);
+
+      outcomes = this.planner.plan({ books, target, pattern, sanitizeForCrossPlatform, folderPathOwners, filePathOwners, hashOwners });
+    }
+
+    return { target, outcomes, totalSelected: bookIds.length, sourceLibraryIds };
+  }
+
+  private async assertEditorAccess(user: RequestUser, libraryIds: number[]): Promise<void> {
+    if (user.isSuperuser || libraryIds.length === 0) return;
+
+    const access = await this.moveRepo.findLibraryAccess(libraryIds);
+    const granted = new Set(access.filter((row) => row.userId === user.id && EDITOR_LEVELS.has(row.accessLevel)).map((row) => row.libraryId));
+
+    const missing = libraryIds.filter((id) => !granted.has(id));
+    if (missing.length > 0) {
+      throw new ForbiddenException(`Editor access is required for library ${missing[0]} to move books`);
+    }
+  }
+
+  private selectWork(
+    outcomes: BookMovePlanOutcome[],
+    jobPolicy: BookMoveJobCollisionPolicy,
+    overrides: Map<number, BookMoveCollisionPolicy>,
+  ): { plan: BookMovePlan; mergeDuplicateBookId: number | null; skipReason?: string }[] {
+    const work: { plan: BookMovePlan; mergeDuplicateBookId: number | null; skipReason?: string }[] = [];
+
+    for (const outcome of outcomes) {
+      if (outcome.kind === 'ready') {
+        work.push({ plan: outcome.plan, mergeDuplicateBookId: null });
+        continue;
+      }
+      if (outcome.kind !== 'collision') continue;
+
+      // "suggested" defers to what the planner worked out for this specific
+      // collision, so identical copies merge while name-only clashes keep both.
+      const jobChoice = jobPolicy === 'suggested' ? outcome.collision.suggestedPolicy : jobPolicy;
+      const policy = overrides.get(outcome.plan.bookId) ?? jobChoice;
+      const resolvedWork = this.applyCollisionPolicy(outcome.plan, outcome.collision, policy);
+      if (resolvedWork) work.push(resolvedWork);
+    }
+
+    return work;
+  }
+
+  private applyCollisionPolicy(
+    plan: BookMovePlan,
+    collision: PlanCollision,
+    policy: BookMoveCollisionPolicy,
+  ): { plan: BookMovePlan; mergeDuplicateBookId: number | null; skipReason?: string } | null {
+    if (policy === 'skip') return null;
+
+    if (policy === 'merge') {
+      // Merging replaces the book already in the target library. That is only
+      // meaningful when the two hold identical content; for a name-only clash it
+      // would delete an unrelated book, so refuse instead of guessing.
+      if (collision.kind !== 'hash_duplicate' || collision.existingBookId == null) {
+        return { plan, mergeDuplicateBookId: null, skipReason: 'merge only applies to identical copies' };
+      }
+      return { plan, mergeDuplicateBookId: collision.existingBookId };
+    }
+
+    if (collision.keepBothPlan === plan) {
+      return { plan, mergeDuplicateBookId: null, skipReason: 'no free destination name found' };
+    }
+    return { plan: collision.keepBothPlan, mergeDuplicateBookId: null };
+  }
+
+  private async buildPreview(resolved: ResolvedPlan): Promise<BookMovePreviewResult> {
+    const { target, outcomes } = resolved;
+
+    const ready: BookMovePreviewReadyItem[] = [];
+    const collisions: BookMovePreviewCollisionItem[] = [];
+    const ineligible: BookMovePreviewIneligibleItem[] = [];
+    let readyCount = 0;
+    let alreadyInTargetCount = 0;
+    const layoutCounts = new Map<BookMoveLayoutChange, number>();
+    const movingPlans: BookMovePlan[] = [];
+
+    for (const outcome of outcomes) {
+      switch (outcome.kind) {
+        case 'already_in_target':
+          alreadyInTargetCount++;
+          break;
+        case 'ineligible':
+          if (ineligible.length < BOOK_MOVE_DETAIL_LIMIT) {
+            ineligible.push({ bookId: outcome.bookId, title: outcome.title, reason: outcome.reason, detail: outcome.detail });
+          }
+          break;
+        case 'ready':
+          readyCount++;
+          movingPlans.push(outcome.plan);
+          if (outcome.plan.layoutChange) {
+            layoutCounts.set(outcome.plan.layoutChange, (layoutCounts.get(outcome.plan.layoutChange) ?? 0) + 1);
+          }
+          if (ready.length < BOOK_MOVE_PREVIEW_SAMPLE_LIMIT) {
+            ready.push({
+              bookId: outcome.plan.bookId,
+              title: outcome.plan.title,
+              currentPath: outcome.plan.currentPath,
+              targetPath: outcome.plan.targetPath,
+              layoutChange: outcome.plan.layoutChange,
+            });
+          }
+          break;
+        case 'collision':
+          movingPlans.push(outcome.plan);
+          if (outcome.plan.layoutChange) {
+            layoutCounts.set(outcome.plan.layoutChange, (layoutCounts.get(outcome.plan.layoutChange) ?? 0) + 1);
+          }
+          if (collisions.length < BOOK_MOVE_DETAIL_LIMIT) {
+            collisions.push({
+              bookId: outcome.plan.bookId,
+              title: outcome.plan.title,
+              kind: outcome.collision.kind,
+              currentPath: outcome.plan.currentPath,
+              targetPath: outcome.plan.targetPath,
+              existingBookId: outcome.collision.existingBookId,
+              suggestedPolicy: outcome.collision.suggestedPolicy,
+              keepBothPath: outcome.collision.keepBothPlan.targetPath,
+            });
+          }
+          break;
+      }
+    }
+
+    const collisionCount = outcomes.filter((outcome) => outcome.kind === 'collision').length;
+    const ineligibleCount = outcomes.filter((outcome) => outcome.kind === 'ineligible').length;
+
+    const warnings = await this.buildWarnings(resolved, movingPlans, layoutCounts);
+
+    return {
+      targetLibraryId: target.libraryId,
+      targetFolderId: target.folderId,
+      targetOrganizationMode: target.organizationMode as OrganizationMode,
+      totalSelected: resolved.totalSelected,
+      readyCount,
+      ready,
+      alreadyInTargetCount,
+      collisionCount,
+      collisions,
+      collisionsTruncated: collisionCount > collisions.length,
+      ineligibleCount,
+      ineligible,
+      ineligibleTruncated: ineligibleCount > ineligible.length,
+      warnings,
+      requiresReview:
+        collisionCount > 0 ||
+        ineligibleCount > 0 ||
+        warnings.accessLosers.length > 0 ||
+        warnings.koboImpact.length > 0 ||
+        warnings.formatMismatches.length > 0 ||
+        warnings.layout !== null,
     };
-    for (let i = 0; i < book.files.length; i++) {
-      addWithParents(book.files[i].absolutePath, book.libraryFolderPath);
-      addWithParents(fileUpdates[i].absolutePath, targetRoot);
+  }
+
+  private async buildWarnings(
+    resolved: ResolvedPlan,
+    movingPlans: BookMovePlan[],
+    layoutCounts: Map<BookMoveLayoutChange, number>,
+  ): Promise<BookMoveWarnings> {
+    const { target, sourceLibraryIds } = resolved;
+
+    const bookCountByLibrary = new Map<number, number>();
+    for (const plan of movingPlans) {
+      bookCountByLibrary.set(plan.sourceLibraryId, (bookCountByLibrary.get(plan.sourceLibraryId) ?? 0) + 1);
     }
-    if (this.isContainedIn(book.libraryFolderPath, book.folderPath)) paths.add(book.folderPath);
-    if (this.isContainedIn(targetRoot, newFolderPath)) paths.add(newFolderPath);
-    return [...paths];
-  }
 
-  private isContainedIn(root: string, target: string): boolean {
-    const rel = relative(root, target);
-    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
-  }
+    const accessRows = await this.moveRepo.findLibraryAccess([...new Set([...sourceLibraryIds, target.libraryId])]);
+    const targetUserIds = new Set(accessRows.filter((row) => row.libraryId === target.libraryId).map((row) => row.userId));
 
-  private isAtOrContainedIn(root: string, target: string): boolean {
-    return relative(root, target) === '' || this.isContainedIn(root, target);
-  }
-
-  private async pathExists(path: string): Promise<boolean> {
-    try {
-      await access(path);
-      return true;
-    } catch {
-      return false;
+    const losingBookCounts = new Map<number, number>();
+    for (const row of accessRows) {
+      if (row.libraryId === target.libraryId || targetUserIds.has(row.userId)) continue;
+      const affected = bookCountByLibrary.get(row.libraryId) ?? 0;
+      if (affected === 0) continue;
+      losingBookCounts.set(row.userId, (losingBookCounts.get(row.userId) ?? 0) + affected);
     }
+
+    const userRows = await this.moveRepo.findUsers([...losingBookCounts.keys()]);
+    const nonSuperusers = userRows.filter((row) => !row.isSuperuser);
+    const deviceCounts = await this.moveRepo.countKoboDevicesByUser(nonSuperusers.map((row) => row.id));
+
+    const accessLosers = nonSuperusers.map((row) => ({
+      userId: row.id,
+      username: row.username,
+      bookCount: losingBookCounts.get(row.id) ?? 0,
+    }));
+
+    const koboImpact = accessLosers
+      .filter((loser) => (deviceCounts.get(loser.userId) ?? 0) > 0)
+      .map((loser) => ({
+        userId: loser.userId,
+        username: loser.username,
+        deviceCount: deviceCounts.get(loser.userId) ?? 0,
+        bookCount: loser.bookCount,
+      }));
+
+    const allowedFormats = target.allowedFormats ?? [];
+    const formatMismatches =
+      allowedFormats.length === 0
+        ? []
+        : movingPlans
+            .filter((plan) => !allowedFormats.includes(plan.primaryFormat))
+            .slice(0, BOOK_MOVE_DETAIL_LIMIT)
+            .map((plan) => ({ bookId: plan.bookId, title: plan.title, format: plan.primaryFormat }));
+
+    const [layoutChange, layoutBookCount] = [...layoutCounts.entries()][0] ?? [null, 0];
+
+    return {
+      accessLosers,
+      koboImpact,
+      layout: layoutChange ? { change: layoutChange, bookCount: layoutBookCount } : null,
+      formatMismatches,
+      crossDevice: await this.detectCrossDevice(movingPlans, target),
+    };
   }
 
-  // Removes empty directories from startDir upward, but never the library
-  // folder root itself: for flat libraries books.folderPath IS the folder root,
-  // and deleting it would break the library until someone recreates it.
-  private async cleanupEmptyDirsUpTo(startDir: string, stopDir: string): Promise<void> {
-    let current = startDir;
-    while (this.isContainedIn(stopDir, current)) {
-      const removed = await this.tryRemoveEmptyDir(current);
-      if (!removed) return;
-      current = dirname(current);
-    }
-  }
+  private async detectCrossDevice(movingPlans: BookMovePlan[], target: MoveTargetLibrary): Promise<boolean> {
+    if (movingPlans.length === 0) return false;
 
-  private async tryRemoveEmptyDir(dirPath: string): Promise<boolean> {
-    try {
-      const entries = await readdir(dirPath);
-      if (entries.length === 0) {
-        await rmdir(dirPath);
-        return true;
-      }
-    } catch {
-      // Best effort.
+    const targetDevice = await stat(target.folderPath)
+      .then((info) => info.dev)
+      .catch(() => null);
+    if (targetDevice === null) return false;
+
+    const sourceRoots = [...new Set(movingPlans.map((plan) => plan.sourceLibraryFolderPath))];
+    for (const root of sourceRoots) {
+      const device = await stat(root)
+        .then((info) => info.dev)
+        .catch(() => null);
+      if (device !== null && device !== targetDevice) return true;
     }
+
     return false;
   }
+
+  private async notifyCompletion(userId: number, target: MoveTargetLibrary, movedCount: number, failed: number): Promise<void> {
+    await this.notificationService
+      .notify({
+        type: failed > 0 ? NotificationType.BulkRenameFailed : NotificationType.BulkRenameCompleted,
+        title: failed > 0 ? 'Book move completed with errors' : 'Book move completed',
+        message: `${movedCount} moved to ${target.libraryName}, ${failed} failed`,
+        scope: { kind: 'user', userId },
+        meta: { targetLibraryId: target.libraryId, moved: movedCount, failed },
+      })
+      .catch(() => {});
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

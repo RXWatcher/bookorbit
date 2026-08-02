@@ -69,8 +69,8 @@ const globalStubs = {
     DialogContent: { template: '<div><slot /></div>' },
     DialogClose: { template: '<button><slot /></button>' },
     AddToCollectionSheet: true,
+    MoveToLibrarySheet: true,
     DeleteBookDialog: true,
-    MoveBooksDialog: true,
     ResetReadingStateDialog: true,
   },
 }

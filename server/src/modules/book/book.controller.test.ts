@@ -166,20 +166,11 @@ function makeController() {
   const fileWriteService = {
     findWriteLog: vi.fn(),
   };
-  const bookMoveService = {
-    moveBooks: vi.fn(),
-    validateTarget: vi.fn().mockResolvedValue(undefined),
-  };
-  const auditEvents = {
-    emit: vi.fn(),
-  };
 
   return {
-    controller: new BookController(bookService as never, fileWriteService as never, bookMoveService as never, auditEvents as never),
+    controller: new BookController(bookService as never, fileWriteService as never),
     bookService,
     fileWriteService,
-    bookMoveService,
-    auditEvents,
   };
 }
 
@@ -197,71 +188,6 @@ describe('BookController', () => {
     bookService.getCoverPath.mockResolvedValue(null);
 
     await expect(controller.getCover(7, makeUser(), reply, undefined, undefined)).rejects.toThrow(NotFoundException);
-  });
-
-  it('validates the target before opening the stream and streams per-book move events plus a done summary', async () => {
-    const { controller, bookService, bookMoveService, auditEvents } = makeController();
-    const outcomes = [
-      { bookId: 1, status: 'moved' },
-      { bookId: 2, status: 'skipped', reason: 'target_path_exists' },
-    ];
-    bookMoveService.moveBooks.mockImplementation(
-      (_ids: number[], _lib: number, _folder: number | undefined, _user: unknown, onProgress?: (event: unknown) => void) => {
-        for (const outcome of outcomes) onProgress?.(outcome);
-        return Promise.resolve(outcomes);
-      },
-    );
-    const { reply, raw } = makeReply();
-    const user = makeUser();
-
-    await controller.moveBooks({ bookIds: [1, 2], targetLibraryId: 3, targetFolderId: 9 } as never, user, reply);
-
-    expect(bookService.resolveSelectionToIds).toHaveBeenCalledWith(expect.objectContaining({ bookIds: [1, 2] }), user);
-    expect(bookMoveService.validateTarget).toHaveBeenCalledWith(3, 9, user);
-    expect(raw.write).toHaveBeenNthCalledWith(1, `data: ${JSON.stringify(outcomes[0])}\n\n`);
-    expect(raw.write).toHaveBeenNthCalledWith(2, `data: ${JSON.stringify(outcomes[1])}\n\n`);
-    expect(raw.write).toHaveBeenNthCalledWith(
-      3,
-      `data: ${JSON.stringify({ done: true, total: 2, moved: 1, skipped: 1, failed: 0, cancelled: false })}\n\n`,
-    );
-    expect(raw.end).toHaveBeenCalled();
-    expect(auditEvents.emit).toHaveBeenCalledWith(
-      'audit.log',
-      expect.objectContaining({
-        action: 'book.bulk.move',
-        description: 'Moved 1 of 2 books to library 3 (1 skipped)',
-        meta: expect.objectContaining({ targetLibraryId: 3, targetFolderId: 9, moved: 1, skipped: 1, failed: 0, total: 2 }),
-      }),
-    );
-  });
-
-  it('does not open the move stream when target validation fails', async () => {
-    const { controller, bookMoveService } = makeController();
-    bookMoveService.validateTarget.mockRejectedValue(new BadRequestException('Folder 9 does not belong to library 3'));
-    const { reply, raw } = makeReply();
-
-    await expect(controller.moveBooks({ bookIds: [1], targetLibraryId: 3, targetFolderId: 9 } as never, makeUser(), reply)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-
-    expect(raw.writeHead).not.toHaveBeenCalled();
-    expect(bookMoveService.moveBooks).not.toHaveBeenCalled();
-  });
-
-  it('audits the partial outcome when the move stream is interrupted', async () => {
-    const { controller, bookMoveService, auditEvents } = makeController();
-    bookMoveService.moveBooks.mockResolvedValue([{ bookId: 1, status: 'moved' }]);
-    const { reply } = makeReply();
-
-    await controller.moveBooks({ bookIds: [1, 2], targetLibraryId: 3 } as never, makeUser(), reply);
-
-    expect(auditEvents.emit).toHaveBeenCalledWith(
-      'audit.log',
-      expect.objectContaining({
-        description: 'Moved 1 of 2 books to library 3',
-        meta: expect.objectContaining({ cancelled: true }),
-      }),
-    );
   });
 
   it('delegates embed-all endpoint to service', async () => {
