@@ -3332,8 +3332,12 @@
         "isFinished": "завершено",
         "isLocked": "заблокований",
         "isUnlocked": "розблоковано",
-        "isUpNext": "є наступним"
+        "isUpNext": "є наступним",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Будь-який постачальник",
       "communityRatingProvider": "Постачальник рейтингу спільноти",
       "loadingLibraries": "Завантаження бібліотеки...",

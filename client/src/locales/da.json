@@ -3332,8 +3332,12 @@
         "isFinished": "er færdig",
         "isLocked": "er låst",
         "isUnlocked": "er låst op",
-        "isUpNext": "er oppe næste"
+        "isUpNext": "er oppe næste",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Enhver udbyder",
       "communityRatingProvider": "Community rating provider",
       "loadingLibraries": "Indlæser biblioteker...",

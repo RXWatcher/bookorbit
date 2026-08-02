@@ -3332,8 +3332,12 @@
         "isFinished": "está finalizado",
         "isLocked": "está bloqueado",
         "isUnlocked": "está desbloqueado",
-        "isUpNext": "é a próxima"
+        "isUpNext": "é a próxima",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Qualquer provedor",
       "communityRatingProvider": "Provedor de avaliação da comunidade",
       "loadingLibraries": "Carregando bibliotecas...",

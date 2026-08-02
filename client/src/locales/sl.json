@@ -3332,8 +3332,12 @@
         "isFinished": "je zaključeno",
         "isLocked": "je zaklenjeno",
         "isUnlocked": "je odklenjeno",
-        "isUpNext": "je naslednje"
+        "isUpNext": "je naslednje",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Kateri koli ponudnik",
       "communityRatingProvider": "Ponudnik ocen skupnosti",
       "loadingLibraries": "Nalaganje knjižnic ...",

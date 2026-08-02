@@ -3332,8 +3332,12 @@
         "isFinished": "завершён",
         "isLocked": "заблокирован",
         "isUnlocked": "разблокирован",
-        "isUpNext": "дальше"
+        "isUpNext": "дальше",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Любой провайдер",
       "communityRatingProvider": "Поставщик рейтинга сообщества",
       "loadingLibraries": "Загрузка библиотек...",

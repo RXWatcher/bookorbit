@@ -3332,8 +3332,12 @@
         "isFinished": "is finished",
         "isLocked": "is locked",
         "isUnlocked": "is unlocked",
-        "isUpNext": "is up next"
+        "isUpNext": "is up next",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Any provider",
       "communityRatingProvider": "Community rating provider",
       "loadingLibraries": "Loading libraries...",

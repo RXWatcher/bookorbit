@@ -3332,8 +3332,12 @@
         "isFinished": "är klar",
         "isLocked": "är låst",
         "isUnlocked": "är upplåst",
-        "isUpNext": "är uppe nästa"
+        "isUpNext": "är uppe nästa",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "Valfri leverantör",
       "communityRatingProvider": "Gemenskapens betygsleverantör",
       "loadingLibraries": "Laddar bibliotek...",

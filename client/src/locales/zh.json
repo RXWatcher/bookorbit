@@ -3332,8 +3332,12 @@
         "isFinished": "已完成",
         "isLocked": "已锁定",
         "isUnlocked": "已解锁",
-        "isUpNext": "是下一个"
+        "isUpNext": "是下一个",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "任何提供商",
       "communityRatingProvider": "社区评分提供商",
       "loadingLibraries": "Loading libraries...",

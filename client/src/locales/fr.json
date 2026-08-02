@@ -3332,8 +3332,12 @@
         "isFinished": "est terminé",
         "isLocked": "est verrouillé",
         "isUnlocked": "n'est pas verrouillé",
-        "isUpNext": "est à la suite"
+        "isUpNext": "est à la suite",
+        "isTrue": "is yes",
+        "isFalse": "is no"
       },
+      "customFieldsGroup": "Custom fields",
+      "customFieldFallback": "Custom field",
       "anyProvider": "N'importe quel fournisseur",
       "communityRatingProvider": "Fournisseur de notation communautaire",
       "loadingLibraries": "Chargement des bibliothèques...",
