@@ -162,6 +162,42 @@ describe('SelectionActionBar demo restriction', () => {
     expect(wrapper.emitted('lock-metadata')?.map((args) => args[0])).toEqual([true, false])
   })
 
+  it('emits move from a direct action button for users with delete permission', async () => {
+    const wrapper = mountBar()
+
+    const moveButton = wrapper.find('button[data-testid="action-bulk-move"]')
+    expect(moveButton.exists()).toBe(true)
+    await moveButton.trigger('click')
+
+    expect(wrapper.emitted('move')).toHaveLength(1)
+  })
+
+  it('disables the move button while nothing is selected', () => {
+    const wrapper = mount(SelectionActionBar, {
+      props: { visible: true, count: 0, inCollection: false, inFlight: null },
+      global: globalStubs,
+    })
+
+    // Direct bar buttons are count-gated; the old dropdown entry was not.
+    expect(wrapper.find('button[data-testid="action-bulk-move"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('hides the move action without delete permission', () => {
+    permissionState.allowed = new Set(['library_edit_metadata'])
+    const wrapper = mountBar()
+
+    expect(wrapper.find('[data-testid="action-bulk-move"]').exists()).toBe(false)
+  })
+
+  it('keeps the move action for demo-restricted accounts with delete permission, mirroring delete', () => {
+    permissionState.allowed = new Set(['library_delete_books'])
+    permissionState.demoRestricted = true
+    const wrapper = mountBar()
+
+    expect(wrapper.find('[data-testid="action-delete"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="action-bulk-move"]').exists()).toBe(true)
+  })
+
   it('emits set-field from the field editor flow', async () => {
     const wrapper = mountBar()
     await wrapper.find('[data-testid="action-bulk-set-field"]').trigger('click')

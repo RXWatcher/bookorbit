@@ -21,6 +21,7 @@ import { useCollections } from '@/features/collection/composables/useCollections
 import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { useScanProgress, getSocket } from '@/features/scanner/composables/useScanProgress'
 import { useLibraryUploadEvents } from '@/features/library/composables/useLibraryUploadEvents'
+import { useBookEvents } from '@/features/book/composables/useBookEvents'
 import { useBookDockSummary } from '@/features/book-dock/composables/useBookDockSummary'
 import type { Library } from '@bookorbit/types'
 import CreateSmartScopeDialog from '@/features/smart-scope/components/CreateSmartScopeDialog.vue'
@@ -154,6 +155,11 @@ const stopLibraryUploadListener = onLibraryUploadCompleted((event) => {
   if (event.uploadedCount === 0) return
   void refreshLibraries()
   void refreshBrowseCounts()
+})
+
+// Book moves change per-library counts; refresh the sidebar badges like scans and uploads do.
+useBookEvents().onBookTransferred(() => {
+  void refreshLibraries()
 })
 
 onUnmounted(() => stopLibraryUploadListener())

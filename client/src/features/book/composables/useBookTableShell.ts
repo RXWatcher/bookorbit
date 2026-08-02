@@ -15,11 +15,14 @@ interface BookTableShellOptions {
   loading?: Ref<boolean>
   exitSelectionMode?: () => void
   querySelection?: Ref<QuerySelectionState | null>
+  // Called after a bulk move so the view can refresh counts/buckets itself,
+  // independent of the book:transferred websocket round-trip.
+  onBooksMoved?: () => void | Promise<void>
 }
 
 type BookActionType = 'quick-view' | 'add-to-collection' | 'delete'
 
-export function useBookTableShell({ books, querySelection }: BookTableShellOptions) {
+export function useBookTableShell({ books, querySelection, onBooksMoved }: BookTableShellOptions) {
   const router = useRouter()
   const { setBookContext } = useBookNavigation()
   const tableControls = useTableViewControls()
@@ -50,8 +53,30 @@ export function useBookTableShell({ books, querySelection }: BookTableShellOptio
   const addToCollectionOpen = ref(false)
   const bulkEditOpen = ref(false)
   const sendBookOpen = ref(false)
+  const moveBooksOpen = ref(false)
+  const movingBooks = ref(false)
   const quickViewBookId = ref<number | null>(null)
   const quickViewOpen = ref(false)
+
+  async function confirmMoveBooks(libraryId: number, folderId?: number): Promise<void> {
+    if (movingBooks.value) return
+    movingBooks.value = true
+    let completed = false
+    try {
+      completed = await bulk.handleBulkMove(libraryId, folderId)
+      if (completed && onBooksMoved) {
+        try {
+          await onBooksMoved()
+        } catch {
+          // The move itself succeeded; a failed view refresh must not surface as a move error.
+        }
+      }
+    } finally {
+      movingBooks.value = false
+      // Keep the dialog open on transport errors so the user can retry.
+      if (completed) moveBooksOpen.value = false
+    }
+  }
 
   function handleBookAction(book: BookCard, action: BookActionType): void {
     if (action === 'quick-view') {
@@ -101,6 +126,9 @@ export function useBookTableShell({ books, querySelection }: BookTableShellOptio
     addToCollectionOpen,
     bulkEditOpen,
     sendBookOpen,
+    moveBooksOpen,
+    movingBooks,
+    confirmMoveBooks,
     quickViewBookId,
     quickViewOpen,
     handleBookAction,

@@ -29,6 +29,7 @@ import { ForbidPermission } from '../../common/decorators/forbid-permission.deco
 import { imageContentTypeFromPath } from '../../common/image-content-type';
 import type { RequestUser } from '../../common/types/request-user';
 import { FileWriteService } from '../file-write/file-write.service';
+import { BookMoveService } from '../book-move/book-move.service';
 import { BookService } from './book.service';
 import { BookQueryPipe } from './pipes/book-query.pipe';
 import { BulkBookIdsDto } from './dto/bulk-book-ids.dto';
@@ -39,6 +40,7 @@ import { BulkUpdateTagsDto } from './dto/bulk-update-tags.dto';
 import { BulkSetMetadataLockDto } from './dto/bulk-set-metadata-lock.dto';
 import { BulkEditMetadataDto } from './dto/bulk-edit-metadata.dto';
 import { DeleteBooksDto } from './dto/delete-books.dto';
+import { MoveBooksDto } from './dto/move-books.dto';
 import { ExportBooksDto } from './dto/export-books.dto';
 import { MetadataExportDto } from './dto/metadata-export.dto';
 import { SaveProgressDto } from './dto/save-progress.dto';
@@ -50,7 +52,8 @@ import { SearchBooksDto } from './dto/search-books.dto';
 import { UpdateBookFileDto } from './dto/update-book-file.dto';
 import { SetStatusDto } from '../user-book-status/dto/set-status.dto';
 import { Permission, AuditAction, AuditResource } from '@bookorbit/types';
-import type { BookDeletionAuditMeta } from '@bookorbit/types';
+import { AUDIT_EVENT, AuditEventsService } from '../audit/audit-events.service';
+import type { BookDeletionAuditMeta, MoveBookOutcome, MoveBooksSummary } from '@bookorbit/types';
 import type { BookQuery } from '@bookorbit/types';
 import { UpdateBookMetadataLocksDto } from '../book-metadata-lock/dto/update-book-metadata-locks.dto';
 
@@ -95,6 +98,8 @@ export class BookController {
   constructor(
     private readonly bookService: BookService,
     private readonly fileWriteService: FileWriteService,
+    private readonly bookMoveService: BookMoveService,
+    private readonly auditEvents: AuditEventsService,
   ) {}
 
   @Post('embed-all')
@@ -133,6 +138,65 @@ export class BookController {
   async deleteBooks(@Body() dto: DeleteBooksDto, @CurrentUser() user: RequestUser) {
     const ids = await this.bookService.resolveSelectionToIds(dto, user);
     return this.bookService.deleteBooks(ids, user);
+  }
+
+  // Streams one SSE event per book plus a final done summary; large moves run
+  // long and need progress. Audit is emitted manually because the interceptor
+  // never sees a response body on @Res() streaming handlers.
+  @Post('move')
+  @RequirePermission(Permission.LibraryDeleteBooks)
+  async moveBooks(@Body() dto: MoveBooksDto, @CurrentUser() user: RequestUser, @Res() reply: FastifyReply) {
+    const ids = await this.bookService.resolveSelectionToIds(dto, user);
+    // Target validation errors must surface as JSON errors, not as a broken
+    // event stream, so validate before any headers are written.
+    await this.bookMoveService.validateTarget(dto.targetLibraryId, dto.targetFolderId, user);
+
+    const stream = this.createSseStream(reply);
+    let results: MoveBookOutcome[] = [];
+    try {
+      results = await this.bookMoveService.moveBooks(
+        ids,
+        dto.targetLibraryId,
+        dto.targetFolderId,
+        user,
+        (event) => {
+          stream.send(event);
+        },
+        { isCancelled: stream.isClosed },
+      );
+      if (!stream.isClosed()) {
+        stream.send({ done: true, ...this.buildMoveSummary(ids.length, results) });
+      }
+    } finally {
+      stream.close();
+      this.emitMoveAudit(dto, user, reply, ids.length, results);
+    }
+  }
+
+  private buildMoveSummary(total: number, results: MoveBookOutcome[]): MoveBooksSummary {
+    return {
+      total,
+      moved: results.filter((entry) => entry.status === 'moved').length,
+      skipped: results.filter((entry) => entry.status === 'skipped').length,
+      failed: results.filter((entry) => entry.status === 'failed').length,
+      cancelled: results.length < total,
+    };
+  }
+
+  private emitMoveAudit(dto: MoveBooksDto, user: RequestUser, reply: FastifyReply, total: number, results: MoveBookOutcome[]): void {
+    const summary = this.buildMoveSummary(total, results);
+    const parts = [summary.skipped > 0 ? `${summary.skipped} skipped` : null, summary.failed > 0 ? `${summary.failed} failed` : null]
+      .filter(Boolean)
+      .join(', ');
+    this.auditEvents.emit(AUDIT_EVENT, {
+      userId: user.id,
+      actorUsername: user.username,
+      action: AuditAction.BookBulkMove,
+      resource: AuditResource.Book,
+      description: `Moved ${summary.moved} of ${summary.total} book${summary.total !== 1 ? 's' : ''} to library ${dto.targetLibraryId}${parts ? ` (${parts})` : ''}`,
+      ip: reply.request?.ip,
+      meta: { targetLibraryId: dto.targetLibraryId, targetFolderId: dto.targetFolderId, ...summary, results },
+    });
   }
 
   // Must be before @Get(':id') so NestJS does not treat 'search' as an :id param

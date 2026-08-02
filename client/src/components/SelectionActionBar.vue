@@ -5,6 +5,7 @@ import {
   BookOpen,
   Download,
   FileSpreadsheet,
+  FolderInput,
   FolderMinus,
   FolderPlus,
   ImageDown,
@@ -84,6 +85,7 @@ const emit = defineEmits<{
   'set-rating': [rating: number | null]
   'set-field': [field: BulkEditableField, value: BulkEditableValue]
   'lock-metadata': [locked: boolean]
+  move: []
   delete: []
   exit: []
 }>()
@@ -105,6 +107,8 @@ const hasCustomContent = computed(() => Boolean(slots.content))
 const canBulkActions = computed(() => !isDemoRestrictedAccount.value)
 const canDownload = computed(() => hasPermission('library_download') && canBulkActions.value)
 const canEditMetadata = computed(() => hasPermission('library_edit_metadata') && canBulkActions.value)
+// Gated like delete below: only on the permission, not on the demo restriction.
+const canMove = computed(() => hasPermission('library_delete_books'))
 const canShowMoreMenu = computed(() => canDownload.value || canEditMetadata.value)
 const canShare = computed(() => hasPermission('email_send') || canDownload.value)
 const numericFieldSelected = computed(() => bulkField.value === 'publishedYear')
@@ -449,7 +453,21 @@ watch(
               <TooltipContent side="top">{{ t('components.selectionActionBar.moreActions') }}</TooltipContent>
             </Tooltip>
 
-            <div v-if="hasPermission('library_delete_books')" :class="DIVIDER" />
+            <div v-if="canMove || hasPermission('library_delete_books')" :class="DIVIDER" />
+
+            <Tooltip v-if="canMove">
+              <TooltipTrigger as-child>
+                <button
+                  data-testid="action-bulk-move"
+                  :disabled="count === 0"
+                  :class="[BTN_ICON, count > 0 ? BTN_PRIMARY : BTN_DISABLED]"
+                  @click="emit('move')"
+                >
+                  <FolderInput :size="ICON_SIZE" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{{ t('components.selectionActionBar.moveToLibrary') }}</TooltipContent>
+            </Tooltip>
 
             <Tooltip v-if="hasPermission('library_delete_books')">
               <TooltipTrigger as-child>
