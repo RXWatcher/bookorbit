@@ -4095,7 +4095,11 @@
         "seriesPlaceholder": "Серія",
         "moveUp": "Посунути вгору",
         "moveDown": "Посунути вниз",
-        "removeSeries": "Видалити послідовність"
+        "removeSeries": "Видалити послідовність",
+        "seriesIndexLabel": "Position in series",
+        "totalLabel": "Books in series",
+        "totalPlaceholder": "of",
+        "totalHint": "Total books in this series. Shared with everyone who has this series."
       }
     },
     "table": {
@@ -6193,6 +6197,10 @@
   "series": {
     "completion": {
       "readOfTotal": "{read} від {total} прочитано ({percentage}%)"
+    },
+    "ownership": {
+      "label": "In library",
+      "ownedOfExpected": "{owned} of {expected} in library"
     },
     "gaps": {
       "label": "Можливі прогалини:"

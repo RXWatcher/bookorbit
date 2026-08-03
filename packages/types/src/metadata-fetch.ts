@@ -77,6 +77,8 @@ export interface MetadataCandidate {
   isbn13?: string;
   seriesName?: string;
   seriesIndex?: number;
+  /** Books the provider believes the series contains in total, not a field of this book. */
+  seriesTotalBooks?: number;
   seriesMemberships?: MetadataSeriesMembership[];
   genres?: string[];
   coverUrl?: string;

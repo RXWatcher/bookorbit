@@ -4095,7 +4095,11 @@
         "seriesPlaceholder": "Serie",
         "moveUp": "Vai su",
         "moveDown": "Spostati giù",
-        "removeSeries": "Rimuovi serie"
+        "removeSeries": "Rimuovi serie",
+        "seriesIndexLabel": "Position in series",
+        "totalLabel": "Books in series",
+        "totalPlaceholder": "of",
+        "totalHint": "Total books in this series. Shared with everyone who has this series."
       }
     },
     "table": {
@@ -6193,6 +6197,10 @@
   "series": {
     "completion": {
       "readOfTotal": "{read} di {total} letto ({percentage}%)"
+    },
+    "ownership": {
+      "label": "In library",
+      "ownedOfExpected": "{owned} of {expected} in library"
     },
     "gaps": {
       "label": "Possibili lacune:"

@@ -4095,7 +4095,11 @@
         "seriesPlaceholder": "系列",
         "moveUp": "上移",
         "moveDown": "向下移动",
-        "removeSeries": "删除系列"
+        "removeSeries": "删除系列",
+        "seriesIndexLabel": "Position in series",
+        "totalLabel": "Books in series",
+        "totalPlaceholder": "of",
+        "totalHint": "Total books in this series. Shared with everyone who has this series."
       }
     },
     "table": {
@@ -6193,6 +6197,10 @@
   "series": {
     "completion": {
       "readOfTotal": "{read} of {total} read ({percentage}%)"
+    },
+    "ownership": {
+      "label": "In library",
+      "ownedOfExpected": "{owned} of {expected} in library"
     },
     "gaps": {
       "label": "可能存在的差距："
