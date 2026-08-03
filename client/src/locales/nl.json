@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Instellingen",
       "ariaLabel": "Lezerinstellingen",
-      "tabs": {
-        "appearance": "Weergave",
-        "text": "Tekst",
-        "layout": "Indeling"
-      },
-      "appearance": {
-        "mode": "Modus",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Licht",
-        "dark": "Donker",
-        "colorTheme": "Kleurthema"
+        "dark": "Donker"
       },
-      "text": {
-        "fontSize": "Lettergrootte",
-        "fontSizeRange": "Bereik: 10-32px",
-        "lineHeight": "Regelhoogte",
-        "lineHeightRange": "Bereik: 0,8-3,0",
-        "fontFamily": "Lettertype",
-        "fontFamilyDescription": "Kies ingebouwde of geüploade lettertypen voor de tekst.",
-        "builtIn": "Ingebouwd",
-        "yourFonts": "Jouw lettertypen",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Ingebouwd",
+      "fontServer": "Server fonts",
+      "fontYours": "Jouw lettertypen",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Leesstroom",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Paginaspreads",
-        "pageSpreadsDescription": "Kies hoe deze op afbeeldingen gebaseerde EPUB pagina's koppelt.",
+      "pageSpreads": "Paginaspreads",
+      "pageSpreadsHint": "Kies hoe deze op afbeeldingen gebaseerde EPUB pagina's koppelt.",
+      "spread": {
         "bookDefault": "Standaard van boek",
-        "singlePage": "Enkele pagina",
-        "readingFlow": "Leesstroom",
-        "readingFlowDescription": "Wissel tussen gepagineerd en doorlopend scrollen.",
-        "paginated": "Gepagineerd",
-        "scrolled": "Scrollend",
-        "textColumns": "Tekstkolommen",
-        "textColumnsRange": "Bereik: 1-10",
-        "columnGap": "Kolomtussenruimte",
-        "columnGapRange": "Bereik: 0-50%",
-        "maxWidth": "Maximale breedte",
-        "maxWidthRange": "Bereik: 400-1600",
-        "justifyText": "Tekst uitvullen",
-        "justifyTextDescription": "Uitlijning over de volledige breedte inschakelen.",
-        "hyphenation": "Woordafbreking",
-        "hyphenationDescription": "Automatische woordafbreking inschakelen."
+        "singlePage": "Enkele pagina"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Kolomtussenruimte",
+      "justifyText": "Tekst uitvullen",
+      "hyphenation": "Woordafbreking",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Configurações",
       "ariaLabel": "Configurações do Leitor",
-      "tabs": {
-        "appearance": "Aparência",
-        "text": "Texto",
-        "layout": "Layout"
-      },
-      "appearance": {
-        "mode": "Modo",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Claro",
-        "dark": "Escuro",
-        "colorTheme": "Tema de cor"
+        "dark": "Escuro"
       },
-      "text": {
-        "fontSize": "Tamanho da fonte",
-        "fontSizeRange": "Intervalo: 10-32px",
-        "lineHeight": "Altura da linha",
-        "lineHeightRange": "Intervalo: 0.8-3.0",
-        "fontFamily": "Família de fontes",
-        "fontFamilyDescription": "Escolha as fontes internas ou importadas para o corpo do texto.",
-        "builtIn": "Internas",
-        "yourFonts": "Suas fontes",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Internas",
+      "fontServer": "Server fonts",
+      "fontYours": "Suas fontes",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Fluxo de leitura",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Disposição das páginas",
-        "pageSpreadsDescription": "Escolha como esse EPUB baseado em imagem emparelha as páginas.",
+      "pageSpreads": "Disposição das páginas",
+      "pageSpreadsHint": "Escolha como esse EPUB baseado em imagem emparelha as páginas.",
+      "spread": {
         "bookDefault": "Padrão do livro",
-        "singlePage": "Página única",
-        "readingFlow": "Fluxo de leitura",
-        "readingFlowDescription": "Alterne entre rolagem contínua e páginas separadas.",
-        "paginated": "Paginado",
-        "scrolled": "Rolar",
-        "textColumns": "Colunas de texto",
-        "textColumnsRange": "Intervalo: 1-10",
-        "columnGap": "Espaçamento das colunas",
-        "columnGapRange": "Intervalo: 0-50%",
-        "maxWidth": "Largura máxima",
-        "maxWidthRange": "Intervalo: 400-1600",
-        "justifyText": "Justificar texto",
-        "justifyTextDescription": "Habilitar alinhamento de parágrafos para a largura completa.",
-        "hyphenation": "Hifenização",
-        "hyphenationDescription": "Habilitar hifenização automática na quebra de linha."
+        "singlePage": "Página única"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Espaçamento das colunas",
+      "justifyText": "Justificar texto",
+      "hyphenation": "Hifenização",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "设置",
       "ariaLabel": "阅读器设置",
-      "tabs": {
-        "appearance": "外观",
-        "text": "文本",
-        "layout": "布局"
-      },
-      "appearance": {
-        "mode": "模式",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "亮色的",
-        "dark": "深色",
-        "colorTheme": "颜色主题"
+        "dark": "深色"
       },
-      "text": {
-        "fontSize": "Font size",
-        "fontSizeRange": "范围: 10-32px",
-        "lineHeight": "行高度",
-        "lineHeightRange": "Range: 0.8-3.0",
-        "fontFamily": "字体类",
-        "fontFamilyDescription": "选择内置字体或上传字体。",
-        "builtIn": "内置",
-        "yourFonts": "您的字体",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "内置",
+      "fontServer": "Server fonts",
+      "fontYours": "您的字体",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "读取流程",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "页面扩展",
-        "pageSpreadsDescription": "选择这个基于图像的 EPUB 对应页面的方式。",
+      "pageSpreads": "页面扩展",
+      "pageSpreadsHint": "选择这个基于图像的 EPUB 对应页面的方式。",
+      "spread": {
         "bookDefault": "预约默认",
-        "singlePage": "单页",
-        "readingFlow": "读取流程",
-        "readingFlowDescription": "在分页和连续滚动之间切换。",
-        "paginated": "分页",
-        "scrolled": "已滚动",
-        "textColumns": "文本列",
-        "textColumnsRange": "Range: 1-10",
-        "columnGap": "列间距",
-        "columnGapRange": "Range: 0-50%",
-        "maxWidth": "Max width",
-        "maxWidthRange": "Range: 400-1600",
-        "justifyText": "对齐文本",
-        "justifyTextDescription": "启用全宽段对齐。",
-        "hyphenation": "低温化",
-        "hyphenationDescription": "启用自动断字连字。"
+        "singlePage": "单页"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "列间距",
+      "justifyText": "对齐文本",
+      "hyphenation": "低温化",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

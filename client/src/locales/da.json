@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Indstillinger",
       "ariaLabel": "Læser indstillinger",
-      "tabs": {
-        "appearance": "Udseende",
-        "text": "Tekst",
-        "layout": "Layout"
-      },
-      "appearance": {
-        "mode": "Tilstand",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Lys",
-        "dark": "Mørk",
-        "colorTheme": "Farve tema"
+        "dark": "Mørk"
       },
-      "text": {
-        "fontSize": "Font size",
-        "fontSizeRange": "Interval: 10-32px",
-        "lineHeight": "Linje højde",
-        "lineHeightRange": "Range: 0.8-3.0",
-        "fontFamily": "Skrifttype familie",
-        "fontFamilyDescription": "Vælg indbyggede eller uploadede skrifttyper til brødtekst.",
-        "builtIn": "Indbygget",
-        "yourFonts": "Dine skrifttyper",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Indbygget",
+      "fontServer": "Server fonts",
+      "fontYours": "Dine skrifttyper",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Læser flow",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Sidespreads",
-        "pageSpreadsDescription": "Vælg hvordan dette billede-baserede EPUB par sider.",
+      "pageSpreads": "Sidespreads",
+      "pageSpreadsHint": "Vælg hvordan dette billede-baserede EPUB par sider.",
+      "spread": {
         "bookDefault": "Bogs standard",
-        "singlePage": "Enkelt side",
-        "readingFlow": "Læser flow",
-        "readingFlowDescription": "Skift mellem sidekædet og kontinuerlig rulning.",
-        "paginated": "Pagineret",
-        "scrolled": "Rullet",
-        "textColumns": "Tekst kolonner",
-        "textColumnsRange": "Range: 1-10",
-        "columnGap": "Kolonne mellemrum",
-        "columnGapRange": "Range: 0-50%",
-        "maxWidth": "Max width",
-        "maxWidthRange": "Range: 400-1600",
-        "justifyText": "Justér tekst",
-        "justifyTextDescription": "Aktivér justering af afsnit i fuld bredde.",
-        "hyphenation": "Hyphenation",
-        "hyphenationDescription": "Aktiver automatisk ordskift bindeling."
+        "singlePage": "Enkelt side"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Kolonne mellemrum",
+      "justifyText": "Justér tekst",
+      "hyphenation": "Hyphenation",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

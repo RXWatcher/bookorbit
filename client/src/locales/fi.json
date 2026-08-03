@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Asetukset",
       "ariaLabel": "Lukijan asetukset",
-      "tabs": {
-        "appearance": "Ulkoasu",
-        "text": "Teksti",
-        "layout": "Asettelu"
-      },
-      "appearance": {
-        "mode": "Tila",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Vaalea",
-        "dark": "Tumma",
-        "colorTheme": "Teeman väri"
+        "dark": "Tumma"
       },
-      "text": {
-        "fontSize": "Font size",
-        "fontSizeRange": "Alue: 10-32px",
-        "lineHeight": "Viivan korkeus",
-        "lineHeightRange": "Range: 0.8-3.0",
-        "fontFamily": "Kirjasinperhe",
-        "fontFamilyDescription": "Valitse sisäänrakennetut tai ladatut kirjasimet vartalotekstille.",
-        "builtIn": "Sisäänrakennettu",
-        "yourFonts": "Kirjasimesi",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Sisäänrakennettu",
+      "fontServer": "Server fonts",
+      "fontYours": "Kirjasimesi",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Lukemisen virta",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Sivun levitykset",
-        "pageSpreadsDescription": "Valitse, miten tämä kuvapohjainen EPUB paria sivut.",
+      "pageSpreads": "Sivun levitykset",
+      "pageSpreadsHint": "Valitse, miten tämä kuvapohjainen EPUB paria sivut.",
+      "spread": {
         "bookDefault": "Varaa oletus",
-        "singlePage": "Yksi sivu",
-        "readingFlow": "Lukemisen virta",
-        "readingFlowDescription": "Vaihda sivutun ja jatkuvan vierityksen välillä.",
-        "paginated": "Sivutettu",
-        "scrolled": "Vieritetty",
-        "textColumns": "Tekstin sarakkeet",
-        "textColumnsRange": "Range: 1-10",
-        "columnGap": "Sarakkeen väli",
-        "columnGapRange": "Range: 0-50%",
-        "maxWidth": "Max width",
-        "maxWidthRange": "Range: 400-1600",
-        "justifyText": "Tasaa teksti",
-        "justifyTextDescription": "Ota koko leveyden kohdistus käyttöön.",
-        "hyphenation": "Hyfenaatio",
-        "hyphenationDescription": "Ota käyttöön automaattinen sananmurron vältys."
+        "singlePage": "Yksi sivu"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Sarakkeen väli",
+      "justifyText": "Tasaa teksti",
+      "hyphenation": "Hyfenaatio",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

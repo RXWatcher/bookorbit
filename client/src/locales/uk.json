@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Налаштування",
       "ariaLabel": "Параметри читання",
-      "tabs": {
-        "appearance": "Зовнішній вигляд",
-        "text": "Текст",
-        "layout": "Макет"
-      },
-      "appearance": {
-        "mode": "Режим",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Світла",
-        "dark": "Темна",
-        "colorTheme": "Кольорова тема"
+        "dark": "Темна"
       },
-      "text": {
-        "fontSize": "Font size",
-        "fontSizeRange": "Діапазон: 10-32px",
-        "lineHeight": "Висота рядка",
-        "lineHeightRange": "Range: 0.8-3.0",
-        "fontFamily": "Сімейство шрифтів",
-        "fontFamilyDescription": "Виберіть вбудовані або завантажені шрифти для тексту тексту.",
-        "builtIn": "Вбудована тема",
-        "yourFonts": "Ваші шрифти",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Вбудована тема",
+      "fontServer": "Server fonts",
+      "fontYours": "Ваші шрифти",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Потік читання",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Розгортання сторінки",
-        "pageSpreadsDescription": "Виберіть, як відображаються сторінки пар на основі зображень.",
+      "pageSpreads": "Розгортання сторінки",
+      "pageSpreadsHint": "Виберіть, як відображаються сторінки пар на основі зображень.",
+      "spread": {
         "bookDefault": "Книга за замовчуванням",
-        "singlePage": "Одна сторінка",
-        "readingFlow": "Потік читання",
-        "readingFlowDescription": "Перемикання між вивантаженими та безперервною прокручуванням.",
-        "paginated": "Розбивка на сторінки",
-        "scrolled": "Прокрутити",
-        "textColumns": "Текстові стовпці",
-        "textColumnsRange": "Range: 1-10",
-        "columnGap": "Розрив стовпчика",
-        "columnGapRange": "Range: 0-50%",
-        "maxWidth": "Max width",
-        "maxWidthRange": "Range: 400-1600",
-        "justifyText": "По ширині тексту",
-        "justifyTextDescription": "Увімкнути вирівнювання по повній ширині абзац.",
-        "hyphenation": "Дефікація",
-        "hyphenationDescription": "Enable automatic word-break hyphenation."
+        "singlePage": "Одна сторінка"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Розрив стовпчика",
+      "justifyText": "По ширині тексту",
+      "hyphenation": "Дефікація",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

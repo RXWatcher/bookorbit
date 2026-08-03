@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Nastavitve",
       "ariaLabel": "Nastavitve bralnika",
-      "tabs": {
-        "appearance": "Videz",
-        "text": "Besedilo",
-        "layout": "Postavitev"
-      },
-      "appearance": {
-        "mode": "Način",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Svetlo",
-        "dark": "Temno",
-        "colorTheme": "Barvna tema"
+        "dark": "Temno"
       },
-      "text": {
-        "fontSize": "Velikost pisave",
-        "fontSizeRange": "Obseg: 10-32px",
-        "lineHeight": "Višina vrstice",
-        "lineHeightRange": "Obseg: 0.8-3.0",
-        "fontFamily": "Družina pisav",
-        "fontFamilyDescription": "Izberite vgrajene ali naložene pisave za besedilo.",
-        "builtIn": "Vgrajeno",
-        "yourFonts": "Vaše pisave",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Vgrajeno",
+      "fontServer": "Server fonts",
+      "fontYours": "Vaše pisave",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Potek branja",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Razpon strani",
-        "pageSpreadsDescription": "Izberite, kako ta na slikah temelječ EPUB združuje strani.",
+      "pageSpreads": "Razpon strani",
+      "pageSpreadsHint": "Izberite, kako ta na slikah temelječ EPUB združuje strani.",
+      "spread": {
         "bookDefault": "Privzeto za knjigo",
-        "singlePage": "Ena stran",
-        "readingFlow": "Potek branja",
-        "readingFlowDescription": "Preklapljajte med branjem po straneh in neprekinjenim drsenjem.",
-        "paginated": "Po straneh",
-        "scrolled": "Drsenje",
-        "textColumns": "Stolpci besedila",
-        "textColumnsRange": "Obseg: 1-10",
-        "columnGap": "Razmik med stolpci",
-        "columnGapRange": "Obseg: 0-50%",
-        "maxWidth": "Največja širina",
-        "maxWidthRange": "Obseg: 400-1600",
-        "justifyText": "Poravnaj besedilo",
-        "justifyTextDescription": "Omogoči poravnavo odstavkov na polno širino.",
-        "hyphenation": "Deljenje besed",
-        "hyphenationDescription": "Omogoči samodejno deljenje besed."
+        "singlePage": "Ena stran"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Razmik med stolpci",
+      "justifyText": "Poravnaj besedilo",
+      "hyphenation": "Deljenje besed",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

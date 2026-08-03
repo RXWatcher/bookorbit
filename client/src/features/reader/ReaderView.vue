@@ -379,6 +379,18 @@ async function applyUpdate(partial: Partial<ReaderState>) {
   }
 }
 
+// Drops this book's overrides and falls back to the reader defaults. The renderer keeps
+// injecting styles so the change is visible immediately rather than only after a reopen.
+async function resetSettings() {
+  const previousSpread = state.value.fixedLayoutSpread
+  bookSettings.resetBookSettings()
+  shouldApplyStyles.value = true
+  seedState(bookSettings.effective.value as EpubReaderSettings)
+  if (state.value.fixedLayoutSpread !== previousSpread) {
+    await reopenEpubAtCurrentLocation()
+  }
+}
+
 watch(
   () => footerMode.value,
   (mode) => {
@@ -589,7 +601,14 @@ watch(
       @startReading="startTrackedReading"
     >
       <template #settingsPanel>
-        <ReaderSettingsPanel :state="state" :customFonts="customFonts" :is-fixed-layout="isFixedLayout" @update="applyUpdate" />
+        <ReaderSettingsPanel
+          :state="state"
+          :customFonts="customFonts"
+          :is-fixed-layout="isFixedLayout"
+          :can-reset="bookSettings.isCustomized.value"
+          @update="applyUpdate"
+          @reset="resetSettings"
+        />
       </template>
     </ReaderHeader>
 

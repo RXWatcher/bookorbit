@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Inställningar",
       "ariaLabel": "Inställningar för läsare",
-      "tabs": {
-        "appearance": "Utseende",
-        "text": "Text",
-        "layout": "Layout"
-      },
-      "appearance": {
-        "mode": "Läge",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Ljus",
-        "dark": "Mörk",
-        "colorTheme": "Färg tema"
+        "dark": "Mörk"
       },
-      "text": {
-        "fontSize": "Font size",
-        "fontSizeRange": "Räckvidd: 10-32px",
-        "lineHeight": "Linje höjd",
-        "lineHeightRange": "Range: 0.8-3.0",
-        "fontFamily": "Typsnitt familj",
-        "fontFamilyDescription": "Välj inbyggda eller uppladdade teckensnitt för kroppstext.",
-        "builtIn": "Inbyggd",
-        "yourFonts": "Dina typsnitt",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Inbyggd",
+      "fontServer": "Server fonts",
+      "fontYours": "Dina typsnitt",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Läser flöde",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Sid spreads",
-        "pageSpreadsDescription": "Välj hur denna bildbaserade EPUB parar sidor.",
+      "pageSpreads": "Sid spreads",
+      "pageSpreadsHint": "Välj hur denna bildbaserade EPUB parar sidor.",
+      "spread": {
         "bookDefault": "Bokens standard",
-        "singlePage": "Enda sidan",
-        "readingFlow": "Läser flöde",
-        "readingFlowDescription": "Växla mellan sidrullning och kontinuerlig rullning.",
-        "paginated": "Sidnumrerad",
-        "scrolled": "Rullad",
-        "textColumns": "Text kolumner",
-        "textColumnsRange": "Range: 1-10",
-        "columnGap": "Kolumn mellanrum",
-        "columnGapRange": "Range: 0-50%",
-        "maxWidth": "Max width",
-        "maxWidthRange": "Range: 400-1600",
-        "justifyText": "Justera text",
-        "justifyTextDescription": "Aktivera justering av punkt i full bredd.",
-        "hyphenation": "Hyfenering",
-        "hyphenationDescription": "Aktivera automatisk word-break bindestreck."
+        "singlePage": "Enda sidan"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Kolumn mellanrum",
+      "justifyText": "Justera text",
+      "hyphenation": "Hyfenering",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {

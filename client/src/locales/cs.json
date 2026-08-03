@@ -5952,47 +5952,66 @@
     "settings": {
       "title": "Nastavení",
       "ariaLabel": "Nastavení čtečky",
-      "tabs": {
-        "appearance": "Vzhled",
-        "text": "Text",
-        "layout": "Rozložení"
-      },
-      "appearance": {
-        "mode": "Režim",
+      "reset": "Reset to defaults",
+      "modeLabel": "Color mode",
+      "mode": {
         "light": "Světlý",
-        "dark": "Tmavý",
-        "colorTheme": "Barevný motiv"
+        "dark": "Tmavý"
       },
-      "text": {
-        "fontSize": "Font size",
-        "fontSizeRange": "Rozsah: 10-32px",
-        "lineHeight": "Výška čáry",
-        "lineHeightRange": "Range: 0.8-3.0",
-        "fontFamily": "Rodina písma",
-        "fontFamilyDescription": "Vyberte vestavěná nebo nahraná písma pro text těla.",
-        "builtIn": "Vestavěné",
-        "yourFonts": "Vaše písma",
-        "serverFonts": "Server fonts"
+      "textSize": "Text size",
+      "textSizeSmaller": "Smaller text",
+      "textSizeLarger": "Larger text",
+      "pixels": "{value} px",
+      "percent": "{value}%",
+      "pageColor": "Page color",
+      "font": "Font",
+      "fontBuiltIn": "Vestavěné",
+      "fontServer": "Server fonts",
+      "fontYours": "Vaše písma",
+      "lineSpacing": "Line spacing",
+      "pageWidth": "Page width",
+      "pageWidthNarrow": "Narrow",
+      "pageWidthMedium": "Medium",
+      "pageWidthWide": "Wide",
+      "pageWidthFull": "Full",
+      "readingFlow": "Měření průtoku",
+      "flow": {
+        "paginated": "Pages",
+        "scrolled": "Scroll"
       },
-      "layout": {
-        "pageSpreads": "Rozložení stránky",
-        "pageSpreadsDescription": "Vyberte si, jak tyto EPUB stránky založené na obrázcích.",
+      "pageSpreads": "Rozložení stránky",
+      "pageSpreadsHint": "Vyberte si, jak tyto EPUB stránky založené na obrázcích.",
+      "spread": {
         "bookDefault": "Výchozí rezervace",
-        "singlePage": "Jedna stránka",
-        "readingFlow": "Měření průtoku",
-        "readingFlowDescription": "Přepínání mezi stránkováním a spojitým rolováním.",
-        "paginated": "Stránkováno",
-        "scrolled": "Posunout",
-        "textColumns": "Sloupce textu",
-        "textColumnsRange": "Range: 1-10",
-        "columnGap": "Mezera sloupce",
-        "columnGapRange": "Range: 0-50%",
-        "maxWidth": "Max width",
-        "maxWidthRange": "Range: 400-1600",
-        "justifyText": "Zarovnat text",
-        "justifyTextDescription": "Povolit zarovnání odstavce na celou šířku.",
-        "hyphenation": "Hyfenace",
-        "hyphenationDescription": "Povolit automatickou pomlčku slova."
+        "singlePage": "Jedna stránka"
+      },
+      "advanced": "Advanced layout",
+      "columns": "Columns",
+      "columnsFewer": "Fewer columns",
+      "columnsMore": "More columns",
+      "columnGap": "Mezera sloupce",
+      "justifyText": "Zarovnat text",
+      "hyphenation": "Hyfenace",
+      "themes": {
+        "default": "Default",
+        "gray": "Gray",
+        "sepia": "Sepia",
+        "crimson": "Crimson",
+        "meadow": "Meadow",
+        "rosewood": "Rosewood",
+        "azure": "Azure",
+        "dawnlight": "Dawnlight",
+        "ember": "Ember",
+        "aurora": "Aurora",
+        "ocean": "Ocean",
+        "mist": "Mist",
+        "amoled": "AMOLED"
+      },
+      "fonts": {
+        "bookDefault": "Book default",
+        "serif": "Serif",
+        "sansSerif": "Sans-serif",
+        "monospace": "Monospace"
       }
     },
     "search": {
