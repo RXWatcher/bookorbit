@@ -259,6 +259,7 @@ jobs:
               - 'pnpm-workspace.yaml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/crowdin-translations.yml'
 
       - name: Print change scope
         shell: bash

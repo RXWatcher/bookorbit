@@ -1,21 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { validateLocaleMessage, validateSlotCountMessage } from './locale-message-validation.mjs'
+import { flattenCatalog, validateCatalogs } from './locale-catalog-validation.mjs'
 
 const clientRoot = fileURLToPath(new URL('..', import.meta.url))
 const localesDirectory = path.join(clientRoot, 'src/locales')
 const localeTypesPath = path.join(clientRoot, '../packages/types/src/locale.ts')
-
-function flatten(value, prefix = '', output = new Map()) {
-  for (const [key, child] of Object.entries(value)) {
-    const messageKey = prefix ? `${prefix}.${key}` : key
-    if (typeof child === 'string') output.set(messageKey, child)
-    else if (child && typeof child === 'object' && !Array.isArray(child)) flatten(child, messageKey, output)
-    else throw new Error(`${messageKey} must be a string or message object`)
-  }
-  return output
-}
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true })
@@ -71,38 +61,17 @@ if (JSON.stringify(localeFiles) !== JSON.stringify(expectedFiles)) {
 const catalogs = new Map()
 for (const locale of supportedLocales) {
   const raw = await readFile(path.join(localesDirectory, `${locale}.json`), 'utf8')
-  catalogs.set(locale, flatten(JSON.parse(raw)))
+  catalogs.set(locale, flattenCatalog(JSON.parse(raw)))
 }
 
 const reference = catalogs.get('en')
 if (!reference) throw new Error('English reference catalog is required')
 
-const errors = []
 const { keys: referencedKeys, slotCountKeys } = await sourceMessageKeys()
-for (const key of referencedKeys) {
-  if (!reference.has(key)) errors.push(`en: missing key referenced in source ${key}`)
-}
-
-for (const [locale, catalog] of catalogs) {
-  for (const [key, referenceMessage] of reference) {
-    const message = catalog.get(key)
-    if (message === undefined) {
-      errors.push(`${locale}: missing key ${key}`)
-      continue
-    }
-    if (message.length === 0) errors.push(`${locale}: empty message ${key}`)
-    if (message.includes('\u2014')) errors.push(`${locale}: Unicode em dash is not allowed in ${key}`)
-    if (/<[^>]+>/.test(message)) errors.push(`${locale}: HTML is not allowed in ${key}`)
-    errors.push(...validateLocaleMessage({ key, locale, message, referenceMessage }))
-    if (slotCountKeys.has(key)) errors.push(...validateSlotCountMessage({ key, locale, message }))
-  }
-  for (const key of catalog.keys()) {
-    if (!reference.has(key)) errors.push(`${locale}: unexpected key ${key}`)
-  }
-}
+const errors = validateCatalogs({ catalogs, referencedKeys, slotCountKeys })
 
 if (errors.length > 0) {
   throw new Error(`Locale validation failed:\n${errors.join('\n')}`)
 }
 
-console.log(`Validated ${supportedLocales.length} locale catalogs with ${reference.size} messages each`)
+console.log(`Validated ${supportedLocales.length} locale catalogs against ${reference.size} English messages`)
