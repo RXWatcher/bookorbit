@@ -82,8 +82,8 @@
   <text x="516" y="470" text-anchor="end" class="pct-label">89%</text>
   <text x="24" y="498" class="lang-label">🇨🇳  Chinese Simplified</text>
   <rect x="205" y="489" width="255" height="8" rx="4" class="bar-bg" />
-  <rect x="205" y="489" width="214" height="8" rx="4" class="bar-progress" />
-  <text x="516" y="498" text-anchor="end" class="pct-label">84%</text>
+  <rect x="205" y="489" width="217" height="8" rx="4" class="bar-progress" />
+  <text x="516" y="498" text-anchor="end" class="pct-label">85%</text>
   <line x1="24" y1="518" x2="516" y2="518" class="grid" />
   <rect x="24" y="530" width="8" height="8" rx="2" class="bar-done" />
   <text x="38" y="538" class="legend-label">Complete</text>
