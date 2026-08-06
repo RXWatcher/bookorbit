@@ -60,7 +60,7 @@ jobs:
           CROWDIN_ALLOWED_TRANSLATION_LOSSES: ${{ inputs.allowed_translation_losses }}
           CROWDIN_PROJECT_ID: ${{ vars.CROWDIN_PROJECT_ID }}
           CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
-        run: node client/scripts/sync-crowdin-translations.mjs
+        run: pnpm --filter client sync:crowdin
 
       - name: Validate translation catalogs
         run: pnpm --filter client validate:locales

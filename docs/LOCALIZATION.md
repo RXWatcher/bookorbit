@@ -39,6 +39,8 @@ Feature branches must:
 
 Do not add the key to target catalogs. Target catalogs are sparse and contain only real Crowdin translations. Vue I18n resolves an absent target key through the complete English catalog, including English ICU plural rules.
 
+CI rejects changes to existing target catalogs in ordinary pull requests. The validated `l10n_main` Crowdin PR is the only routine writer. A normal issue-linked pull request may add an empty catalog only as part of the new-language setup described below.
+
 Do not create or improve target-language translations directly in Git. Crowdin does not continuously import repository translations after initial setup, so a later Crowdin export would overwrite those changes. Apply any emergency target-catalog fix in Crowdin before the next export.
 
 When an English edit changes meaning rather than wording, prefer a new message key. If the key must remain, explicitly invalidate or clear the affected translations in Crowdin so an outdated translation is not exported for the new meaning.
@@ -187,9 +189,9 @@ Update `crowdin.yml`:
 - Add the exact Crowdin language ID to `export_languages`.
 - Add `languages_mapping` when the desired filename is not the language's unique `%two_letters_code%` output.
 
-Add the Crowdin language ID and application locale mapping to `TARGET_CATALOGS` in `client/scripts/sync-crowdin-translations.mjs`.
+`TARGET_CATALOGS` is derived from `SUPPORTED_LOCALES`. If the Crowdin language ID differs from the application locale, add the exception to `CROWDIN_LANGUAGE_ID_OVERRIDES` in `client/scripts/locale-configuration.mjs`.
 
-Update `scripts/classify-crowdin-pr.sh` to allow the new target catalog path. Do not allow `en.json` or broaden the rule to the whole locales directory.
+Add the new target catalog path to `.github/workflows/crowdin-translations.yml` and `scripts/classify-crowdin-pr.sh`. Do not allow `en.json` or broaden either rule to the whole locales directory. The synchronization script checks these lists and `crowdin.yml` against the shared locale configuration before contacting Crowdin.
 
 Before merging, add the target language in Crowdin while the current `main` configuration still excludes it from `export_languages`, or pause translation synchronization. Merge the repository support before allowing the first export. After Crowdin synchronizes the new English source, dispatch `Crowdin Translation Sync` manually and confirm that the generated pull request changes only explicitly allowed target catalogs.
 

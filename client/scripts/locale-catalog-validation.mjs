@@ -2,7 +2,7 @@ import { validateLocaleMessage, validateSlotCountMessage } from './locale-messag
 
 export function flattenCatalog(value, prefix = '', output = new Map()) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(prefix || 'catalog root must be a message object')
+    throw new Error(`${prefix || 'catalog root'} must be a message object`)
   }
 
   for (const [key, child] of Object.entries(value)) {

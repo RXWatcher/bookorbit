@@ -1,7 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
+import { TARGET_CATALOGS, assertCrowdinTargetConfiguration } from './locale-configuration.mjs'
 import { flattenCatalog, validateCatalogs } from './locale-catalog-validation.mjs'
 
 const API = 'https://api.crowdin.com/api/v2'
@@ -9,26 +11,11 @@ const SOURCE_PATH_SUFFIX = '/client/src/locales/en.json'
 const MAX_API_RESPONSE_BYTES = 2 * 1024 * 1024
 const MAX_CATALOG_BYTES = 10 * 1024 * 1024
 const REQUEST_TIMEOUT_MS = 30_000
-const clientRoot = path.basename(process.cwd()) === 'client' ? process.cwd() : path.join(process.cwd(), 'client')
+const scriptDirectory = import.meta.dirname ?? path.join(process.cwd(), 'scripts')
+const clientRoot = path.resolve(scriptDirectory, '..')
 const localesDirectory = path.join(clientRoot, 'src/locales')
 
-export const TARGET_CATALOGS = [
-  { languageId: 'cs', locale: 'cs' },
-  { languageId: 'da', locale: 'da' },
-  { languageId: 'de', locale: 'de' },
-  { languageId: 'es-ES', locale: 'es' },
-  { languageId: 'fi', locale: 'fi' },
-  { languageId: 'fr', locale: 'fr' },
-  { languageId: 'it', locale: 'it' },
-  { languageId: 'nl', locale: 'nl' },
-  { languageId: 'pl', locale: 'pl' },
-  { languageId: 'pt-BR', locale: 'pt' },
-  { languageId: 'ru', locale: 'ru' },
-  { languageId: 'sl', locale: 'sl' },
-  { languageId: 'sv-SE', locale: 'sv' },
-  { languageId: 'uk', locale: 'uk' },
-  { languageId: 'zh-CN', locale: 'zh' },
-]
+export { TARGET_CATALOGS }
 
 const TARGET_LOCALES = new Set(TARGET_CATALOGS.map(({ locale }) => locale))
 
@@ -65,36 +52,76 @@ function parseJson(text, context) {
   }
 }
 
-function assertSafeDownloadUrl(value) {
+function ipv4Value(hostname) {
+  return hostname.split('.').reduce((value, octet) => value * 256 + Number(octet), 0) >>> 0
+}
+
+function isInIpv4Range(value, network, prefixLength) {
+  const mask = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0
+  return (value & mask) === (network & mask)
+}
+
+function isBlockedIpv4(hostname) {
+  const value = ipv4Value(hostname)
+  return [
+    [ipv4Value('0.0.0.0'), 8],
+    [ipv4Value('10.0.0.0'), 8],
+    [ipv4Value('100.64.0.0'), 10],
+    [ipv4Value('127.0.0.0'), 8],
+    [ipv4Value('169.254.0.0'), 16],
+    [ipv4Value('172.16.0.0'), 12],
+    [ipv4Value('192.0.0.0'), 24],
+    [ipv4Value('192.0.2.0'), 24],
+    [ipv4Value('192.168.0.0'), 16],
+    [ipv4Value('198.18.0.0'), 15],
+    [ipv4Value('198.51.100.0'), 24],
+    [ipv4Value('203.0.113.0'), 24],
+    [ipv4Value('224.0.0.0'), 4],
+    [ipv4Value('240.0.0.0'), 4],
+  ].some(([network, prefixLength]) => isInIpv4Range(value, network, prefixLength))
+}
+
+function ipv6Groups(hostname) {
+  const [head, tail = ''] = hostname.split('::')
+  const headGroups = head ? head.split(':').map((group) => Number.parseInt(group, 16)) : []
+  const tailGroups = tail ? tail.split(':').map((group) => Number.parseInt(group, 16)) : []
+  return [...headGroups, ...Array(8 - headGroups.length - tailGroups.length).fill(0), ...tailGroups]
+}
+
+function isBlockedIpv6(hostname) {
+  const groups = ipv6Groups(hostname)
+  const first = groups[0]
+  const ipv4Mapped = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff
+  if (ipv4Mapped) {
+    const embedded = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`
+    return isBlockedIpv4(embedded)
+  }
+
+  return (
+    groups.every((group) => group === 0) ||
+    (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) ||
+    groups.slice(0, 6).every((group) => group === 0) ||
+    (first & 0xfe00) === 0xfc00 ||
+    (first & 0xffc0) === 0xfe80 ||
+    (first & 0xffc0) === 0xfec0 ||
+    (first & 0xff00) === 0xff00
+  )
+}
+
+export function assertSafeDownloadUrl(value) {
   const url = new URL(value)
   if (url.protocol !== 'https:') throw new Error('Crowdin export URL must use HTTPS')
 
-  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  if (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname.endsWith('.local') ||
-    hostname === '::1' ||
-    hostname.startsWith('fc') ||
-    hostname.startsWith('fd') ||
-    hostname.startsWith('fe80:')
-  ) {
+  const hostname = url.hostname
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '')
+    .toLowerCase()
+  const addressType = isIP(hostname)
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
     throw new Error('Crowdin export URL must not target a local network host')
   }
-
-  const octets = hostname.split('.').map(Number)
-  if (octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)) {
-    const [first, second] = octets
-    if (
-      first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && second === 168)
-    ) {
-      throw new Error('Crowdin export URL must not target a local network host')
-    }
+  if ((addressType === 4 && isBlockedIpv4(hostname)) || (addressType === 6 && isBlockedIpv6(hostname))) {
+    throw new Error('Crowdin export URL must not target a local network host')
   }
 
   return url
@@ -172,7 +199,7 @@ function orderedSparseCatalog(reference, messages, prefix = '') {
     const messageKey = prefix ? `${prefix}.${key}` : key
     if (typeof child === 'string') {
       const translated = messages.get(messageKey)
-      if (translated) output[key] = translated
+      if (translated !== undefined) output[key] = translated
       continue
     }
 
@@ -252,9 +279,15 @@ export function findTranslationLosses({ locale, reference, current, exported }) 
   return losses
 }
 
-export function assertTranslationRetention({ reference, currentCatalogs, exportedCatalogs, allowedLosses = new Set() }) {
+export function assertTranslationRetention({
+  reference,
+  currentCatalogs,
+  exportedCatalogs,
+  allowedLosses = new Set(),
+  targetCatalogs = TARGET_CATALOGS,
+}) {
   const losses = []
-  for (const { locale } of TARGET_CATALOGS) {
+  for (const { locale } of targetCatalogs) {
     const current = currentCatalogs.get(locale)
     const exported = exportedCatalogs.get(locale)
     if (!current || !exported) throw new Error(`Translation retention comparison is missing the ${locale} catalog`)
@@ -282,14 +315,17 @@ export async function syncCrowdinTranslations({
   catalogDirectory = localesDirectory,
   outputDirectory = catalogDirectory,
   allowedLosses = new Set(),
+  targetCatalogs = TARGET_CATALOGS,
+  assertTargetConfiguration = assertCrowdinTargetConfiguration,
 }) {
   if (!token) throw new Error('CROWDIN_TOKEN is required')
+  await assertTargetConfiguration()
 
   const reference = JSON.parse(await readFile(path.join(catalogDirectory, 'en.json'), 'utf8'))
   const referenceMessages = flattenCatalog(reference)
   const currentCatalogs = new Map(
     await Promise.all(
-      TARGET_CATALOGS.map(async ({ locale }) => {
+      targetCatalogs.map(async ({ locale }) => {
         const catalog = JSON.parse(await readFile(path.join(catalogDirectory, `${locale}.json`), 'utf8'))
         return [locale, flattenCatalog(catalog)]
       }),
@@ -307,7 +343,7 @@ export async function syncCrowdinTranslations({
     throw new Error(`Crowdin source is not synchronized with en.json\n${details.join('\n')}`)
   }
 
-  const downloaded = await mapWithConcurrency(TARGET_CATALOGS, 4, async ({ languageId, locale }) => ({
+  const downloaded = await mapWithConcurrency(targetCatalogs, 4, async ({ languageId, locale }) => ({
     locale,
     catalog: normalizeCrowdinCatalog(await client.exportedCatalog(fileId, languageId), reference),
   }))
@@ -321,6 +357,7 @@ export async function syncCrowdinTranslations({
     currentCatalogs,
     exportedCatalogs: catalogs,
     allowedLosses,
+    targetCatalogs,
   })
 
   await mkdir(outputDirectory, { recursive: true })

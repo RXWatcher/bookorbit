@@ -1,11 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { SUPPORTED_LOCALES } from './locale-configuration.mjs'
 import { flattenCatalog, validateCatalogs } from './locale-catalog-validation.mjs'
 
 const clientRoot = fileURLToPath(new URL('..', import.meta.url))
 const localesDirectory = path.join(clientRoot, 'src/locales')
-const localeTypesPath = path.join(clientRoot, '../packages/types/src/locale.ts')
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true })
@@ -45,21 +45,14 @@ async function sourceMessageKeys() {
   return { keys, slotCountKeys }
 }
 
-const localeTypes = await readFile(localeTypesPath, 'utf8')
-const supportedMatch = localeTypes.match(/SUPPORTED_LOCALES\s*=\s*(\[[\s\S]*?\])\s+as const/)
-if (!supportedMatch) throw new Error('Unable to read SUPPORTED_LOCALES from packages/types/src/locale.ts')
-// Prettier wraps the array once the locale list outgrows the print width, which
-// adds a trailing comma that JSON.parse rejects.
-const supportedLocales = JSON.parse(supportedMatch[1].replace(/,(\s*])$/, '$1'))
-
 const localeFiles = (await readdir(localesDirectory)).filter((file) => file.endsWith('.json')).sort()
-const expectedFiles = supportedLocales.map((locale) => `${locale}.json`).sort()
+const expectedFiles = SUPPORTED_LOCALES.map((locale) => `${locale}.json`).sort()
 if (JSON.stringify(localeFiles) !== JSON.stringify(expectedFiles)) {
   throw new Error(`Locale files do not match SUPPORTED_LOCALES: expected ${expectedFiles.join(', ')}, found ${localeFiles.join(', ')}`)
 }
 
 const catalogs = new Map()
-for (const locale of supportedLocales) {
+for (const locale of SUPPORTED_LOCALES) {
   const raw = await readFile(path.join(localesDirectory, `${locale}.json`), 'utf8')
   catalogs.set(locale, flattenCatalog(JSON.parse(raw)))
 }
@@ -74,4 +67,4 @@ if (errors.length > 0) {
   throw new Error(`Locale validation failed:\n${errors.join('\n')}`)
 }
 
-console.log(`Validated ${supportedLocales.length} locale catalogs against ${reference.size} English messages`)
+console.log(`Validated ${SUPPORTED_LOCALES.length} locale catalogs against ${reference.size} English messages`)

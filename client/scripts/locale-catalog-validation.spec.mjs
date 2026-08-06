@@ -15,6 +15,11 @@ function catalogs(target = {}) {
 }
 
 describe('locale catalog validation', () => {
+  it('reports invalid catalog objects with their path', () => {
+    expect(() => flattenCatalog(null)).toThrow('catalog root must be a message object')
+    expect(() => flattenCatalog(null, 'common')).toThrow('common must be a message object')
+  })
+
   it('accepts a sparse target catalog', () => {
     expect(validateCatalogs({ catalogs: catalogs({ common: { save: 'Uložit' } }) })).toEqual([])
   })
