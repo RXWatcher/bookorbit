@@ -1,0 +1,97 @@
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+export interface TokenResponse {
+  accessToken: string;
+  idToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+}
+
+interface TokenEndpointResponse {
+  access_token: string;
+  id_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
+@Injectable()
+export class OidcTokenClientService {
+  private readonly logger = new Logger(OidcTokenClientService.name);
+  private readonly tokenExchangeTimeoutMs: number;
+
+  constructor(private readonly configService: ConfigService) {
+    this.tokenExchangeTimeoutMs = this.configService.get<number>('oidcRuntime.tokenExchangeTimeoutMs') ?? 10_000;
+  }
+
+  async exchangeCode(params: {
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+    tokenEndpoint: string;
+    clientId: string;
+    clientSecret: string;
+  }): Promise<TokenResponse> {
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: params.code,
+      code_verifier: params.codeVerifier,
+      redirect_uri: params.redirectUri,
+      client_id: params.clientId,
+    });
+
+    // Public clients (token_endpoint_auth_method: none) must not send client_secret.
+    // Sending an empty secret is still interpreted as client_secret_post by some providers.
+    if (params.clientSecret) {
+      body.set('client_secret', params.clientSecret);
+    }
+
+    const res = await fetch(params.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(this.tokenExchangeTimeoutMs),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.warn(
+        `[auth.oidc_token_exchange] [fail] status=${res.status} errorClass=InternalServerErrorException error="${text || 'non-ok response'}" - token exchange failed`,
+      );
+      throw new InternalServerErrorException('Token exchange with OIDC provider failed');
+    }
+
+    const data = (await res.json()) as TokenEndpointResponse;
+    return {
+      accessToken: data.access_token,
+      idToken: data.id_token,
+      refreshToken: data.refresh_token,
+      expiresIn: data.expires_in,
+    };
+  }
+
+  async fetchUserInfo(userinfoEndpoint: string, accessToken: string): Promise<Record<string, unknown>> {
+    try {
+      const res = await fetch(userinfoEndpoint, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        this.logger.warn(
+          `[auth.oidc_userinfo] [fail] status=${res.status} errorClass=InternalServerErrorException error="${text || 'non-ok response'}" - userinfo fetch failed`,
+        );
+        throw new InternalServerErrorException('Failed to fetch OIDC userinfo');
+      }
+      return (await res.json()) as Promise<Record<string, unknown>>;
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+      const errorClass = error instanceof Error ? error.name : 'UnknownError';
+      const errorMessage = error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(`[auth.oidc_userinfo] [fail] errorClass=${errorClass} error="${errorMessage}" - userinfo fetch failed`);
+      throw new InternalServerErrorException('Failed to fetch OIDC userinfo');
+    }
+  }
+}

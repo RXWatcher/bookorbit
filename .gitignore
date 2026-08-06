@@ -1,0 +1,41 @@
+node_modules/
+dist/
+.env
+.env.local
+client/.env
+server/.env
+server/.venv/
+*.local
+data
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Package managers
+package-lock.json
+
+# Docker
+docker/postgres/data/
+
+# Local-only
+local/
+
+# Build artifacts
+coverage/
+*.tsbuildinfo
+server/src/metadata.ts
+
+# Test results (generated artifacts - uploaded to CI, not committed)
+test-results/
+
+# IDE
+.idea/
+
+# vite-plugin-pwa dev service worker output
+dev-dist

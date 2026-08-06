@@ -1,0 +1,20 @@
+Feature: Admin catalog cache status
+Status: Complete
+Started: 2026-06-03
+Completed: 2026-06-03
+
+Ralph loop:
+- Baseline before edits: previous loop completed with clean worktree and `pnpm run verify` passing.
+- RED: Added admin controller delegation test for `getCacheStatus()` and cache service status test for aggregate cover counts/bytes.
+- GREEN: Added `GET /api/v1/admin/warehouse/cache-status`, shared `WarehouseCacheStatus` DTO types, and cover-cache status aggregation.
+- Hardening: Status aggregation counts only valid cache entries with a raster content type, matching byte length, and matching SHA-256 checksum.
+- Review checkpoint: Privacy/spec reviewer approved admin-only permission coverage and aggregate-only response shape with no keys, paths, URLs, remote IDs, API keys, or filenames.
+- Review checkpoint: Code-quality reviewer found missing checksum validation; fixed and added same-length corruption regression.
+- Focused verification: `pnpm --filter server exec vitest run src/modules/warehouse/warehouse-admin.controller.test.ts src/modules/warehouse/warehouse-catalog-cover-cache.service.test.ts` passed.
+- Type verification: `pnpm run typecheck` passed.
+- Lint verification: `pnpm --filter server lint:check` passed.
+
+Notes:
+- The endpoint reports total cover entries/bytes and ebook/audiobook breakdown only.
+- Missing cache roots and transient file changes report safely as zero or skip the affected entry.
+- This is a status-only slice; refresh, repair, rebuild, and telemetry remain separate rollout work.

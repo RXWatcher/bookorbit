@@ -1,0 +1,19 @@
+Feature: Native catalog ebook download proxy
+Started: 2026-06-03 14:36 EDT
+Completed: 2026-06-03 14:36 EDT
+Status: Complete
+
+Scope:
+- Add a native BookOrbit catalog ebook download route.
+- Verify the cached ebook item exists before making a live binary call.
+- Keep response headers safe with allowlisted content types and a fixed fallback attachment filename.
+
+Verification so far:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-client.service.test.ts --testNamePattern "binary ebook download"
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.service.test.ts --testNamePattern "ebook download"
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.controller.test.ts --testNamePattern "ebook download|unexpected proxied"
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-client.service.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse-catalog.controller.test.ts
+- pnpm run typecheck
+
+Final verification:
+- pnpm run verify

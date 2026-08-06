@@ -1,0 +1,1 @@
+2026-06-05 07:56:40 EDT - Feature: OPDS source-backed collection parity. Status: Complete. Notes: OPDS collection navigation and `/api/v1/opds/catalog?collectionId=...` now include current-user-owned Ebook Library members from native collection membership while keeping smart-scope OPDS parity for a later loop.

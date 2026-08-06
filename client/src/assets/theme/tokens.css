@@ -1,0 +1,205 @@
+/* ── Theme tokens ───────────────────────────────────────────
+   Single source of truth. Never hardcode values in components.
+
+   Architecture:
+   - --tint-h / --tint-c control the hue of ALL neutral surfaces.
+     Changing just --tint-h shifts the entire palette toward that hue.
+   - Accent classes override --tint-h (surfaces) + --primary (interactive).
+   - Radius classes override --radius.
+   - Dark mode overrides lightness + slightly raises --tint-c.
+────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+  /* Tint controls — warm amber base */
+  --tint-h: 80;
+  --tint-c: 0.006;
+  --tint-c-surface: var(--tint-c);
+
+  /* Colour roles */
+  --background: oklch(0.99 var(--tint-c-surface) var(--tint-h));
+  --foreground: oklch(0.145 var(--tint-c-surface) var(--tint-h));
+
+  --card: oklch(0.975 var(--tint-c-surface) var(--tint-h));
+  --card-foreground: oklch(0.145 var(--tint-c-surface) var(--tint-h));
+
+  --popover: oklch(0.975 var(--tint-c-surface) var(--tint-h));
+  --popover-foreground: oklch(0.145 var(--tint-c-surface) var(--tint-h));
+
+  --primary: oklch(0.21 var(--tint-c-surface) var(--tint-h));
+  --primary-foreground: oklch(0.985 0.004 var(--tint-h));
+
+  --secondary: oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --secondary-foreground: oklch(0.21 var(--tint-c-surface) var(--tint-h));
+
+  --muted: oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --muted-foreground: oklch(0.52 0.001 var(--tint-h));
+
+  --accent: oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --accent-foreground: oklch(0.21 var(--tint-c-surface) var(--tint-h));
+
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --border: oklch(0.878 var(--tint-c-surface) var(--tint-h));
+  --input: oklch(0.878 var(--tint-c-surface) var(--tint-h));
+  --ring: oklch(0.65 var(--tint-c-surface) var(--tint-h));
+
+  --sidebar: oklch(0.965 var(--tint-c-surface) var(--tint-h));
+  --sidebar-foreground: oklch(0.145 var(--tint-c-surface) var(--tint-h));
+  --sidebar-primary: oklch(0.21 var(--tint-c-surface) var(--tint-h));
+  --sidebar-primary-foreground: oklch(0.985 0.004 var(--tint-h));
+  --sidebar-accent: oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --sidebar-accent-foreground: oklch(0.21 var(--tint-c-surface) var(--tint-h));
+  --sidebar-border: oklch(0.878 var(--tint-c-surface) var(--tint-h));
+  --sidebar-ring: oklch(0.65 var(--tint-c-surface) var(--tint-h));
+
+  /* Elevation surfaces */
+  --surface-1: oklch(0.975 var(--tint-c-surface) var(--tint-h));
+  --surface-2: oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --surface-3: oklch(0.93 var(--tint-c-surface) var(--tint-h));
+  --surface-4: oklch(0.91 var(--tint-c-surface) var(--tint-h));
+
+  /* Shadows */
+  --elevation-xs: 0 1px 2px oklch(0 0 0 / 0.05);
+  --elevation-sm: 0 1px 3px oklch(0 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.06);
+  --elevation-md: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.06);
+  --elevation-lg: 0 10px 15px -3px oklch(0 0 0 / 0.08), 0 4px 6px -4px oklch(0 0 0 / 0.05);
+  --elevation-xl: 0 20px 25px -5px oklch(0 0 0 / 0.1), 0 8px 10px -6px oklch(0 0 0 / 0.06);
+  --elevation-2xl: 0 25px 50px -12px oklch(0 0 0 / 0.18);
+
+  /* Shape */
+  --radius: 0.625rem;
+
+  /* App shell (sidebar + header): one card gap, one material.
+     --shell-surface-opacity is user-controlled and overwritten on <html>. */
+  --shell-gap: 0.75rem;
+  --shell-content-gutter: 0.75rem;
+  --shell-surface-opacity: 92%;
+  --shell-surface: color-mix(in oklch, var(--sidebar) var(--shell-surface-opacity), transparent);
+  /* Accent ladder: four steps, used for every tinted fill and border in the shell. */
+  --shell-accent-wash: color-mix(in oklch, var(--primary) 6%, transparent);
+  --shell-accent-tint: color-mix(in oklch, var(--primary) 12%, transparent);
+  --shell-accent-line: color-mix(in oklch, var(--primary) 30%, transparent);
+  --shell-border: var(--shell-accent-line);
+
+  --dot-color: oklch(0.82 var(--tint-c-surface) var(--tint-h));
+
+  --scrollbar-thumb: oklch(0.8 var(--tint-c) var(--tint-h));
+  --scrollbar-thumb-hover: oklch(0.7 var(--tint-c) var(--tint-h));
+
+  /* Annotation pill hues — fixed, accent-independent. Sources get distinct
+     hues; status uses semantic tiers (Exact stays neutral via --muted). */
+  --pill-web: oklch(0.55 0.16 245);
+  --pill-koreader: oklch(0.52 0.2 295);
+  --pill-kobo: oklch(0.55 0.1 195);
+  --pill-repaired: oklch(0.62 0.14 70);
+  --pill-pending: oklch(0.55 0.09 255);
+  --pill-file-as-book: oklch(0.58 0.15 150);
+  --pill-folder-as-book: oklch(0.55 0.16 245);
+  --pill-success: oklch(0.58 0.15 150);
+  --pill-warning: oklch(0.62 0.14 70);
+  --pill-info: oklch(0.55 0.16 245);
+
+  --audit-authentication: oklch(0.55 0.17 295);
+  --audit-books: oklch(0.55 0.16 245);
+  --audit-users: oklch(0.62 0.14 70);
+  --audit-libraries: oklch(0.55 0.1 195);
+  --audit-collections: oklch(0.55 0.09 255);
+  --audit-integrations: oklch(0.58 0.15 150);
+  --audit-settings: oklch(0.55 0.15 25);
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --shell-content-gutter: 1rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --shell-content-gutter: 1.5rem;
+  }
+}
+
+.dark {
+  color-scheme: dark;
+  --tint-c: 0.0175;
+  --tint-c-surface: var(--tint-c);
+  --bg-lift: 0;
+
+  --background: oklch(calc(0.145 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --foreground: oklch(0.985 0.001 var(--tint-h));
+
+  --card: oklch(calc(0.18 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --card-foreground: oklch(0.985 0.001 var(--tint-h));
+
+  --popover: oklch(calc(0.18 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --popover-foreground: oklch(0.985 0.001 var(--tint-h));
+
+  --primary: oklch(0.91 var(--tint-c-surface) var(--tint-h));
+  --primary-foreground: oklch(0.18 var(--tint-c-surface) var(--tint-h));
+
+  --secondary: oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --secondary-foreground: oklch(0.985 0.001 var(--tint-h));
+
+  --muted: oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --muted-foreground: oklch(0.725 0.001 var(--tint-h));
+
+  --accent: oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --accent-foreground: oklch(0.985 0.001 var(--tint-h));
+
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.52 0.008 var(--tint-h));
+
+  --sidebar: oklch(calc(0.18 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --sidebar-foreground: oklch(0.985 0.001 var(--tint-h));
+  --sidebar-primary: oklch(0.91 var(--tint-c-surface) var(--tint-h));
+  --sidebar-primary-foreground: oklch(0.18 var(--tint-c-surface) var(--tint-h));
+  --sidebar-accent: oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --sidebar-accent-foreground: oklch(0.985 0.001 var(--tint-h));
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.52 0.001 var(--tint-h));
+
+  /* Elevation surfaces */
+  --surface-1: oklch(calc(0.18 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --surface-2: oklch(calc(0.235 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --surface-3: oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --surface-4: oklch(calc(0.295 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+
+  /* Shadows */
+  --elevation-xs: 0 1px 2px oklch(0 0 0 / 0.4);
+  --elevation-sm: 0 1px 3px oklch(0 0 0 / 0.5), 0 1px 2px oklch(0 0 0 / 0.4);
+  --elevation-md: 0 4px 8px -1px oklch(0 0 0 / 0.5), 0 2px 4px -2px oklch(0 0 0 / 0.4);
+  --elevation-lg: 0 10px 20px -3px oklch(0 0 0 / 0.5), 0 4px 8px -4px oklch(0 0 0 / 0.4);
+  --elevation-xl: 0 20px 30px -5px oklch(0 0 0 / 0.6), 0 8px 12px -6px oklch(0 0 0 / 0.4);
+  --elevation-2xl: 0 25px 50px -12px oklch(0 0 0 / 0.7);
+
+  --dot-color: oklch(calc(0.3 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+
+  --scrollbar-thumb: oklch(0.35 var(--tint-c) var(--tint-h));
+  --scrollbar-thumb-hover: oklch(0.45 var(--tint-c) var(--tint-h));
+
+  /* Lifted lightness so pills read on dark surfaces */
+  --pill-web: oklch(0.72 0.14 245);
+  --pill-koreader: oklch(0.72 0.17 295);
+  --pill-kobo: oklch(0.74 0.1 195);
+  --pill-repaired: oklch(0.78 0.13 70);
+  --pill-pending: oklch(0.72 0.09 255);
+  --pill-file-as-book: oklch(0.75 0.13 150);
+  --pill-folder-as-book: oklch(0.72 0.14 245);
+  --pill-success: oklch(0.75 0.13 150);
+  --pill-warning: oklch(0.78 0.13 70);
+  --pill-info: oklch(0.72 0.14 245);
+
+  --audit-authentication: oklch(0.72 0.17 295);
+  --audit-books: oklch(0.72 0.14 245);
+  --audit-users: oklch(0.78 0.13 70);
+  --audit-libraries: oklch(0.74 0.1 195);
+  --audit-collections: oklch(0.72 0.09 255);
+  --audit-integrations: oklch(0.75 0.13 150);
+  --audit-settings: oklch(0.72 0.15 25);
+}

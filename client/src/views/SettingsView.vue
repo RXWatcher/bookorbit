@@ -1,0 +1,23 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import SettingsHeader from '@/features/settings/SettingsHeader.vue'
+
+const route = useRoute()
+const maxWidth = computed(() => (route.meta.maxWidth as string | undefined) ?? 'max-w-3xl')
+</script>
+
+<template>
+  <div class="flex flex-col mt-2 h-[calc(100%-0.5rem)] overflow-hidden rounded-lg border border-border/70 bg-card/40 shadow-sm">
+    <SettingsHeader />
+    <main class="flex-1 overflow-y-auto overflow-x-hidden">
+      <div class="md:px-6 px-4 py-6" :class="maxWidth">
+        <router-view v-slot="{ Component, route: childRoute }">
+          <div :key="childRoute.path">
+            <component :is="Component" />
+          </div>
+        </router-view>
+      </div>
+    </main>
+  </div>
+</template>

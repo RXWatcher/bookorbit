@@ -1,0 +1,40 @@
+import { Module, forwardRef } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
+import type { StringValue } from 'ms';
+
+import { SelfWriteRegistryModule } from '../../common/self-write-registry.module';
+import { AchievementModule } from '../achievement/achievement.module';
+import { AuthModule } from '../auth/auth.module';
+import { BookMetadataFetchModule } from '../book-metadata-fetch/book-metadata-fetch.module';
+import { MetadataModule } from '../metadata/metadata.module';
+import { NotificationModule } from '../notification/notification.module';
+import { FileEventProcessorService } from './file-event-processor.service';
+import { FileWatcherService } from './file-watcher.service';
+import { ScanGateway } from './scan.gateway';
+import { ScanJobStore } from './scan-job-store.service';
+import { ScannerController } from './scanner.controller';
+import { ScannerRepository } from './scanner.repository';
+import { ScannerService } from './scanner.service';
+
+@Module({
+  imports: [
+    MetadataModule,
+    AuthModule,
+    AchievementModule,
+    SelfWriteRegistryModule,
+    forwardRef(() => NotificationModule),
+    forwardRef(() => BookMetadataFetchModule),
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: config.getOrThrow<string>('auth.jwtSecret'),
+        signOptions: { expiresIn: config.getOrThrow<StringValue | number>('auth.jwtExpiresIn') },
+      }),
+    }),
+  ],
+  controllers: [ScannerController],
+  providers: [ScannerService, ScannerRepository, ScanGateway, ScanJobStore, FileEventProcessorService, FileWatcherService],
+  exports: [ScannerService, FileWatcherService, ScanGateway],
+})
+export class ScannerModule {}

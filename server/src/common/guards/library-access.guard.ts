@@ -1,0 +1,54 @@
+import { BadRequestException, CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { eq, and } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
+
+import { DB } from '../../db';
+import * as schema from '../../db/schema';
+import { LIBRARY_ACCESS_KEY, LibraryAccessLevel } from '../decorators/require-library-access.decorator';
+import { RequestUser } from '../types/request-user';
+
+const ACCESS_RANK: Record<LibraryAccessLevel, number> = { viewer: 1, editor: 2, owner: 3 };
+const SOURCE_BACKED_LIBRARY_IDS = new Set([CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID]);
+
+@Injectable()
+export class LibraryAccessGuard implements CanActivate {
+  constructor(
+    private readonly reflector: Reflector,
+    @Inject(DB) private readonly db: NodePgDatabase<typeof schema>,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const required = this.reflector.getAllAndOverride<LibraryAccessLevel | undefined>(LIBRARY_ACCESS_KEY, [context.getHandler(), context.getClass()]);
+    if (!required) return true;
+
+    const request = context.switchToHttp().getRequest<{ user: RequestUser; params?: Record<string, string> }>();
+    const user = request.user;
+
+    const rawLibraryId = request.params?.libraryId ?? request.params?.id ?? '';
+    const libraryId = Number.parseInt(rawLibraryId, 10);
+    if (!Number.isInteger(libraryId) || (libraryId <= 0 && !SOURCE_BACKED_LIBRARY_IDS.has(libraryId))) {
+      throw new BadRequestException('Missing or invalid libraryId');
+    }
+
+    if (SOURCE_BACKED_LIBRARY_IDS.has(libraryId)) {
+      if (required === 'viewer') return true;
+      throw new BadRequestException('Source-backed libraries are read-only');
+    }
+
+    if (user.isSuperuser) return true;
+
+    const row = await this.db.query.userLibraryAccess.findFirst({
+      where: and(eq(schema.userLibraryAccess.userId, user.id), eq(schema.userLibraryAccess.libraryId, libraryId)),
+    });
+
+    if (!row) throw new ForbiddenException('No library access');
+
+    if (ACCESS_RANK[row.accessLevel] < ACCESS_RANK[required]) {
+      throw new ForbiddenException('Insufficient library access level');
+    }
+
+    return true;
+  }
+}

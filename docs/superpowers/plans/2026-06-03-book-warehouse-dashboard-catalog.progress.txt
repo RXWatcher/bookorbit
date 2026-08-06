@@ -1,0 +1,30 @@
+Book Warehouse Dashboard Catalog Progress
+2026-06-03
+
+Completed:
+- Task 1: Recent owned catalog repository query.
+  - Added `WarehouseRepository.listRecentUserCatalogItems` scoped by `warehouse_user_items.user_id`.
+  - Query joins cached catalog metadata across media types and orders by the current user's owned-item recency.
+  - Focused repository test passed.
+- Task 2: Safe dashboard catalog additions API.
+  - Added shared `DashboardCatalogAdditionsData` and `DashboardCatalogItem` types without upstream/source/raw payload fields.
+  - Added `DashboardService.getCatalogAdditions` and `GET /api/v1/dashboard/catalog-additions`.
+  - Dashboard module now imports `WarehouseModule` for the repository provider.
+  - Focused service and controller tests passed.
+- Task 3: Native dashboard shelf.
+  - Added `catalog-additions` as a configurable scroller type and default enabled shelf.
+  - Added client fetch/composable support for catalog additions.
+  - Added `DashboardCatalogScroller` with safe visible copy, item count, loading/error/empty states, cover support for audiobooks, and navigation to native catalog detail pages.
+  - Dashboard settings can select the Catalog Additions shelf.
+
+Latest verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/modules/dashboard/dashboard.controller.test.ts => 3 files / 65 tests passed
+- pnpm --filter client exec vitest run src/features/dashboard/composables/__tests__/useDashboardConfig.spec.ts src/features/dashboard/composables/__tests__/useDashboardCatalogAdditions.spec.ts src/features/dashboard/components/__tests__/DashboardCatalogScroller.spec.ts => 3 files / 12 tests passed
+- pnpm run typecheck => passed
+- Targeted dashboard visible-copy guard => passed
+- Vite dev-server HTTP smoke at http://localhost:5173/ => 200 with root app and module entry present
+- pnpm run build:client => passed
+- pnpm run verify => passed; server 485 files / 6065 tests, client 193 files / 2201 tests
+
+Next:
+- Commit this loop, then select the next highest-priority parity feature.

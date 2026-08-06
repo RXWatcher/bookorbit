@@ -1,0 +1,8 @@
+{
+  "id": "audio-1",
+  "title": "The Test Audiobook",
+  "authors": ["Ada Writer"],
+  "narrators": ["Case Reader"],
+  "duration": 12345,
+  "series": "Foundation Tests"
+}

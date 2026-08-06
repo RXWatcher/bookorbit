@@ -1,0 +1,951 @@
+<script setup lang="ts">
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
+import { useFoliate, type RelocateDetail } from './epub/composables/useFoliate'
+import type { SelectionDetail } from './epub/composables/useFoliateSelection'
+import { useReaderProgress } from './shared/composables/useReaderProgress'
+import { useReadingSession } from './shared/composables/useReadingSession'
+import { useReaderState } from './epub/composables/useReaderState'
+import { useReaderSettings } from './shared/composables/useReaderSettings'
+import { useCustomFonts } from './epub/composables/useCustomFonts'
+import { useVisibility } from './shared/composables/useVisibility'
+import { useWakeLock } from './shared/composables/useWakeLock'
+import { useBookmarks, type Bookmark } from './epub/composables/useBookmarks'
+import { useAnnotations, type Annotation } from './epub/composables/useAnnotations'
+import { useFullscreen } from './shared/composables/useFullscreen'
+import { useReaderAnnotationActions } from './epub/composables/useReaderAnnotationActions'
+import { useToc } from './epub/composables/useToc'
+import { useSearch, type FoliateView } from './epub/composables/useSearch'
+import { useReaderSelection } from './epub/composables/useReaderSelection'
+import { useReaderSidebarPin } from './epub/composables/useReaderSidebarPin'
+import { useReaderKeyboardShortcuts } from './epub/composables/useReaderKeyboardShortcuts'
+import ReaderHeader from './epub/components/ReaderHeader.vue'
+import ReaderFooter from './epub/components/ReaderFooter.vue'
+import ReaderSidebar from './epub/components/ReaderSidebar.vue'
+import ReaderSettingsPanel from './epub/components/ReaderSettingsPanel.vue'
+import SelectionPopup from './epub/components/SelectionPopup.vue'
+import ReaderSearchPanel from './epub/components/ReaderSearchPanel.vue'
+import NoteDialog from './epub/components/NoteDialog.vue'
+import DictionaryPopover from './epub/components/DictionaryPopover.vue'
+import TranslationPopover from './epub/components/TranslationPopover.vue'
+import TranslationSheet from './epub/components/TranslationSheet.vue'
+import KeyboardShortcutsModal from './epub/components/KeyboardShortcutsModal.vue'
+import CbzReaderView from './cbz/CbzReaderView.vue'
+import AudiobookReaderView from './audiobook/AudiobookReaderView.vue'
+import type { ReaderState } from './epub/composables/useReaderState'
+import type { FoliateLocationContext, FoliateRenderer } from './epub/composables/useFoliate'
+import type { EpubReaderSettings, WarehouseCatalogAnnotation, WarehouseCatalogBookmark, WarehouseMediaType } from '@bookorbit/types'
+import { findMatchingCfiRange } from './epub/utils'
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, getFormatGroup } from '@bookorbit/types'
+import { parseLibraryRouteId } from '@/features/library/lib/library-route'
+import {
+  catalogSourceEbookDownloadUrl,
+  createCatalogSourceAnnotation,
+  createCatalogSourceBookmark,
+  deleteCatalogSourceAnnotation,
+  deleteCatalogSourceBookmark,
+  fetchCatalogSourceAnnotations,
+  fetchCatalogSourceBookmarks,
+  fetchCatalogSourceUserState,
+  patchCatalogSourceUserState,
+  saveCatalogSourceReadingSession,
+  updateCatalogSourceAnnotation,
+} from '@/features/warehouse/api/catalog-source.api'
+
+const PdfV4ReaderView = defineAsyncComponent(() => import('./pdf-v4/PdfV4ReaderView.vue'))
+
+const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
+const fileFormat = (route.query.format as string) || 'epub'
+const catalogMediaType = resolveCatalogMediaType()
+const catalogRemoteId = firstRouteText(route.params.remoteId)
+const hasCatalogSource = catalogMediaType !== null && catalogRemoteId !== null
+const bookId = hasCatalogSource ? 0 : Number(route.params.bookId)
+const fileId = hasCatalogSource ? 0 : Number(route.params.fileId)
+const isAudioFormat = getFormatGroup(fileFormat) === 'audio'
+const isPdfFormat = fileFormat === 'pdf'
+const isComicFormat = fileFormat === 'cbz' || fileFormat === 'cbr' || fileFormat === 'cb7'
+const isPeekMode = computed(() => {
+  const mode = route.query.mode
+  return (Array.isArray(mode) ? mode[0] : mode) === 'peek'
+})
+const trackingEnabled = computed(() => !isPeekMode.value)
+
+const containerRef = ref<HTMLElement | null>(null)
+const showSidebar = ref(false)
+const showSettings = ref(false)
+const showSearch = ref(false)
+const searchInitialQuery = ref('')
+const sectionFractions = ref<number[]>([])
+const sidebarLocationMetaByCfi = ref<Record<string, { chapterTitle: string | null; percentage: number | null }>>({})
+let sidebarLocationResolveSeq = 0
+
+const catalogSettingsStorageKey = computed(() =>
+  hasCatalogSource && catalogMediaType && catalogRemoteId
+    ? `reader:catalog:${catalogMediaType}:${catalogRemoteId}:${isComicFormat ? 'cbz' : fileFormat}`
+    : undefined,
+)
+const catalogReaderRouteName = computed<'reader' | 'catalog-reader' | 'library-reader'>(() => {
+  if (route.name === 'library-reader') return 'library-reader'
+  if (route.name === 'catalog-reader') return 'catalog-reader'
+  return 'reader'
+})
+const catalogProgressAdapters = computed((): { loadProgress?: typeof loadCatalogProgress; saveProgress?: typeof saveCatalogProgress } => {
+  if (!catalogMediaType || !catalogRemoteId) return {}
+  return {
+    loadProgress: loadCatalogProgress,
+    saveProgress: saveCatalogProgress,
+  }
+})
+const catalogSessionAdapters = computed((): { saveSession?: typeof saveCatalogSession } => {
+  if (!catalogMediaType || !catalogRemoteId) return {}
+  return {
+    saveSession: saveCatalogSession,
+  }
+})
+const pdfDocumentUrl = computed(() =>
+  catalogMediaType === 'ebook' && catalogRemoteId && isPdfFormat ? catalogSourceEbookDownloadUrl(catalogRemoteId) : undefined,
+)
+const cbzCatalogSource = computed(() =>
+  catalogMediaType && catalogRemoteId && isComicFormat
+    ? {
+        mediaType: catalogMediaType === 'comic' ? ('comic' as const) : ('ebook' as const),
+        remoteId: catalogRemoteId,
+        format: fileFormat,
+      }
+    : undefined,
+)
+const audioCatalogMediaType = computed(() => (catalogMediaType === 'audiobook' && catalogRemoteId ? 'audiobook' : undefined))
+const audioCatalogRemoteId = computed(() => (catalogMediaType === 'audiobook' ? (catalogRemoteId ?? undefined) : undefined))
+
+const bookSettings = useReaderSettings(
+  fileId,
+  fileFormat,
+  catalogSettingsStorageKey.value
+    ? {
+        bookStorageKey: catalogSettingsStorageKey.value,
+        syncBookPreferences: false,
+      }
+    : undefined,
+)
+// False when overrideBookFormatting is off and the book has no per-book delta.
+// Prevents injecting any CSS so the book renders with its own embedded styles.
+const shouldApplyStyles = ref(true)
+
+const readerState = useReaderState()
+const {
+  state,
+  activeMode,
+  isDark,
+  applyToRenderer,
+  setFontSize,
+  setLineHeight,
+  setFontFamily,
+  setMaxColumnCount,
+  setGap,
+  setMaxInlineSize,
+  setMaxBlockSize,
+  setJustify,
+  setHyphenate,
+  setIsDark,
+  setThemeName,
+  setFlow,
+  setFixedLayoutSpread,
+  setFontFaceCSS,
+} = readerState
+
+const customFonts = useCustomFonts()
+
+const { onActivity, elapsedMinutes } = useReadingSession(
+  fileId,
+  () => ({
+    percentage: progress.percentage.value,
+    cfi: progress.cfi.value,
+    pageNumber: progress.pageNumber.value,
+  }),
+  {
+    trackingEnabled,
+    ...catalogSessionAdapters.value,
+  },
+)
+
+const progress = useReaderProgress(bookId, fileId, elapsedMinutes, 0, {
+  trackingEnabled,
+  ...catalogProgressAdapters.value,
+})
+const { cfi, chapterTitle, sectionIndex, totalSections, fraction, locationTotal, footerMode, cycleFooterMode, updateHeadsFeet } = progress
+
+const visibility = useVisibility()
+const { headerVisible, footerVisible, handleMiddleTap, setVisibilityLock } = visibility
+const { toggleFullscreen } = useFullscreen()
+
+useWakeLock()
+
+const catalogBookmarkStore =
+  catalogMediaType && catalogRemoteId
+    ? {
+        load: async () => (await fetchCatalogSourceBookmarks(catalogMediaType, catalogRemoteId)).filter((item) => item.cfi).map(toReaderBookmark),
+        create: async (bookmark: { cfi: string; title: string }) =>
+          toReaderBookmark(await createCatalogSourceBookmark(catalogMediaType, catalogRemoteId, bookmark)),
+        remove: (bookmarkId: number) => deleteCatalogSourceBookmark(catalogMediaType, catalogRemoteId, bookmarkId),
+      }
+    : undefined
+const catalogAnnotationStore =
+  catalogMediaType && catalogRemoteId
+    ? {
+        load: async () => (await fetchCatalogSourceAnnotations(catalogMediaType, catalogRemoteId)).map(toReaderAnnotation),
+        create: async (data: { cfi: string; text: string; color: string; style: string; note?: string | null; chapterTitle?: string | null }) =>
+          toReaderAnnotation(await createCatalogSourceAnnotation(catalogMediaType, catalogRemoteId, data)),
+        update: async (annotationId: number, data: { note?: string | null; color?: string; style?: string }) =>
+          toReaderAnnotation(await updateCatalogSourceAnnotation(catalogMediaType, catalogRemoteId, annotationId, data)),
+        remove: (annotationId: number) => deleteCatalogSourceAnnotation(catalogMediaType, catalogRemoteId, annotationId),
+      }
+    : undefined
+const bookmarks = useBookmarks(catalogBookmarkStore)
+const annotations = useAnnotations(catalogAnnotationStore)
+
+const toc = useToc()
+const { chapters, expandedHrefs, activeHref, setChapters, toggleExpand } = toc
+
+const search = useSearch()
+const { results: searchResults, isSearching, search: doSearch, clear: clearSearch } = search
+
+const selection = useReaderSelection()
+const { isSidebarPinned, toggleSidebarPinned, shouldCloseAfterNavigation } = useReaderSidebarPin(fileId)
+
+function closeAnyPanel() {
+  if (showSearch.value) {
+    closeSearch()
+  } else if (showSidebar.value) {
+    showSidebar.value = false
+  } else if (showSettings.value) {
+    showSettings.value = false
+  } else {
+    handleMiddleTap()
+  }
+}
+
+const { showHelpModal } = useReaderKeyboardShortcuts({
+  toggleSidebar: () => {
+    showSidebar.value = !showSidebar.value
+  },
+  toggleSearch: () => {
+    showSearch.value = !showSearch.value
+  },
+  toggleBookmark: () => {
+    bookmarks.toggle(bookId, cfi.value ?? '', chapterTitle.value)
+  },
+  toggleFullscreen,
+  cycleFooterMode,
+  closePanel: closeAnyPanel,
+  goToStart: () => goToFraction(0),
+  goToEnd: () => goToFraction(1),
+})
+
+function toggleHelpModal() {
+  showHelpModal.value = !showHelpModal.value
+}
+
+async function startTrackedReading() {
+  const query = { ...route.query }
+  delete query.mode
+  await router.replace({ name: catalogReaderRouteName.value, params: route.params, query })
+  await nextTick()
+  await progress.save()
+  onActivity()
+}
+
+const chapterStartFraction = computed(() => {
+  const fracs = sectionFractions.value
+  const idx = sectionIndex.value
+  return fracs[idx] ?? 0
+})
+
+const chapterEndFraction = computed(() => {
+  const fracs = sectionFractions.value
+  const idx = sectionIndex.value
+  return fracs[idx + 1] ?? 1
+})
+
+const showDictionary = ref(false)
+const dictionaryWord = ref('')
+const dictionaryPosition = ref({ x: 0, y: 0, showBelow: false })
+
+const showTranslation = ref(false)
+const translationText = ref('')
+const translationPosition = ref({ x: 0, y: 0, showBelow: false })
+const isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+
+function handleDefine() {
+  dictionaryWord.value = selection.text.value
+  dictionaryPosition.value = {
+    x: selection.position.value.x,
+    y: selection.position.value.y,
+    showBelow: selection.showBelow.value,
+  }
+  selection.dismiss()
+  showDictionary.value = true
+}
+
+function handleTranslate() {
+  translationText.value = selection.text.value
+  translationPosition.value = {
+    x: selection.position.value.x,
+    y: selection.position.value.y,
+    showBelow: selection.showBelow.value,
+  }
+  selection.dismiss()
+  showTranslation.value = true
+}
+
+function onRelocateHandler(detail: RelocateDetail) {
+  progress.onRelocate(detail)
+  onActivity()
+  bookmarks.setCfi(detail?.cfi ?? null)
+  toc.setActiveHref(detail?.tocItem?.href ?? '')
+  const renderer = getRenderer()
+  if (renderer) {
+    updateHeadsFeet(renderer, activeMode.value)
+  }
+}
+
+function onApplyStylesHandler(renderer: FoliateRenderer) {
+  if (shouldApplyStyles.value) {
+    applyToRenderer(renderer, isFixedLayout.value ? { flow: 'paginated' } : undefined)
+  }
+}
+
+function onMiddleTapHandler() {
+  handleMiddleTap()
+}
+
+const {
+  loading,
+  error,
+  open,
+  openFromUrl,
+  goTo,
+  goToFraction,
+  goToSection,
+  getSectionFractions,
+  getChapters,
+  getLocationContext,
+  getRenderer,
+  addAnnotation,
+  addAnnotations,
+  deleteAnnotation,
+  redrawAnnotation,
+  setTextSelectedHandler,
+  setAnnotationClickHandler,
+  view: foliateView,
+  bookLanguage,
+  isFixedLayout,
+} = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler)
+
+function firstRouteText(value: unknown): string | null {
+  if (Array.isArray(value)) return firstRouteText(value[0])
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const trimmed = String(value).trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeLegacyCatalogMediaType(value: unknown): WarehouseMediaType | null {
+  const raw = firstRouteText(value)?.toLowerCase()
+  if (!raw) return null
+  if (raw === 'ebook' || raw === 'ebooks') return 'ebook'
+  if (raw === 'audiobook' || raw === 'audiobooks' || raw === 'audio') return 'audiobook'
+  if (raw === 'comic' || raw === 'comics') return 'comic'
+  return null
+}
+
+function resolveCatalogMediaType(): WarehouseMediaType | null {
+  if (route.name === 'catalog-reader') return normalizeLegacyCatalogMediaType(route.params.mediaType)
+  if (route.name !== 'library-reader') return null
+
+  const libraryId = parseLibraryRouteId(route.params.id)
+  if (libraryId === CLOUD_EBOOK_LIBRARY_ID) return 'ebook'
+  if (libraryId === CLOUD_AUDIO_LIBRARY_ID) return 'audiobook'
+  if (libraryId === CLOUD_COMIC_LIBRARY_ID) return 'comic'
+  return null
+}
+
+async function loadCatalogProgress() {
+  if (!catalogMediaType || !catalogRemoteId) return { percentage: 0 }
+  const state = await fetchCatalogSourceUserState(catalogMediaType, catalogRemoteId)
+  return {
+    cfi: null,
+    pageNumber: null,
+    percentage: state.progressPercent ?? 0,
+  }
+}
+
+async function saveCatalogProgress(payload: { cfi: string | null; pageNumber: number | null; percentage: number }) {
+  if (!catalogMediaType || !catalogRemoteId) return
+  await patchCatalogSourceUserState(catalogMediaType, catalogRemoteId, {
+    progressPercent: payload.percentage,
+  })
+}
+
+async function saveCatalogSession(payload: Parameters<typeof saveCatalogSourceReadingSession>[2], options: { useBeacon: boolean }) {
+  if (!catalogMediaType || !catalogRemoteId) return
+  await saveCatalogSourceReadingSession(catalogMediaType, catalogRemoteId, payload, options)
+  await patchCatalogSourceUserState(catalogMediaType, catalogRemoteId, {
+    progressPercent: payload.endProgress,
+  })
+}
+
+function toReaderBookmark(item: WarehouseCatalogBookmark): Bookmark {
+  return {
+    id: item.id,
+    bookId,
+    cfi: item.cfi ?? '',
+    title: item.title,
+    createdAt: item.createdAt,
+  }
+}
+
+function toReaderAnnotation(item: WarehouseCatalogAnnotation): Annotation {
+  return {
+    id: item.id,
+    bookId,
+    cfi: item.cfi,
+    jumpFileId: null,
+    pageno: null,
+    text: item.text,
+    color: item.color,
+    style: item.style,
+    note: item.note,
+    chapterTitle: item.chapterTitle,
+    origin: 'web',
+    positionStatus: null,
+    chapterIndex: null,
+    createdAt: item.createdAt,
+  }
+}
+
+const { handleHighlight, handleOpenNoteDialog, handleSaveNote } = useReaderAnnotationActions({
+  bookId,
+  fileId,
+  chapterTitle,
+  annotations,
+  selection,
+  addAnnotation,
+  redrawAnnotation,
+})
+
+function handleTextSelected(detail: SelectionDetail) {
+  const match = findMatchingCfiRange(annotations.annotations.value, detail.cfi)
+  selection.show(detail, match?.id ?? null)
+}
+
+function handleAnnotationClick(cfi: string, popupPosition: { x: number; y: number; showBelow: boolean }) {
+  const ann = annotations.annotations.value.find((a) => a.cfi === cfi)
+  if (!ann) return
+  selection.show({ text: ann.text, cfi, popupPosition }, ann.id)
+}
+
+setTextSelectedHandler(handleTextSelected)
+setAnnotationClickHandler(handleAnnotationClick)
+
+onMounted(async () => {
+  // Specialized readers own their own progress/settings/loading lifecycle.
+  if (isAudioFormat || isPdfFormat || isComicFormat) return
+
+  await customFonts.fetchAllFonts()
+  await refreshFontFaces()
+
+  await progress.load()
+
+  await bookSettings.load()
+  const effective = bookSettings.effective.value as EpubReaderSettings
+  if (effective.footerDisplayMode !== undefined) {
+    footerMode.value = effective.footerDisplayMode
+  }
+  if (effective.overrideBookFormatting) {
+    shouldApplyStyles.value = true
+    seedState(effective)
+  } else if (bookSettings.isCustomized.value) {
+    shouldApplyStyles.value = true
+    seedState(bookSettings.bookDelta.value as Partial<ReaderState>)
+  } else {
+    shouldApplyStyles.value = false
+  }
+
+  const hadProgress = progress.percentage.value > 0
+  if (catalogMediaType === 'ebook' && catalogRemoteId) {
+    await openFromUrl(
+      catalogSourceEbookDownloadUrl(catalogRemoteId),
+      fileFormat,
+      catalogRemoteId,
+      progress.cfi.value,
+      hadProgress ? progress.percentage.value / 100 : undefined,
+    )
+  } else {
+    await open(bookId, fileId, fileFormat, progress.cfi.value, hadProgress ? progress.percentage.value / 100 : undefined)
+  }
+  setChapters(getChapters())
+  sectionFractions.value = getSectionFractions()
+  await bookmarks.load(bookId)
+  await annotations.load(bookId)
+  const drawableAnnotations = annotations.annotations.value.filter((a): a is typeof a & { cfi: string } => a.cfi != null)
+  if (drawableAnnotations.length > 0) {
+    addAnnotations(drawableAnnotations.map((a) => ({ cfi: a.cfi, color: a.color, style: a.style })))
+  }
+  void hydrateSidebarLocationMeta()
+
+  const deepLinkCfi = typeof route.query.cfi === 'string' ? route.query.cfi : null
+  if (deepLinkCfi) {
+    try {
+      await goTo(deepLinkCfi)
+    } catch {
+      toast.error(t('reader.toast.linkedHighlightError'))
+    }
+  }
+
+  if (hadProgress) {
+    const pct = Math.round(progress.percentage.value)
+    const label = chapterTitle.value || t('reader.chapterNumber', { number: sectionIndex.value + 1 })
+    toast.info(t('reader.toast.resumed', { pct, label }), { duration: 2500 })
+  }
+})
+
+const epubSetters: Record<string, (v: unknown) => void> = {
+  fontSize: (v) => setFontSize(v as number),
+  lineHeight: (v) => setLineHeight(v as number),
+  fontFamily: (v) => setFontFamily(v as string | null),
+  maxColumnCount: (v) => setMaxColumnCount(v as number),
+  gap: (v) => setGap(v as number),
+  maxInlineSize: (v) => setMaxInlineSize(v as number),
+  maxBlockSize: (v) => setMaxBlockSize(v as number),
+  justify: (v) => setJustify(v as boolean),
+  hyphenate: (v) => setHyphenate(v as boolean),
+  isDark: (v) => setIsDark(v as boolean),
+  themeName: (v) => setThemeName(v as string),
+  flow: (v) => setFlow(v as 'paginated' | 'scrolled'),
+  fixedLayoutSpread: (v) => setFixedLayoutSpread(v as EpubReaderSettings['fixedLayoutSpread']),
+}
+
+// Applies settings to reactive refs (and renderer if open) without touching the delta.
+// Used for initial seeding on mount.
+function seedState(partial: Partial<ReaderState>) {
+  for (const [key, value] of Object.entries(partial)) {
+    epubSetters[key]?.(value)
+  }
+  const renderer = getRenderer()
+  if (renderer) applyToRenderer(renderer, isFixedLayout.value ? { flow: 'paginated' } : undefined)
+}
+
+async function reopenEpubAtCurrentLocation() {
+  const fallbackFraction = fraction.value > 0 ? fraction.value : progress.percentage.value > 0 ? progress.percentage.value / 100 : undefined
+  await open(bookId, fileId, fileFormat, null, fallbackFraction, {
+    fixedLayoutSpread: state.value.fixedLayoutSpread,
+  })
+  setChapters(getChapters())
+  sectionFractions.value = getSectionFractions()
+}
+
+// Applies a user-initiated change: updates reactive refs AND saves the changed field to delta.
+// Also enables style injection from this point forward (user has opted in by changing something).
+async function applyUpdate(partial: Partial<ReaderState>) {
+  const shouldReopenForSpread = partial.fixedLayoutSpread !== undefined && partial.fixedLayoutSpread !== state.value.fixedLayoutSpread
+  shouldApplyStyles.value = true
+  seedState(partial)
+  bookSettings.updateBookSettings(partial)
+  if (shouldReopenForSpread) {
+    await reopenEpubAtCurrentLocation()
+  }
+}
+
+// Drops this book's overrides and falls back to the reader defaults. The renderer keeps
+// injecting styles so the change is visible immediately rather than only after a reopen.
+async function resetSettings() {
+  const previousSpread = state.value.fixedLayoutSpread
+  bookSettings.resetBookSettings()
+  shouldApplyStyles.value = true
+  seedState(bookSettings.effective.value as EpubReaderSettings)
+  if (state.value.fixedLayoutSpread !== previousSpread) {
+    await reopenEpubAtCurrentLocation()
+  }
+}
+
+watch(
+  () => footerMode.value,
+  (mode) => {
+    bookSettings.updateBookSettings({ footerDisplayMode: mode })
+    const renderer = getRenderer()
+    if (renderer) {
+      updateHeadsFeet(renderer, activeMode.value)
+    }
+  },
+)
+
+function setSettingsOpen(open: boolean) {
+  showSettings.value = open
+}
+
+watch(showSettings, (open) => {
+  setVisibilityLock(open)
+})
+
+// Only the selected family is held in memory, so the blob URLs backing the injected
+// CSS have to be refreshed whenever either the selection or the font list changes.
+async function refreshFontFaces() {
+  await customFonts.ensureCssFamilyLoaded(state.value.fontFamily)
+  setFontFaceCSS(customFonts.generateFontFaceCSS())
+  const renderer = getRenderer()
+  if (renderer && shouldApplyStyles.value) applyToRenderer(renderer, isFixedLayout.value ? { flow: 'paginated' } : undefined)
+}
+
+watch(() => [customFonts.fonts.value, customFonts.serverFonts.value], refreshFontFaces)
+
+watch(() => state.value.fontFamily, refreshFontFaces)
+
+function handleDeleteAnnotation(id: number) {
+  const ann = annotations.annotations.value.find((a) => a.id === id)
+  if (ann) {
+    if (ann.cfi) deleteAnnotation(ann.cfi)
+    annotations.remove(bookId, id)
+  }
+  selection.dismiss()
+}
+
+function handleSidebarDeleteAnnotation(id: number) {
+  const ann = annotations.annotations.value.find((a) => a.id === id)
+  if (ann) {
+    if (ann.cfi) deleteAnnotation(ann.cfi)
+    annotations.remove(bookId, id)
+  }
+}
+
+function handleSidebarDeleteBookmark(id: number) {
+  bookmarks.remove(bookId, id)
+}
+
+function getSidebarCfiTargets(): string[] {
+  const targets = new Set<string>()
+  for (const bm of bookmarks.bookmarks.value) {
+    if (bm.cfi) targets.add(bm.cfi)
+  }
+  for (const ann of annotations.annotations.value) {
+    if (ann.cfi) targets.add(ann.cfi)
+  }
+  return Array.from(targets)
+}
+
+function pruneSidebarLocationMeta(targets: string[]) {
+  const targetSet = new Set(targets)
+  const next: Record<string, { chapterTitle: string | null; percentage: number | null }> = {}
+  for (const [cfiKey, meta] of Object.entries(sidebarLocationMetaByCfi.value)) {
+    if (targetSet.has(cfiKey)) {
+      next[cfiKey] = meta
+    }
+  }
+  if (Object.keys(next).length === Object.keys(sidebarLocationMetaByCfi.value).length) return
+  sidebarLocationMetaByCfi.value = next
+}
+
+function toSidebarLocationMeta(context: FoliateLocationContext): { chapterTitle: string | null; percentage: number | null } {
+  const percentage =
+    typeof context.fraction === 'number' && Number.isFinite(context.fraction) ? Math.max(0, Math.min(100, Math.round(context.fraction * 100))) : null
+  return { chapterTitle: context.chapterTitle, percentage }
+}
+
+async function hydrateSidebarLocationMeta() {
+  const targets = getSidebarCfiTargets()
+  pruneSidebarLocationMeta(targets)
+  if (targets.length === 0) return
+
+  const unresolved = targets.filter((target) => !sidebarLocationMetaByCfi.value[target])
+  if (unresolved.length === 0) return
+
+  const requestSeq = ++sidebarLocationResolveSeq
+  const entries = await Promise.all(
+    unresolved.map(async (target) => {
+      try {
+        const context = await getLocationContext(target)
+        return [target, toSidebarLocationMeta(context)] as const
+      } catch {
+        return [target, { chapterTitle: null, percentage: null }] as const
+      }
+    }),
+  )
+
+  if (requestSeq !== sidebarLocationResolveSeq) return
+  sidebarLocationMetaByCfi.value = { ...sidebarLocationMetaByCfi.value, ...Object.fromEntries(entries) }
+}
+
+function onSearchQuery(q: string) {
+  if (!foliateView.value) return
+  doSearch(foliateView.value as FoliateView, q)
+}
+
+async function openSearchWithText(text: string) {
+  selection.dismiss()
+  searchInitialQuery.value = text
+  showSearch.value = true
+  await nextTick()
+  onSearchQuery(text)
+}
+
+function onSearchClear() {
+  clearSearch(foliateView.value as FoliateView | null)
+}
+
+function navigateSearch(cfiTarget: string) {
+  goTo(cfiTarget)
+}
+
+function closeSidebarAfterNavigation() {
+  if (shouldCloseAfterNavigation()) {
+    showSidebar.value = false
+  }
+}
+
+async function navigateFromSidebar(cfiTarget: string) {
+  const goToPromise = goTo(cfiTarget)
+  if (!goToPromise) return
+  const navigated = await Promise.resolve(goToPromise)
+    .then(() => true)
+    .catch(() => false)
+  if (!navigated) return
+  closeSidebarAfterNavigation()
+}
+
+function navigateAnnotationChapterFromSidebar(chapterIndex: number) {
+  const goToPromise = goToSection(chapterIndex)
+  if (!goToPromise) return
+  void Promise.resolve(goToPromise)
+    .then(() => {
+      closeSidebarAfterNavigation()
+    })
+    .catch(() => undefined)
+}
+
+function navigateChapterFromSidebar(href: string) {
+  goTo(href)
+  closeSidebarAfterNavigation()
+}
+
+function closeSearch() {
+  onSearchClear()
+  searchInitialQuery.value = ''
+  showSearch.value = false
+}
+
+watch(showSidebar, (open) => {
+  if (open) {
+    void hydrateSidebarLocationMeta()
+  }
+})
+
+watch(
+  () => [bookmarks.bookmarks.value.map((bm) => bm.cfi).join('|'), annotations.annotations.value.map((ann) => ann.cfi).join('|')],
+  () => {
+    if (showSidebar.value) {
+      void hydrateSidebarLocationMeta()
+    }
+  },
+)
+</script>
+
+<template>
+  <PdfV4ReaderView
+    v-if="isPdfFormat"
+    :bookId="bookId"
+    :fileId="fileId"
+    :peek-mode="isPeekMode"
+    :document-url="pdfDocumentUrl"
+    :settings-storage-key="catalogSettingsStorageKey"
+    :reader-route-name="catalogReaderRouteName"
+    :load-progress="catalogProgressAdapters.loadProgress"
+    :save-progress="catalogProgressAdapters.saveProgress"
+    :save-session="catalogSessionAdapters.saveSession"
+  />
+  <CbzReaderView
+    v-else-if="isComicFormat"
+    :bookId="bookId"
+    :fileId="fileId"
+    :peek-mode="isPeekMode"
+    :catalog-source="cbzCatalogSource"
+    :settings-storage-key="catalogSettingsStorageKey"
+    :reader-route-name="catalogReaderRouteName"
+    :load-progress="catalogProgressAdapters.loadProgress"
+    :save-progress="catalogProgressAdapters.saveProgress"
+    :save-session="catalogSessionAdapters.saveSession"
+  />
+  <AudiobookReaderView
+    v-else-if="isAudioFormat"
+    :bookId="bookId"
+    :fileId="fileId"
+    :peek-mode="isPeekMode"
+    :catalog-media-type="audioCatalogMediaType"
+    :catalog-remote-id="audioCatalogRemoteId"
+    :catalog-format="fileFormat"
+  />
+  <div
+    v-else
+    class="fixed inset-0 overflow-hidden"
+    :style="
+      shouldApplyStyles ? { background: activeMode.bg, colorScheme: isDark ? 'dark' : 'light' } : { background: '#ffffff', colorScheme: 'light' }
+    "
+  >
+    <ReaderHeader
+      :chapterTitle="chapterTitle"
+      :isBookmarked="bookmarks.isCurrentCfiBookmarked.value"
+      :settings-open="showSettings"
+      :footerMode="footerMode"
+      :peek-mode="isPeekMode"
+      class="transition-all duration-300"
+      :class="headerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
+      @back="router.back()"
+      @toggleSidebar="showSidebar = !showSidebar"
+      @toggleSearch="showSearch = !showSearch"
+      @toggleBookmark="bookmarks.toggle(bookId, cfi ?? '', chapterTitle)"
+      @update:settings-open="setSettingsOpen"
+      @toggleFullscreen="toggleFullscreen"
+      @toggleHelp="toggleHelpModal"
+      @cycleFooterMode="cycleFooterMode"
+      @startReading="startTrackedReading"
+    >
+      <template #settingsPanel>
+        <ReaderSettingsPanel
+          :state="state"
+          :customFonts="customFonts"
+          :is-fixed-layout="isFixedLayout"
+          :can-reset="bookSettings.isCustomized.value"
+          @update="applyUpdate"
+          @reset="resetSettings"
+        />
+      </template>
+    </ReaderHeader>
+
+    <Transition name="bookmark-fade">
+      <div v-if="bookmarks.isCurrentCfiBookmarked.value" class="absolute left-8 z-30 pointer-events-none" aria-hidden="true">
+        <div class="w-7 h-14 bg-primary" style="clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%)" />
+      </div>
+    </Transition>
+
+    <div class="absolute inset-0">
+      <div v-if="loading" class="absolute inset-0 flex items-center justify-center z-10 bg-background">
+        <div class="flex flex-col items-center gap-3">
+          <div class="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p class="text-sm text-muted-foreground">{{ t('reader.loadingBook') }}</p>
+        </div>
+      </div>
+
+      <div v-if="error && !loading" class="absolute inset-0 flex items-center justify-center z-10 p-8 bg-background">
+        <div class="text-center max-w-sm">
+          <p class="text-sm font-medium mb-2 text-foreground">{{ t('reader.failedToLoadBook') }}</p>
+          <p class="text-xs text-muted-foreground">{{ error }}</p>
+        </div>
+      </div>
+
+      <div ref="containerRef" class="absolute inset-0" />
+    </div>
+
+    <ReaderFooter
+      :fraction="fraction"
+      :sectionIndex="sectionIndex"
+      :totalSections="totalSections"
+      :sectionFractions="sectionFractions"
+      :chapterStartFraction="chapterStartFraction"
+      :chapterEndFraction="chapterEndFraction"
+      :locationTotal="locationTotal"
+      class="transition-all duration-300"
+      :class="footerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-full pointer-events-none'"
+      @prevSection="goToSection(sectionIndex - 1)"
+      @nextSection="goToSection(sectionIndex + 1)"
+      @seek="goToFraction($event)"
+    />
+
+    <ReaderSidebar
+      v-if="showSidebar"
+      :chapters="chapters"
+      :bookmarks="bookmarks.bookmarks.value"
+      :annotations="annotations.annotations.value"
+      :currentCfi="cfi"
+      :locationMetaByCfi="sidebarLocationMetaByCfi"
+      :activeHref="activeHref"
+      :expandedHrefs="expandedHrefs"
+      :pinned="isSidebarPinned"
+      @close="showSidebar = false"
+      @togglePinned="toggleSidebarPinned"
+      @navigateChapter="navigateChapterFromSidebar"
+      @navigateBookmark="navigateFromSidebar"
+      @navigateAnnotation="navigateFromSidebar"
+      @navigateAnnotationChapter="navigateAnnotationChapterFromSidebar"
+      @deleteBookmark="handleSidebarDeleteBookmark"
+      @deleteAnnotation="handleSidebarDeleteAnnotation"
+      @toggleExpand="toggleExpand"
+    />
+
+    <ReaderSearchPanel
+      v-if="showSearch"
+      :results="searchResults"
+      :isSearching="isSearching"
+      :initialQuery="searchInitialQuery"
+      @search="onSearchQuery"
+      @clear="onSearchClear"
+      @navigate="navigateSearch($event)"
+      @close="closeSearch"
+    />
+
+    <NoteDialog
+      v-if="selection.showNoteDialog.value"
+      :selectedText="selection.text.value"
+      :modelValue="selection.noteText.value"
+      @update:modelValue="selection.noteText.value = $event"
+      @save="handleSaveNote"
+      @cancel="selection.showNoteDialog.value = false"
+    />
+
+    <SelectionPopup
+      :visible="selection.visible.value"
+      :position="selection.position.value"
+      :showBelow="selection.showBelow.value"
+      :selectedText="selection.text.value"
+      :overlappingAnnotationId="selection.overlappingAnnotationId.value"
+      @copy="selection.dismiss()"
+      @highlight="handleHighlight"
+      @search="() => openSearchWithText(selection.text.value)"
+      @translate="handleTranslate"
+      @define="handleDefine"
+      @note="handleOpenNoteDialog"
+      @deleteAnnotation="handleDeleteAnnotation"
+      @dismiss="selection.dismiss()"
+    />
+
+    <DictionaryPopover
+      v-if="showDictionary"
+      :word="dictionaryWord"
+      :position="dictionaryPosition"
+      :lang="bookLanguage"
+      @close="showDictionary = false"
+    />
+
+    <TranslationPopover
+      v-if="showTranslation && !isMobile"
+      :text="translationText"
+      :position="translationPosition"
+      @close="showTranslation = false"
+    />
+
+    <TranslationSheet v-if="showTranslation && isMobile" :text="translationText" @close="showTranslation = false" />
+
+    <KeyboardShortcutsModal v-if="showHelpModal" @close="showHelpModal = false" />
+  </div>
+</template>
+
+<style scoped>
+.bookmark-fade-enter-active,
+.bookmark-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.bookmark-fade-enter-from,
+.bookmark-fade-leave-to {
+  opacity: 0;
+}
+</style>

@@ -1,0 +1,12 @@
+2026-06-05 09:07 EDT - Feature: Source-backed metadata export selection UI parity. Status: Complete. Notes: Ebook Library and Audio Library all-matching selections now expose the normal metadata export action while keeping selected remote ids out of local selected-book export paths.
+
+Review checkpoint:
+- Added the requested SelectionActionBar render test proving export-only actions show metadata export without enabling file downloads or the full metadata menu.
+
+Verification:
+- pnpm run typecheck
+- pnpm run test
+- pnpm --filter client exec vitest run src/views/__tests__/HomeView.spec.ts src/components/__tests__/SelectionActionBar.spec.ts
+- pnpm run typecheck:client
+- pnpm --filter client lint:check
+- pnpm --filter client test:unit --run

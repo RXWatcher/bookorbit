@@ -1,0 +1,2272 @@
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { SQL, and, asc, count, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
+import { SUPPORTED_BOOK_FORMATS } from '../upload/upload-validator.service';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+
+import type {
+  ContentFilterRules,
+  CustomMetadataFieldTypeMap,
+  JumpBucketKind,
+  JumpBucketsResponse,
+  SortField,
+  SortSpec,
+  TemporalJumpBucketPrecision,
+  TemporalJumpBucketUnit,
+} from '@bookorbit/types';
+import type { BookRecommendation } from '@bookorbit/types';
+import { isAudioFormat, isComicFormat, normalizeCoverAspectRatio } from '@bookorbit/types';
+import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
+import { accentInsensitiveIlike } from '../../common/utils/accent-insensitive-search.utils';
+import { SeriesIdentityService } from '../../common/services/series-identity.service';
+import { SeriesMembershipService } from '../../common/services/series-membership.service';
+import { BookQueryBuilder } from './book-query-builder.service';
+import { letterJumpBucketExpr } from './jump-bucket-expr';
+import { DB } from '../../db';
+import * as schema from '../../db/schema';
+import {
+  authors,
+  bookAuthors,
+  bookCommunityRatings,
+  bookFiles,
+  bookGenres,
+  bookMetadata,
+  bookNarrators,
+  bookSeries,
+  bookSeriesMemberships,
+  books,
+  bookTags,
+  collectionBooks,
+  collections,
+  genres,
+  koboDevices,
+  koboLibrarySnapshots,
+  koboReadingStates,
+  koboSnapshotBooks,
+  koboSyncSettings,
+  libraries,
+  narrators,
+  audiobookProgress,
+  readingProgress,
+  userBookRatings,
+  tags,
+  userBookStatus,
+} from '../../db/schema';
+
+type Db = NodePgDatabase<typeof schema>;
+type DbTransaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+type MetadataUpdateExecutor = Pick<Db, 'delete' | 'insert' | 'select' | 'update'>;
+type MetadataReadExecutor = Pick<Db, 'select'>;
+type JsonObj = Record<string, unknown>;
+
+type CollapsedRawRow = {
+  id: number;
+  status: string;
+  cover_aspect_ratio: string;
+  primary_file_id: number | null;
+  folder_path: string;
+  added_at: string;
+  updated_at: string;
+  title: string | null;
+  series_id: number | null;
+  series_name: string | null;
+  series_index: number | null;
+  published_date: string | null;
+  published_year: number | null;
+  language: string | null;
+  rating: number | null;
+  metadata_score: number | null;
+  cover_source: string | null;
+  locked_fields: string[] | null;
+  subtitle: string | null;
+  isbn13: string | null;
+  hardcover_id: string | null;
+  hardcover_edition_id: string | null;
+  publisher: string | null;
+  page_count: number | null;
+  sort_title: string | null;
+  sort_added_at: string | null;
+  book_count: string | null;
+  read_count: string | null;
+  cover_book_ids: number[] | null;
+  cover_updated_at_by_book_id: JsonObj | null;
+  first_volume_book_id: number | null;
+  latest_volume_book_id: number | null;
+  first_unread_book_id: number | null;
+  total_count: string;
+};
+type PatternMetadataRow = {
+  bookId: number;
+  title: string | null;
+  subtitle: string | null;
+  publisher: string | null;
+  publishedDate: string | null;
+  publishedYear: number | null;
+  language: string | null;
+  seriesId: number | null;
+  seriesName: string | null;
+  seriesIndex: number | null;
+  isbn13: string | null;
+  authors: string[];
+};
+
+function parseDateByBookId(value: JsonObj | null | undefined): Record<number, Date | null> {
+  const result: Record<number, Date | null> = {};
+  for (const [rawBookId, rawValue] of Object.entries(value ?? {})) {
+    const bookId = Number(rawBookId);
+    if (!Number.isInteger(bookId) || bookId <= 0) continue;
+    if (rawValue instanceof Date) {
+      result[bookId] = Number.isNaN(rawValue.getTime()) ? null : rawValue;
+      continue;
+    }
+    if (typeof rawValue === 'string' || typeof rawValue === 'number') {
+      const parsed = new Date(rawValue);
+      result[bookId] = Number.isNaN(parsed.getTime()) ? null : parsed;
+      continue;
+    }
+    result[bookId] = null;
+  }
+  return result;
+}
+
+const PROGRESS_EPSILON = 0.0001;
+
+// Shared between the collapsed listing query and the collapsed jump-buckets
+// query: both must pick the exact same series representative or bucket indexes
+// drift from listing offsets. Guarded by the jump-buckets invariant e2e test.
+const COLLAPSE_GROUP_KEY_SQL = `base.library_id, COALESCE(base.series_id::text, 'book_' || base.id::text)`;
+const COLLAPSE_REPRESENTATIVE_PICK_SQL = `${COLLAPSE_GROUP_KEY_SQL},
+          base.series_index ASC NULLS LAST,
+          base.added_at ASC,
+          base.id ASC`;
+
+type JumpBucketRawRow = {
+  bucket: string;
+  item_index: number | string;
+  total: number | string;
+};
+
+type TemporalJumpBucketRawRow = JumpBucketRawRow & {
+  is_unknown: boolean;
+  unit: TemporalJumpBucketUnit;
+  step: number | string;
+};
+
+type DiscreteJumpBucketRawRow = JumpBucketRawRow & {
+  is_unknown: boolean;
+};
+
+type FlatDiscreteSourceParts = {
+  prefixCte: SQL;
+  join: SQL;
+  value: SQL;
+};
+
+type CollapsedDiscreteSourceParts = {
+  prefixCte: SQL;
+  baseJoin: SQL;
+  baseExtraSelect: SQL;
+  representativeExtraSelect: SQL;
+  value: SQL;
+};
+
+type TemporalSourceParts = {
+  prefixCte: SQL;
+  join: SQL;
+  value: SQL;
+  baseExtraSelect: SQL;
+  representativeExtraSelect: SQL;
+};
+
+function flatDiscreteSourceParts(field: SortField, userId: number): FlatDiscreteSourceParts | null {
+  const empty = sql.raw('');
+  const direct = (value: SQL): FlatDiscreteSourceParts => ({ prefixCte: empty, join: empty, value });
+
+  switch (field) {
+    case 'title':
+      return direct(sql`${bookMetadata.title}`);
+    case 'author':
+      return direct(sql`${books.primaryAuthorSortName}`);
+    case 'series':
+      return direct(sql`${bookMetadata.seriesName}`);
+    case 'publisher':
+      return direct(sql`${bookMetadata.publisher}`);
+    case 'language':
+      return direct(sql`${bookMetadata.language}`);
+    case 'format':
+      return {
+        prefixCte: empty,
+        join: sql`LEFT JOIN ${bookFiles} rail_primary_file ON rail_primary_file.id = ${books.primaryFileId}`,
+        value: sql.raw('rail_primary_file.format'),
+      };
+    case 'readStatus':
+      return {
+        prefixCte: empty,
+        join: sql`LEFT JOIN ${userBookStatus} rail_ubs ON rail_ubs.book_id = ${books.id} AND rail_ubs.user_id = ${userId}`,
+        value: sql`coalesce(rail_ubs.status::text, 'unread')`,
+      };
+    default:
+      return null;
+  }
+}
+
+function collapsedDiscreteSourceParts(field: SortField, userId: number): CollapsedDiscreteSourceParts | null {
+  const empty = sql.raw('');
+  const direct = (value: SQL): CollapsedDiscreteSourceParts => ({
+    prefixCte: empty,
+    baseJoin: empty,
+    baseExtraSelect: empty,
+    representativeExtraSelect: empty,
+    value,
+  });
+
+  switch (field) {
+    case 'title':
+    case 'series':
+      return direct(sql.raw('r.sort_title'));
+    case 'author':
+      return direct(sql.raw('r.author_sort_name'));
+    case 'publisher':
+      return direct(sql.raw('r.publisher'));
+    case 'language':
+      return {
+        prefixCte: empty,
+        baseJoin: empty,
+        baseExtraSelect: sql`, ${bookMetadata.language} AS language`,
+        representativeExtraSelect: sql`, base.language`,
+        value: sql.raw('r.language'),
+      };
+    case 'format':
+      return {
+        prefixCte: empty,
+        baseJoin: sql`LEFT JOIN ${bookFiles} rail_primary_file ON rail_primary_file.id = ${books.primaryFileId}`,
+        baseExtraSelect: sql`, rail_primary_file.format AS rail_discrete_value`,
+        representativeExtraSelect: sql`, base.rail_discrete_value`,
+        value: sql.raw('r.rail_discrete_value'),
+      };
+    case 'readStatus':
+      return {
+        prefixCte: empty,
+        baseJoin: sql`LEFT JOIN ${userBookStatus} rail_ubs ON rail_ubs.book_id = ${books.id} AND rail_ubs.user_id = ${userId}`,
+        baseExtraSelect: sql`, coalesce(rail_ubs.status::text, 'unread') AS rail_discrete_value`,
+        representativeExtraSelect: sql`, base.rail_discrete_value`,
+        value: sql.raw('r.rail_discrete_value'),
+      };
+    default:
+      return null;
+  }
+}
+
+function discreteBucketsQuery(opts: { prefixCte: SQL; orderedRows: SQL; maxBuckets: number }): SQL {
+  return sql`
+    WITH ${opts.prefixCte}
+    ordered AS MATERIALIZED (${opts.orderedRows}),
+    grouped AS (
+      SELECT bucket, is_unknown, min(item_index)::int AS item_index, (SELECT count(*) FROM ordered)::int AS total
+      FROM ordered
+      WHERE bucket IS NOT NULL
+      GROUP BY bucket, is_unknown
+    ),
+    ranked AS (
+      SELECT
+        grouped.*,
+        row_number() OVER (ORDER BY item_index)::int AS bucket_ordinal,
+        count(*) OVER ()::int AS bucket_count
+      FROM grouped
+    )
+    SELECT bucket, item_index, total, is_unknown
+    FROM ranked
+    WHERE bucket_count <= ${opts.maxBuckets}
+      OR bucket_ordinal = 1
+      OR bucket_ordinal = bucket_count
+      OR mod(
+        bucket_ordinal - 1,
+        GREATEST(ceil((bucket_count - 1)::numeric / GREATEST(${opts.maxBuckets} - 1, 1))::int, 1)
+      ) = 0
+    ORDER BY item_index
+    LIMIT ${opts.maxBuckets}
+  `;
+}
+
+function temporalSourceParts(field: SortField, userId: number, timeZone: string, collapsed: boolean): TemporalSourceParts | null {
+  const empty = sql.raw('');
+  const direct = (value: SQL): TemporalSourceParts => ({
+    prefixCte: empty,
+    join: empty,
+    value,
+    baseExtraSelect: empty,
+    representativeExtraSelect: empty,
+  });
+
+  if (collapsed) {
+    switch (field) {
+      case 'addedAt':
+        return direct(sql`timezone(${timeZone}, r.sort_added_at)`);
+      case 'updatedAt':
+        return direct(sql`timezone(${timeZone}, r.updated_at)`);
+      case 'publishedDate':
+        return direct(sql`coalesce(r.published_date, make_date(r.published_year, 1, 1))::timestamp`);
+      case 'publishedYear':
+        return direct(sql`make_date(r.published_year, 1, 1)::timestamp`);
+      case 'startedAt':
+      case 'finishedAt': {
+        const column = field === 'startedAt' ? sql.raw('rail_ubs.started_at') : sql.raw('rail_ubs.finished_at');
+        return {
+          prefixCte: empty,
+          join: sql`LEFT JOIN ${userBookStatus} rail_ubs ON rail_ubs.book_id = books.id AND rail_ubs.user_id = ${userId}`,
+          value: sql`timezone(${timeZone}, r.rail_temporal_value)`,
+          baseExtraSelect: sql`, ${column} AS rail_temporal_value`,
+          representativeExtraSelect: sql`, base.rail_temporal_value`,
+        };
+      }
+      case 'lastReadAt':
+        return {
+          prefixCte: sql`rail_last_read AS MATERIALIZED (
+            SELECT rail_bf.book_id, max(rail_rp.updated_at) AS value
+            FROM ${readingProgress} rail_rp
+            INNER JOIN ${bookFiles} rail_bf ON rail_bf.id = rail_rp.book_file_id
+            WHERE rail_rp.user_id = ${userId}
+            GROUP BY rail_bf.book_id
+          ),`,
+          join: sql`LEFT JOIN rail_last_read ON rail_last_read.book_id = books.id`,
+          value: sql`timezone(${timeZone}, r.rail_temporal_value)`,
+          baseExtraSelect: sql`, rail_last_read.value AS rail_temporal_value`,
+          representativeExtraSelect: sql`, base.rail_temporal_value`,
+        };
+      default:
+        return null;
+    }
+  }
+
+  switch (field) {
+    case 'addedAt':
+      return direct(sql`timezone(${timeZone}, ${books.addedAt})`);
+    case 'updatedAt':
+      return direct(sql`timezone(${timeZone}, ${books.updatedAt})`);
+    case 'publishedDate':
+      return direct(sql`coalesce(${bookMetadata.publishedDate}, make_date(${bookMetadata.publishedYear}, 1, 1))::timestamp`);
+    case 'publishedYear':
+      return direct(sql`make_date(${bookMetadata.publishedYear}, 1, 1)::timestamp`);
+    case 'startedAt':
+    case 'finishedAt': {
+      const column = field === 'startedAt' ? sql.raw('rail_ubs.started_at') : sql.raw('rail_ubs.finished_at');
+      return {
+        prefixCte: empty,
+        join: sql`LEFT JOIN ${userBookStatus} rail_ubs ON rail_ubs.book_id = ${books.id} AND rail_ubs.user_id = ${userId}`,
+        value: sql`timezone(${timeZone}, ${column})`,
+        baseExtraSelect: empty,
+        representativeExtraSelect: empty,
+      };
+    }
+    case 'lastReadAt':
+      return {
+        prefixCte: sql`rail_last_read AS MATERIALIZED (
+          SELECT rail_bf.book_id, max(rail_rp.updated_at) AS value
+          FROM ${readingProgress} rail_rp
+          INNER JOIN ${bookFiles} rail_bf ON rail_bf.id = rail_rp.book_file_id
+          WHERE rail_rp.user_id = ${userId}
+          GROUP BY rail_bf.book_id
+        ),`,
+        join: sql`LEFT JOIN rail_last_read ON rail_last_read.book_id = ${books.id}`,
+        value: sql`timezone(${timeZone}, rail_last_read.value)`,
+        baseExtraSelect: empty,
+        representativeExtraSelect: empty,
+      };
+    default:
+      return null;
+  }
+}
+
+function temporalBucketsQuery(opts: {
+  prefixCte: SQL;
+  temporalRows: SQL;
+  precision: TemporalJumpBucketPrecision;
+  direction: 'asc' | 'desc';
+  maxBuckets: number;
+}): SQL {
+  const direction = sql.raw(opts.direction === 'desc' ? 'DESC' : 'ASC');
+  const unit =
+    opts.precision === 'year'
+      ? sql`'year'::text`
+      : sql`CASE
+          WHEN day_span <= known_capacity THEN 'day'
+          WHEN month_span <= known_capacity THEN 'month'
+          ELSE 'year'
+        END`;
+
+  return sql`
+    WITH ${opts.prefixCte}
+    temporal_rows AS MATERIALIZED (${opts.temporalRows}),
+    bounds AS (
+      SELECT
+        min(value::date) AS min_date,
+        max(value::date) AS max_date,
+        count(*)::int AS total,
+        count(value)::int AS known_total,
+        (count(DISTINCT extract(year FROM value)) FILTER (WHERE value IS NOT NULL))::int AS known_year_count
+      FROM temporal_rows
+    ),
+    spans AS (
+      SELECT
+        bounds.*,
+        GREATEST(${opts.maxBuckets} - CASE WHEN total > known_total THEN 1 ELSE 0 END, 2)::int AS known_capacity,
+        COALESCE((max_date - min_date) + 1, 1)::int AS day_span,
+        COALESCE(
+          ((extract(year FROM max_date)::int - extract(year FROM min_date)::int) * 12)
+          + extract(month FROM max_date)::int - extract(month FROM min_date)::int + 1,
+          1
+        )::int AS month_span,
+        COALESCE(extract(year FROM max_date)::int - extract(year FROM min_date)::int + 1, 1)::int AS year_span
+      FROM bounds
+    ),
+    resolution_seed AS (
+      SELECT spans.*, ${unit} AS unit
+      FROM spans
+    ),
+    resolution_raw AS (
+      SELECT
+        resolution_seed.*,
+        CASE
+          WHEN unit <> 'year' OR year_span <= known_capacity OR known_year_count <= known_capacity THEN 1
+          ELSE GREATEST(1, ceil(year_span::numeric / GREATEST(known_capacity - 1, 1))::int)
+        END AS raw_year_step
+      FROM resolution_seed
+    ),
+    resolution_scale AS (
+      SELECT
+        resolution_raw.*,
+        power(10::numeric, floor(log(GREATEST(raw_year_step, 1)::numeric)))::int AS step_scale
+      FROM resolution_raw
+    ),
+    resolution AS (
+      SELECT
+        min_date,
+        max_date,
+        total,
+        known_total,
+        known_capacity,
+        unit,
+        CASE
+          WHEN raw_year_step <= step_scale THEN step_scale
+          WHEN raw_year_step <= step_scale * 2 THEN step_scale * 2
+          WHEN raw_year_step <= step_scale * 5 THEN step_scale * 5
+          ELSE step_scale * 10
+        END::int AS step
+      FROM resolution_scale
+    ),
+    bucketed AS (
+      SELECT
+        temporal_rows.value,
+        resolution.unit,
+        resolution.step,
+        CASE resolution.unit
+          WHEN 'day' THEN to_char(temporal_rows.value::date, 'YYYY-MM-DD')
+          WHEN 'month' THEN to_char(date_trunc('month', temporal_rows.value)::date, 'YYYY-MM')
+          ELSE (floor(extract(year FROM temporal_rows.value)::numeric / resolution.step) * resolution.step)::int::text
+        END AS bucket
+      FROM temporal_rows
+      CROSS JOIN resolution
+      WHERE temporal_rows.value IS NOT NULL
+    ),
+    known_groups AS (
+      SELECT bucket, min(value) AS bucket_sort, count(*)::int AS item_count, min(unit) AS unit, min(step)::int AS step
+      FROM bucketed
+      GROUP BY bucket
+    ),
+    known_ranked AS (
+      SELECT
+        bucket,
+        COALESCE(
+          sum(item_count) OVER (
+            ORDER BY bucket_sort ${direction}
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+          ),
+          0
+        )::int AS item_index,
+        unit,
+        step
+      FROM known_groups
+    ),
+    result_rows AS (
+      SELECT
+        known_ranked.bucket,
+        known_ranked.item_index,
+        bounds.total,
+        false AS is_unknown,
+        known_ranked.unit,
+        known_ranked.step
+      FROM known_ranked
+      CROSS JOIN bounds
+      UNION ALL
+      SELECT
+        '__unknown__' AS bucket,
+        bounds.known_total AS item_index,
+        bounds.total,
+        true AS is_unknown,
+        resolution.unit,
+        resolution.step
+      FROM bounds
+      CROSS JOIN resolution
+      WHERE bounds.total > bounds.known_total
+    )
+    SELECT bucket, item_index, total, is_unknown, unit, step
+    FROM result_rows
+    ORDER BY item_index
+  `;
+}
+
+@Injectable()
+export class BookRepository {
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() private readonly seriesIdentity?: SeriesIdentityService,
+    @Optional() private readonly seriesMemberships?: SeriesMembershipService,
+  ) {}
+
+  private visibleWhere(where: SQL | undefined): SQL {
+    return where ? and(where, ne(books.status, 'processing'))! : ne(books.status, 'processing');
+  }
+
+  async withTransaction<T>(callback: (tx: DbTransaction) => Promise<T>): Promise<T> {
+    return this.db.transaction((tx) => callback(tx));
+  }
+
+  async findCards(opts: { where: SQL | undefined; orderBy: SQL[]; limit: number; offset: number; userId: number }) {
+    const { where, orderBy, limit, offset, userId } = opts;
+    const visibleWhere = this.visibleWhere(where);
+
+    const rows = await this.db
+      .select({
+        id: books.id,
+        status: books.status,
+        coverAspectRatio: libraries.coverAspectRatio,
+        primaryFileId: books.primaryFileId,
+        folderPath: books.folderPath,
+        addedAt: books.addedAt,
+        updatedAt: books.updatedAt,
+        title: bookMetadata.title,
+        seriesId: bookMetadata.seriesId,
+        seriesName: bookMetadata.seriesName,
+        seriesIndex: bookMetadata.seriesIndex,
+        publishedDate: bookMetadata.publishedDate,
+        publishedYear: bookMetadata.publishedYear,
+        language: bookMetadata.language,
+        rating: userBookRatings.rating,
+        coverSource: bookMetadata.coverSource,
+        lockedFields: bookMetadata.lockedFields,
+        subtitle: bookMetadata.subtitle,
+        publisher: bookMetadata.publisher,
+        pageCount: bookMetadata.pageCount,
+        isbn13: bookMetadata.isbn13,
+        hardcoverId: bookMetadata.hardcoverId,
+        hardcoverEditionId: bookMetadata.hardcoverEditionId,
+        metadataScore: bookMetadata.metadataScore,
+        _total: sql<number>`count(*) over()`.as('_total'),
+      })
+      .from(books)
+      .innerJoin(libraries, eq(libraries.id, books.libraryId))
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .leftJoin(userBookRatings, and(eq(userBookRatings.bookId, books.id), eq(userBookRatings.userId, userId)))
+      .where(visibleWhere)
+      .orderBy(...orderBy)
+      .limit(limit)
+      .offset(offset);
+
+    const total = rows.length > 0 ? rows[0]._total : await this.countWhere(visibleWhere);
+
+    const bookRefs = rows.map((r) => ({ id: r.id, primaryFileId: r.primaryFileId ?? null }));
+    const enrichment = await this.enrichBookIds(bookRefs, userId);
+
+    return { rows, ...enrichment, total: Number(total) };
+  }
+
+  private async enrichBookIds(bookRefs: Array<{ id: number; primaryFileId: number | null }>, userId: number) {
+    const bookIds = bookRefs.map((book) => book.id);
+    const primaryFileIds = bookRefs.map((book) => book.primaryFileId).filter((id): id is number => id != null);
+
+    if (bookIds.length === 0) {
+      return {
+        authorRows: [] as { bookId: number; name: string }[],
+        fileRows: [] as { bookId: number; id: number; format: string | null; role: string; sizeBytes: number | null }[],
+        genreRows: [] as { bookId: number; name: string }[],
+        tagRows: [] as { bookId: number; name: string }[],
+        progressRows: [] as { bookFileId: number; percentage: number }[],
+        statusRows: [] as {
+          bookId: number;
+          status: string;
+          source: string;
+          startedAt: Date | null;
+          finishedAt: Date | null;
+          updatedAt: Date;
+        }[],
+        narratorRows: [] as { bookId: number; name: string }[],
+        seriesMembershipRows: [] as {
+          bookId: number;
+          seriesId: number;
+          seriesName: string;
+          seriesIndex: number | null;
+          displayOrder: number;
+          expectedBookCount: number | null;
+        }[],
+      };
+    }
+
+    const [authorRows, fileRows, genreRows, tagRows, narratorRows, seriesMembershipRows, statusRows, fileProgressRows, audiobookProgressRows] =
+      await Promise.all([
+        this.db
+          .select({ bookId: bookAuthors.bookId, name: authors.name })
+          .from(bookAuthors)
+          .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+          .where(inArray(bookAuthors.bookId, bookIds))
+          .orderBy(bookAuthors.displayOrder),
+        this.db
+          .select({ bookId: bookFiles.bookId, id: bookFiles.id, format: bookFiles.format, role: bookFiles.role, sizeBytes: bookFiles.sizeBytes })
+          .from(bookFiles)
+          .where(inArray(bookFiles.bookId, bookIds)),
+        this.db
+          .select({ bookId: bookGenres.bookId, name: genres.name })
+          .from(bookGenres)
+          .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+          .where(inArray(bookGenres.bookId, bookIds)),
+        this.db
+          .select({ bookId: bookTags.bookId, name: tags.name })
+          .from(bookTags)
+          .innerJoin(tags, eq(tags.id, bookTags.tagId))
+          .where(inArray(bookTags.bookId, bookIds)),
+        this.db
+          .select({ bookId: bookNarrators.bookId, name: narrators.name })
+          .from(bookNarrators)
+          .innerJoin(narrators, eq(narrators.id, bookNarrators.narratorId))
+          .where(inArray(bookNarrators.bookId, bookIds))
+          .orderBy(bookNarrators.displayOrder),
+        this.db
+          .select({
+            bookId: bookSeriesMemberships.bookId,
+            seriesId: bookSeriesMemberships.seriesId,
+            seriesName: bookSeries.name,
+            seriesIndex: bookSeriesMemberships.seriesIndex,
+            displayOrder: bookSeriesMemberships.displayOrder,
+            expectedBookCount: bookSeries.expectedBookCount,
+          })
+          .from(bookSeriesMemberships)
+          .innerJoin(bookSeries, eq(bookSeries.id, bookSeriesMemberships.seriesId))
+          .where(inArray(bookSeriesMemberships.bookId, bookIds))
+          .orderBy(asc(bookSeriesMemberships.bookId), asc(bookSeriesMemberships.displayOrder), asc(bookSeriesMemberships.seriesId)),
+        this.db
+          .select({
+            bookId: userBookStatus.bookId,
+            status: userBookStatus.status,
+            source: userBookStatus.source,
+            startedAt: userBookStatus.startedAt,
+            finishedAt: userBookStatus.finishedAt,
+            updatedAt: userBookStatus.updatedAt,
+          })
+          .from(userBookStatus)
+          .where(and(eq(userBookStatus.userId, userId), inArray(userBookStatus.bookId, bookIds))),
+        primaryFileIds.length > 0
+          ? this.db
+              .select({
+                bookFileId: readingProgress.bookFileId,
+                percentage: readingProgress.percentage,
+                updatedAt: readingProgress.updatedAt,
+              })
+              .from(readingProgress)
+              .where(and(eq(readingProgress.userId, userId), inArray(readingProgress.bookFileId, primaryFileIds)))
+          : Promise.resolve([] as { bookFileId: number; percentage: number; updatedAt: Date }[]),
+        this.db
+          .select({
+            bookId: audiobookProgress.bookId,
+            percentage: audiobookProgress.percentage,
+            updatedAt: audiobookProgress.updatedAt,
+          })
+          .from(audiobookProgress)
+          .where(and(eq(audiobookProgress.userId, userId), inArray(audiobookProgress.bookId, bookIds))),
+      ]);
+
+    const fileProgressById = new Map(fileProgressRows.map((row) => [row.bookFileId, row]));
+    const audiobookProgressByBookId = new Map(audiobookProgressRows.map((row) => [row.bookId, row]));
+    const progressRows = bookRefs.flatMap((book) => {
+      if (book.primaryFileId == null) return [];
+
+      const fileProgress = fileProgressById.get(book.primaryFileId);
+      const audioProgress = audiobookProgressByBookId.get(book.id);
+      if (!fileProgress && !audioProgress) return [];
+
+      const mergedPercentage =
+        fileProgress && audioProgress
+          ? fileProgress.updatedAt >= audioProgress.updatedAt
+            ? fileProgress.percentage
+            : audioProgress.percentage
+          : (fileProgress?.percentage ?? audioProgress?.percentage ?? null);
+
+      return [{ bookFileId: book.primaryFileId, percentage: mergedPercentage }];
+    });
+
+    return { authorRows, fileRows, genreRows, tagRows, progressRows, statusRows, narratorRows, seriesMembershipRows };
+  }
+
+  async findCardsByBookIds(bookIds: number[], userId: number) {
+    if (bookIds.length === 0) {
+      return {
+        rows: [],
+        authorRows: [],
+        fileRows: [],
+        genreRows: [],
+        tagRows: [],
+        progressRows: [],
+        statusRows: [],
+        narratorRows: [],
+        seriesMembershipRows: [],
+        total: 0,
+      };
+    }
+
+    return this.findCards({
+      where: inArray(books.id, bookIds),
+      orderBy: [],
+      limit: bookIds.length,
+      offset: 0,
+      userId,
+    });
+  }
+
+  async findCardsCollapsed(opts: {
+    where: SQL | undefined;
+    sort: SortSpec[];
+    limit: number;
+    offset: number;
+    userId: number;
+    customFieldTypes?: CustomMetadataFieldTypeMap;
+  }): Promise<{
+    rows: Array<{
+      id: number;
+      status: string;
+      coverAspectRatio: string;
+      primaryFileId: number | null;
+      folderPath: string;
+      addedAt: Date;
+      updatedAt: Date;
+      title: string | null;
+      seriesName: string | null;
+      seriesId: number | null;
+      seriesIndex: number | null;
+      publishedDate: string | null;
+      publishedYear: number | null;
+      language: string | null;
+      rating: number | null;
+      metadataScore: number | null;
+      coverSource: string | null;
+      lockedFields: string[] | null;
+      subtitle: string | null;
+      publisher: string | null;
+      pageCount: number | null;
+      isbn13: string | null;
+      hardcoverId: string | null;
+      hardcoverEditionId: string | null;
+      bookCount: number | null;
+      readCount: number | null;
+      coverBookIds: number[] | null;
+      coverUpdatedAtByBookId: Record<number, Date | null> | null;
+      seriesLatestAddedAt: Date | null;
+      firstVolumeBookId: number | null;
+      latestVolumeBookId: number | null;
+      firstUnreadBookId: number | null;
+    }>;
+    authorRows: { bookId: number; name: string }[];
+    fileRows: { bookId: number; id: number; format: string | null; role: string; sizeBytes: number | null }[];
+    genreRows: { bookId: number; name: string }[];
+    tagRows: { bookId: number; name: string }[];
+    progressRows: { bookFileId: number; percentage: number | null }[];
+    statusRows: {
+      bookId: number;
+      status: string;
+      source: string;
+      startedAt: Date | null;
+      finishedAt: Date | null;
+      updatedAt: Date;
+    }[];
+    narratorRows: { bookId: number; name: string }[];
+    seriesMembershipRows: {
+      bookId: number;
+      seriesId: number;
+      seriesName: string;
+      seriesIndex: number | null;
+      displayOrder: number;
+      expectedBookCount: number | null;
+    }[];
+    total: number;
+  }> {
+    const { where, sort, limit, offset, userId } = opts;
+    const whereFragment = this.visibleWhere(where);
+    const orderBy = BookQueryBuilder.buildCollapseOrderBy(sort, userId, opts.customFieldTypes);
+
+    const result = await this.db.execute<CollapsedRawRow>(sql`
+      WITH base_rows AS (
+        SELECT
+          books.id,
+          books.library_id,
+          books.status,
+          libraries.cover_aspect_ratio,
+          books.primary_file_id,
+          books.primary_author_sort_name,
+          books.folder_path,
+          books.added_at,
+          books.updated_at,
+          book_metadata.title,
+          book_metadata.series_id,
+          book_metadata.series_name,
+          book_metadata.series_index,
+          book_metadata.published_date,
+          book_metadata.published_year,
+          book_metadata.language,
+          book_metadata.cover_source,
+          book_metadata.locked_fields,
+          book_metadata.publisher,
+          book_metadata.page_count,
+          book_metadata.subtitle,
+          book_metadata.isbn13,
+          book_metadata.hardcover_id,
+          book_metadata.hardcover_edition_id,
+          book_metadata.metadata_score,
+          NULLIF(lower(btrim(book_metadata.series_name)), '') AS norm_series
+        FROM books
+        INNER JOIN libraries ON libraries.id = books.library_id
+        LEFT JOIN book_metadata ON book_metadata.book_id = books.id
+        WHERE ${whereFragment}
+      ),
+      series_agg AS (
+        SELECT
+          base.series_id,
+          base.library_id,
+          COUNT(*) AS book_count,
+          SUM(CASE WHEN user_book_status.status = 'read' THEN 1 ELSE 0 END) AS read_count,
+          MAX(base.added_at) AS latest_added_at
+        FROM base_rows base
+        LEFT JOIN user_book_status ON user_book_status.book_id = base.id AND user_book_status.user_id = ${userId}
+        WHERE base.series_id IS NOT NULL
+        GROUP BY base.series_id, base.library_id
+      ),
+      series_cover_candidates AS (
+        SELECT
+          base.series_id,
+          base.library_id,
+          base.id,
+          base.series_index,
+          base.added_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY base.series_id, base.library_id
+            ORDER BY base.series_index ASC NULLS LAST, base.added_at ASC, base.id ASC
+          ) AS rn
+        FROM base_rows base
+        WHERE base.series_id IS NOT NULL
+      ),
+      series_covers AS (
+        SELECT
+          scc.series_id,
+          scc.library_id,
+          COALESCE(
+            ARRAY_AGG(scc.id ORDER BY scc.series_index ASC NULLS LAST, scc.added_at ASC, scc.id ASC) FILTER (WHERE scc.rn <= 4),
+            ARRAY[]::int[]
+          ) AS cover_book_ids
+        FROM series_cover_candidates scc
+        GROUP BY scc.series_id, scc.library_id
+      ),
+      series_first_volume AS (
+        SELECT scc.series_id, scc.library_id, scc.id AS first_volume_book_id
+        FROM series_cover_candidates scc
+        WHERE scc.rn = 1
+      ),
+      series_latest_volume AS (
+        SELECT slv.series_id, slv.library_id, slv.id AS latest_volume_book_id
+        FROM (
+          SELECT
+            base.series_id,
+            base.library_id,
+            base.id,
+            ROW_NUMBER() OVER (
+              PARTITION BY base.series_id, base.library_id
+              ORDER BY base.series_index DESC NULLS LAST, base.added_at DESC, base.id DESC
+            ) AS rn
+          FROM base_rows base
+          WHERE base.series_id IS NOT NULL
+        ) slv
+        WHERE slv.rn = 1
+      ),
+      series_first_unread AS (
+        SELECT sfu.series_id, sfu.library_id, sfu.id AS first_unread_book_id
+        FROM (
+          SELECT
+            base.series_id,
+            base.library_id,
+            base.id,
+            ROW_NUMBER() OVER (
+              PARTITION BY base.series_id, base.library_id
+              ORDER BY base.series_index ASC NULLS LAST, base.added_at ASC, base.id ASC
+            ) AS rn
+          FROM base_rows base
+          LEFT JOIN user_book_status ubs ON ubs.book_id = base.id AND ubs.user_id = ${userId}
+          WHERE base.series_id IS NOT NULL
+            AND ubs.status IS DISTINCT FROM 'read'
+        ) sfu
+        WHERE sfu.rn = 1
+      ),
+      series_cover_version_ids AS (
+        SELECT scc.series_id, scc.library_id, scc.id
+        FROM series_cover_candidates scc
+        WHERE scc.rn <= 4
+        UNION
+        SELECT sfv.series_id, sfv.library_id, sfv.first_volume_book_id AS id
+        FROM series_first_volume sfv
+        UNION
+        SELECT slv.series_id, slv.library_id, slv.latest_volume_book_id AS id
+        FROM series_latest_volume slv
+        UNION
+        SELECT sfu.series_id, sfu.library_id, sfu.first_unread_book_id AS id
+        FROM series_first_unread sfu
+      ),
+      series_cover_versions AS (
+        SELECT
+          scvi.series_id,
+          scvi.library_id,
+          COALESCE(JSONB_OBJECT_AGG(scvi.id::text, base.updated_at), '{}'::jsonb) AS cover_updated_at_by_book_id
+        FROM series_cover_version_ids scvi
+        INNER JOIN base_rows base
+          ON base.id = scvi.id
+          AND base.series_id = scvi.series_id
+          AND base.library_id = scvi.library_id
+        GROUP BY scvi.series_id, scvi.library_id
+      ),
+      representatives AS (
+        SELECT DISTINCT ON (${sql.raw(COLLAPSE_GROUP_KEY_SQL)})
+          base.id,
+          base.status,
+          base.cover_aspect_ratio,
+          base.primary_file_id,
+          base.folder_path,
+          base.added_at,
+          base.updated_at,
+          base.title,
+          base.series_id,
+          base.series_name,
+          base.series_index,
+          base.published_date,
+          base.published_year,
+          base.language,
+          ubr.rating,
+          base.cover_source,
+          base.locked_fields,
+          base.publisher,
+          base.page_count,
+          base.subtitle,
+          base.isbn13,
+          base.hardcover_id,
+          base.hardcover_edition_id,
+          base.metadata_score,
+          base.primary_author_sort_name AS author_sort_name,
+          COALESCE(base.norm_series, lower(base.title)) AS sort_title,
+          COALESCE(sa.latest_added_at, base.added_at) AS sort_added_at,
+          sa.book_count,
+          sa.read_count,
+          sc.cover_book_ids,
+          scv.cover_updated_at_by_book_id,
+          sfv.first_volume_book_id,
+          slv2.latest_volume_book_id,
+          sfu2.first_unread_book_id
+        FROM base_rows base
+        LEFT JOIN user_book_ratings ubr ON ubr.book_id = base.id AND ubr.user_id = ${userId}
+        LEFT JOIN series_agg sa
+          ON sa.series_id = base.series_id
+          AND sa.library_id = base.library_id
+        LEFT JOIN series_covers sc
+          ON sc.series_id = sa.series_id
+          AND sc.library_id = sa.library_id
+        LEFT JOIN series_cover_versions scv
+          ON scv.series_id = sa.series_id
+          AND scv.library_id = sa.library_id
+        LEFT JOIN series_first_volume sfv
+          ON sfv.series_id = base.series_id
+          AND sfv.library_id = base.library_id
+        LEFT JOIN series_latest_volume slv2
+          ON slv2.series_id = base.series_id
+          AND slv2.library_id = base.library_id
+        LEFT JOIN series_first_unread sfu2
+          ON sfu2.series_id = base.series_id
+          AND sfu2.library_id = base.library_id
+        ORDER BY ${sql.raw(COLLAPSE_REPRESENTATIVE_PICK_SQL)}
+      )
+      SELECT r.*,
+        COUNT(*) OVER () AS total_count
+      FROM representatives r
+      ORDER BY ${sql.raw(orderBy)}
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    const rawRows = result.rows as CollapsedRawRow[];
+    const total = rawRows.length > 0 ? Number(rawRows[0].total_count) : 0;
+
+    const mappedRows = rawRows.map((r) => ({
+      id: r.id,
+      status: r.status,
+      coverAspectRatio: r.cover_aspect_ratio,
+      primaryFileId: r.primary_file_id,
+      folderPath: r.folder_path,
+      addedAt: new Date(r.added_at),
+      updatedAt: new Date(r.updated_at),
+      title: r.title,
+      seriesId: r.series_id,
+      seriesName: r.series_name,
+      seriesIndex: r.series_index,
+      publishedDate: r.published_date,
+      publishedYear: r.published_year,
+      language: r.language,
+      rating: r.rating,
+      metadataScore: r.metadata_score !== null ? Number(r.metadata_score) : null,
+      coverSource: r.cover_source,
+      lockedFields: r.locked_fields,
+      subtitle: r.subtitle,
+      publisher: r.publisher,
+      pageCount: r.page_count !== null ? Number(r.page_count) : null,
+      isbn13: r.isbn13,
+      hardcoverId: r.hardcover_id,
+      hardcoverEditionId: r.hardcover_edition_id,
+      bookCount: r.book_count !== null ? Number(r.book_count) : null,
+      readCount: r.read_count !== null ? Number(r.read_count) : null,
+      coverBookIds: r.cover_book_ids,
+      coverUpdatedAtByBookId: parseDateByBookId(r.cover_updated_at_by_book_id),
+      seriesLatestAddedAt: r.sort_added_at ? new Date(r.sort_added_at) : null,
+      firstVolumeBookId: r.first_volume_book_id ?? null,
+      latestVolumeBookId: r.latest_volume_book_id ?? null,
+      firstUnreadBookId: r.first_unread_book_id ?? null,
+    }));
+
+    const bookRefs = mappedRows.map((row) => ({ id: row.id, primaryFileId: row.primaryFileId ?? null }));
+    const enrichment = await this.enrichBookIds(bookRefs, userId);
+
+    return { rows: mappedRows, ...enrichment, total };
+  }
+
+  async findJumpBuckets(opts: {
+    where: SQL | undefined;
+    field: SortField;
+    kind: Exclude<JumpBucketKind, 'temporal'>;
+    userId: number;
+    maxBuckets: number;
+    orderBy: SQL[];
+  }): Promise<JumpBucketsResponse> {
+    const source = flatDiscreteSourceParts(opts.field, opts.userId);
+    if (!source) return { buckets: [], total: 0, kind: opts.kind, granularity: null };
+    const visibleWhere = this.visibleWhere(opts.where);
+    const bucketExpr = opts.kind === 'letter' ? letterJumpBucketExpr(source.value) : sql`coalesce((${source.value})::text, '__unknown__')`;
+    const isUnknownExpr = opts.kind === 'category' ? sql`${source.value} IS NULL` : sql`false`;
+    const result = await this.db.execute<DiscreteJumpBucketRawRow>(
+      discreteBucketsQuery({
+        prefixCte: source.prefixCte,
+        orderedRows: sql`
+        SELECT
+          ${bucketExpr} AS bucket,
+          ${isUnknownExpr} AS is_unknown,
+          (ROW_NUMBER() OVER (ORDER BY ${sql.join(opts.orderBy, sql`, `)}) - 1) AS item_index
+        FROM ${books}
+        LEFT JOIN ${bookMetadata} ON ${bookMetadata.bookId} = ${books.id}
+        ${source.join}
+        WHERE ${visibleWhere}
+      `,
+        maxBuckets: opts.maxBuckets,
+      }),
+    );
+
+    return this.mapDiscreteJumpBucketRows(result.rows, opts.kind);
+  }
+
+  async findTemporalJumpBuckets(opts: {
+    where: SQL | undefined;
+    field: SortField;
+    direction: 'asc' | 'desc';
+    precision: TemporalJumpBucketPrecision;
+    userId: number;
+    timeZone: string;
+    maxBuckets: number;
+  }): Promise<JumpBucketsResponse> {
+    const source = temporalSourceParts(opts.field, opts.userId, opts.timeZone, false);
+    if (!source) return { buckets: [], total: 0, kind: 'temporal', granularity: null };
+
+    const visibleWhere = this.visibleWhere(opts.where);
+    const temporalRows = sql`
+      SELECT ${source.value} AS value
+      FROM ${books}
+      LEFT JOIN ${bookMetadata} ON ${bookMetadata.bookId} = ${books.id}
+      ${source.join}
+      WHERE ${visibleWhere}
+    `;
+    const result = await this.db.execute<TemporalJumpBucketRawRow>(
+      temporalBucketsQuery({
+        prefixCte: source.prefixCte,
+        temporalRows,
+        precision: opts.precision,
+        direction: opts.direction,
+        maxBuckets: opts.maxBuckets,
+      }),
+    );
+
+    return this.mapTemporalJumpBucketRows(result.rows);
+  }
+
+  // The representatives CTE mirrors findCardsCollapsed's representative
+  // selection (same group key, same pick order) but only projects the columns
+  // buildCollapseOrderBy can reference as aliases or via r.* correlated
+  // subqueries.
+  async findJumpBucketsCollapsed(opts: {
+    where: SQL | undefined;
+    field: SortField;
+    kind: Exclude<JumpBucketKind, 'temporal'>;
+    sort: SortSpec[];
+    userId: number;
+    maxBuckets: number;
+    customFieldTypes?: CustomMetadataFieldTypeMap;
+  }): Promise<JumpBucketsResponse> {
+    const source = collapsedDiscreteSourceParts(opts.field, opts.userId);
+    if (!source) return { buckets: [], total: 0, kind: opts.kind, granularity: null };
+    const whereFragment = this.visibleWhere(opts.where);
+    const orderBy = BookQueryBuilder.buildCollapseOrderBy(opts.sort, opts.userId, opts.customFieldTypes);
+    const bucketExpr = opts.kind === 'letter' ? letterJumpBucketExpr(source.value) : sql`coalesce((${source.value})::text, '__unknown__')`;
+    const isUnknownExpr = opts.kind === 'category' ? sql`${source.value} IS NULL` : sql`false`;
+    const result = await this.db.execute<DiscreteJumpBucketRawRow>(
+      discreteBucketsQuery({
+        prefixCte: sql`
+      ${source.prefixCte}
+      base_rows AS MATERIALIZED (
+        SELECT
+          books.id,
+          books.library_id,
+          books.primary_file_id,
+          books.primary_author_sort_name,
+          books.added_at,
+          books.updated_at,
+          book_metadata.title,
+          book_metadata.series_id,
+          book_metadata.series_name,
+          book_metadata.series_index,
+          book_metadata.published_date,
+          book_metadata.published_year,
+          book_metadata.publisher,
+          book_metadata.page_count,
+          NULLIF(lower(btrim(book_metadata.series_name)), '') AS norm_series
+          ${source.baseExtraSelect}
+        FROM books
+        LEFT JOIN book_metadata ON book_metadata.book_id = books.id
+        ${source.baseJoin}
+        WHERE ${whereFragment}
+      ),
+      series_latest AS (
+        SELECT
+          base.series_id,
+          base.library_id,
+          MAX(base.added_at) AS latest_added_at
+        FROM base_rows base
+        WHERE base.series_id IS NOT NULL
+        GROUP BY base.series_id, base.library_id
+      ),
+      representatives AS (
+        SELECT DISTINCT ON (${sql.raw(COLLAPSE_GROUP_KEY_SQL)})
+          base.id,
+          base.primary_file_id,
+          base.updated_at,
+          base.series_index,
+          base.published_date,
+          base.published_year,
+          base.publisher,
+          base.page_count,
+          ubr.rating,
+          base.primary_author_sort_name AS author_sort_name,
+          COALESCE(base.norm_series, lower(base.title)) AS sort_title,
+          COALESCE(sl.latest_added_at, base.added_at) AS sort_added_at
+          ${source.representativeExtraSelect}
+        FROM base_rows base
+        LEFT JOIN user_book_ratings ubr ON ubr.book_id = base.id AND ubr.user_id = ${opts.userId}
+        LEFT JOIN series_latest sl
+          ON sl.series_id = base.series_id
+          AND sl.library_id = base.library_id
+        ORDER BY ${sql.raw(COLLAPSE_REPRESENTATIVE_PICK_SQL)}
+      ),
+      `,
+        orderedRows: sql`
+        SELECT
+          ${bucketExpr} AS bucket,
+          ${isUnknownExpr} AS is_unknown,
+          (ROW_NUMBER() OVER (ORDER BY ${sql.raw(orderBy)}) - 1) AS item_index
+        FROM representatives r
+      `,
+        maxBuckets: opts.maxBuckets,
+      }),
+    );
+
+    return this.mapDiscreteJumpBucketRows(result.rows, opts.kind);
+  }
+
+  async findTemporalJumpBucketsCollapsed(opts: {
+    where: SQL | undefined;
+    field: SortField;
+    direction: 'asc' | 'desc';
+    precision: TemporalJumpBucketPrecision;
+    userId: number;
+    timeZone: string;
+    maxBuckets: number;
+  }): Promise<JumpBucketsResponse> {
+    const source = temporalSourceParts(opts.field, opts.userId, opts.timeZone, true);
+    if (!source) return { buckets: [], total: 0, kind: 'temporal', granularity: null };
+
+    const whereFragment = this.visibleWhere(opts.where);
+    const empty = sql.raw('');
+    const usesSeriesLatest = opts.field === 'addedAt';
+    const seriesLatestCte = usesSeriesLatest
+      ? sql`series_latest AS (
+          SELECT base.series_id, base.library_id, max(base.added_at) AS latest_added_at
+          FROM base_rows base
+          WHERE base.series_id IS NOT NULL
+          GROUP BY base.series_id, base.library_id
+        ),`
+      : empty;
+    const seriesLatestJoin = usesSeriesLatest
+      ? sql`LEFT JOIN series_latest sl ON sl.series_id = base.series_id AND sl.library_id = base.library_id`
+      : empty;
+    const sortAddedAt = usesSeriesLatest ? sql`coalesce(sl.latest_added_at, base.added_at)` : sql`base.added_at`;
+    const prefixCte = sql`
+      ${source.prefixCte}
+      base_rows AS MATERIALIZED (
+        SELECT
+          ${books.id} AS id,
+          ${books.libraryId} AS library_id,
+          ${books.addedAt} AS added_at,
+          ${books.updatedAt} AS updated_at,
+          ${bookMetadata.seriesId} AS series_id,
+          ${bookMetadata.seriesIndex} AS series_index,
+          ${bookMetadata.publishedDate} AS published_date,
+          ${bookMetadata.publishedYear} AS published_year
+          ${source.baseExtraSelect}
+        FROM ${books}
+        LEFT JOIN ${bookMetadata} ON ${bookMetadata.bookId} = ${books.id}
+        ${source.join}
+        WHERE ${whereFragment}
+      ),
+      ${seriesLatestCte}
+      representatives AS (
+        SELECT DISTINCT ON (${sql.raw(COLLAPSE_GROUP_KEY_SQL)})
+          base.id,
+          base.updated_at,
+          base.published_date,
+          base.published_year,
+          ${sortAddedAt} AS sort_added_at
+          ${source.representativeExtraSelect}
+        FROM base_rows base
+        ${seriesLatestJoin}
+        ORDER BY ${sql.raw(COLLAPSE_REPRESENTATIVE_PICK_SQL)}
+      ),
+    `;
+    const result = await this.db.execute<TemporalJumpBucketRawRow>(
+      temporalBucketsQuery({
+        prefixCte,
+        temporalRows: sql`SELECT ${source.value} AS value FROM representatives r`,
+        precision: opts.precision,
+        direction: opts.direction,
+        maxBuckets: opts.maxBuckets,
+      }),
+    );
+
+    return this.mapTemporalJumpBucketRows(result.rows);
+  }
+
+  private mapDiscreteJumpBucketRows(rows: DiscreteJumpBucketRawRow[], kind: Exclude<JumpBucketKind, 'temporal'>): JumpBucketsResponse {
+    return {
+      buckets: rows.map((row) => ({
+        key: row.bucket,
+        label: row.bucket,
+        index: Number(row.item_index),
+        ...(row.is_unknown ? { isUnknown: true } : {}),
+      })),
+      total: rows.length > 0 ? Number(rows[0].total) : 0,
+      kind,
+      granularity: null,
+    };
+  }
+
+  private mapTemporalJumpBucketRows(rows: TemporalJumpBucketRawRow[]): JumpBucketsResponse {
+    const first = rows[0];
+    return {
+      buckets: rows.map((row) => ({
+        key: row.bucket,
+        label: row.bucket,
+        index: Number(row.item_index),
+        ...(row.is_unknown ? { isUnknown: true } : {}),
+      })),
+      total: first ? Number(first.total) : 0,
+      kind: 'temporal',
+      granularity: first ? { unit: first.unit, step: Number(first.step) } : null,
+    };
+  }
+
+  async findById(id: number) {
+    const [book] = await this.db
+      .select()
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .leftJoin(libraries, eq(libraries.id, books.libraryId))
+      .where(eq(books.id, id))
+      .limit(1);
+
+    if (!book) return null;
+
+    const [authorRows, genreRows, tagRows, fileRows, narratorRows, seriesMembershipRows, communityRatingRows] = await Promise.all([
+      this.db
+        .select({ id: authors.id, name: authors.name, sortName: authors.sortName })
+        .from(bookAuthors)
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(eq(bookAuthors.bookId, id))
+        .orderBy(bookAuthors.displayOrder),
+      this.db.select({ name: genres.name }).from(bookGenres).innerJoin(genres, eq(genres.id, bookGenres.genreId)).where(eq(bookGenres.bookId, id)),
+      this.db.select({ name: tags.name }).from(bookTags).innerJoin(tags, eq(tags.id, bookTags.tagId)).where(eq(bookTags.bookId, id)),
+      this.db
+        .select({
+          id: bookFiles.id,
+          format: bookFiles.format,
+          role: bookFiles.role,
+          sizeBytes: bookFiles.sizeBytes,
+          absolutePath: bookFiles.absolutePath,
+          createdAt: bookFiles.createdAt,
+          durationSeconds: bookFiles.durationSeconds,
+        })
+        .from(bookFiles)
+        .where(eq(bookFiles.bookId, id))
+        .orderBy(asc(bookFiles.sortOrder), asc(bookFiles.id)),
+      this.db
+        .select({ id: narrators.id, name: narrators.name, sortName: narrators.sortName, displayOrder: bookNarrators.displayOrder })
+        .from(bookNarrators)
+        .innerJoin(narrators, eq(narrators.id, bookNarrators.narratorId))
+        .where(eq(bookNarrators.bookId, id))
+        .orderBy(bookNarrators.displayOrder),
+      this.db
+        .select({
+          seriesId: bookSeriesMemberships.seriesId,
+          seriesName: bookSeries.name,
+          seriesIndex: bookSeriesMemberships.seriesIndex,
+          displayOrder: bookSeriesMemberships.displayOrder,
+          expectedBookCount: bookSeries.expectedBookCount,
+        })
+        .from(bookSeriesMemberships)
+        .innerJoin(bookSeries, eq(bookSeries.id, bookSeriesMemberships.seriesId))
+        .where(eq(bookSeriesMemberships.bookId, id))
+        .orderBy(asc(bookSeriesMemberships.displayOrder), asc(bookSeriesMemberships.seriesId)),
+      this.db
+        .select({
+          provider: bookCommunityRatings.provider,
+          rating: bookCommunityRatings.rating,
+          ratingCount: bookCommunityRatings.ratingCount,
+          updatedAt: bookCommunityRatings.updatedAt,
+        })
+        .from(bookCommunityRatings)
+        .where(eq(bookCommunityRatings.bookId, id))
+        .orderBy(asc(bookCommunityRatings.provider)),
+    ]);
+
+    return { book, authorRows, genreRows, tagRows, fileRows, narratorRows, seriesMembershipRows, communityRatingRows };
+  }
+
+  async findRatingByBookAndUser(bookId: number, userId: number): Promise<number | null> {
+    const [row] = await this.db
+      .select({ rating: userBookRatings.rating })
+      .from(userBookRatings)
+      .where(and(eq(userBookRatings.bookId, bookId), eq(userBookRatings.userId, userId)))
+      .limit(1);
+    return row?.rating ?? null;
+  }
+
+  async findCollectionsByBookId(bookId: number, userId: number): Promise<{ id: number; name: string }[]> {
+    return this.db
+      .select({ id: collections.id, name: collections.name })
+      .from(collectionBooks)
+      .innerJoin(collections, and(eq(collections.id, collectionBooks.collectionId), eq(collections.userId, userId)))
+      .where(eq(collectionBooks.bookId, bookId))
+      .orderBy(collections.name);
+  }
+
+  async findLibraryIdByBookId(bookId: number): Promise<number | null> {
+    const [row] = await this.db.select({ libraryId: books.libraryId }).from(books).where(eq(books.id, bookId)).limit(1);
+    return row?.libraryId ?? null;
+  }
+
+  async checkBookPassesContentFilters(bookId: number, contentFilters: ContentFilterRules): Promise<boolean> {
+    const filterClauses = buildContentFilterClauses(contentFilters, this.db);
+    if (filterClauses.length === 0) return true;
+
+    const [row] = await this.db
+      .select({ id: books.id })
+      .from(books)
+      .where(and(eq(books.id, bookId), ...filterClauses))
+      .limit(1);
+    return !!row;
+  }
+
+  async findFileById(fileId: number) {
+    const [file] = await this.db
+      .select({
+        id: bookFiles.id,
+        absolutePath: bookFiles.absolutePath,
+        format: bookFiles.format,
+        role: bookFiles.role,
+        bookId: bookFiles.bookId,
+        libraryId: books.libraryId,
+        fileHash: bookFiles.fileHash,
+        sizeBytes: bookFiles.sizeBytes,
+        durationSeconds: bookFiles.durationSeconds,
+      })
+      .from(bookFiles)
+      .innerJoin(books, eq(books.id, bookFiles.bookId))
+      .where(eq(bookFiles.id, fileId))
+      .limit(1);
+    return file ?? null;
+  }
+
+  async deleteBookFile(fileId: number): Promise<void> {
+    await this.db.delete(bookFiles).where(eq(bookFiles.id, fileId));
+  }
+
+  async updateBookFile(fileId: number, data: { format?: string | null; role?: string; absolutePath?: string; sizeBytes?: number }): Promise<void> {
+    await this.db
+      .update(bookFiles)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(bookFiles.id, fileId));
+  }
+
+  async updateBookPrimaryFile(bookId: number, primaryFileId: number | null): Promise<void> {
+    await this.db.update(books).set({ primaryFileId, updatedAt: new Date() }).where(eq(books.id, bookId));
+  }
+
+  async findFilesForBook(bookId: number) {
+    return this.db
+      .select({
+        id: bookFiles.id,
+        role: bookFiles.role,
+      })
+      .from(bookFiles)
+      .where(eq(bookFiles.bookId, bookId));
+  }
+
+  async findBookBase(bookId: number) {
+    const [row] = await this.db.select().from(books).where(eq(books.id, bookId)).limit(1);
+    return row ?? null;
+  }
+
+  async findProgress(userId: number, fileId: number) {
+    const [row] = await this.db
+      .select()
+      .from(readingProgress)
+      .where(and(eq(readingProgress.bookFileId, fileId), eq(readingProgress.userId, userId)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findProgressByBook(userId: number, bookId: number) {
+    return this.db
+      .select({
+        fileId: bookFiles.id,
+        cfi: readingProgress.cfi,
+        pageNumber: readingProgress.pageNumber,
+        percentage: readingProgress.percentage,
+        koboLocationSource: readingProgress.koboLocationSource,
+        koboLocationType: readingProgress.koboLocationType,
+        koboLocationValue: readingProgress.koboLocationValue,
+        koboContentSourceProgressPercent: readingProgress.koboContentSourceProgressPercent,
+        koreaderProgress: readingProgress.koreaderProgress,
+        updatedAt: readingProgress.updatedAt,
+      })
+      .from(bookFiles)
+      .leftJoin(readingProgress, and(eq(readingProgress.bookFileId, bookFiles.id), eq(readingProgress.userId, userId)))
+      .where(eq(bookFiles.bookId, bookId))
+      .orderBy(asc(bookFiles.sortOrder), asc(bookFiles.id));
+  }
+
+  async findProgressByBooks(userId: number, bookIds: number[]) {
+    if (bookIds.length === 0) return [];
+    return this.db
+      .select({
+        bookId: bookFiles.bookId,
+        fileId: bookFiles.id,
+        percentage: readingProgress.percentage,
+        koreaderProgress: readingProgress.koreaderProgress,
+        updatedAt: readingProgress.updatedAt,
+      })
+      .from(bookFiles)
+      .innerJoin(readingProgress, and(eq(readingProgress.bookFileId, bookFiles.id), eq(readingProgress.userId, userId)))
+      .where(inArray(bookFiles.bookId, bookIds));
+  }
+
+  async findKoboReadingState(userId: number, bookId: number) {
+    const [row] = await this.db
+      .select({
+        createdAtKobo: koboReadingStates.createdAtKobo,
+        lastModifiedKobo: koboReadingStates.lastModifiedKobo,
+        priorityTimestamp: koboReadingStates.priorityTimestamp,
+        currentBookmark: koboReadingStates.currentBookmark,
+        statistics: koboReadingStates.statistics,
+        statusInfo: koboReadingStates.statusInfo,
+        updatedAt: koboReadingStates.updatedAt,
+      })
+      .from(koboReadingStates)
+      .where(and(eq(koboReadingStates.userId, userId), eq(koboReadingStates.bookId, bookId)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findKoboSnapshotStates(userId: number, bookId: number) {
+    return this.db
+      .select({
+        deviceId: koboDevices.id,
+        deviceName: koboDevices.name,
+        snapshotId: koboLibrarySnapshots.id,
+        snapshotUpdatedAt: koboLibrarySnapshots.updatedAt,
+        synced: koboSnapshotBooks.synced,
+        pendingDelete: koboSnapshotBooks.pendingDelete,
+        isNew: koboSnapshotBooks.isNew,
+        removedByDevice: koboSnapshotBooks.removedByDevice,
+        fileHash: koboSnapshotBooks.fileHash,
+        metadataHash: koboSnapshotBooks.metadataHash,
+      })
+      .from(koboLibrarySnapshots)
+      .innerJoin(koboDevices, and(eq(koboDevices.id, koboLibrarySnapshots.deviceId), eq(koboDevices.userId, userId)))
+      .leftJoin(koboSnapshotBooks, and(eq(koboSnapshotBooks.snapshotId, koboLibrarySnapshots.id), eq(koboSnapshotBooks.bookId, bookId)))
+      .where(eq(koboLibrarySnapshots.userId, userId))
+      .orderBy(asc(koboDevices.createdAt), asc(koboDevices.id));
+  }
+
+  async findKoboSyncCollectionNamesForBook(userId: number, bookId: number): Promise<string[]> {
+    const rows = await this.db
+      .select({ name: collections.name })
+      .from(collectionBooks)
+      .innerJoin(collections, and(eq(collections.id, collectionBooks.collectionId), eq(collections.userId, userId), eq(collections.syncToKobo, true)))
+      .where(eq(collectionBooks.bookId, bookId));
+    return rows.map((r) => r.name);
+  }
+
+  async searchAcrossLibraries(libraryIds: number[], q: string, limit: number, contentFilters?: ContentFilterRules) {
+    if (libraryIds.length === 0) return [];
+
+    const pattern = '%' + q + '%';
+
+    const matchedAuthors = this.db
+      .selectDistinct({ bookId: bookAuthors.bookId })
+      .from(bookAuthors)
+      .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+      .where(accentInsensitiveIlike(authors.name, pattern))
+      .as('matched_authors');
+
+    const matchedSeries = this.db
+      .selectDistinct({ bookId: bookSeriesMemberships.bookId })
+      .from(bookSeriesMemberships)
+      .innerJoin(bookSeries, eq(bookSeries.id, bookSeriesMemberships.seriesId))
+      .where(accentInsensitiveIlike(bookSeries.name, pattern))
+      .as('matched_series');
+
+    const contentFilterClauses = contentFilters ? buildContentFilterClauses(contentFilters, this.db) : [];
+
+    const rows = await this.db
+      .select({
+        id: books.id,
+        title: bookMetadata.title,
+        seriesId: bookMetadata.seriesId,
+        seriesName: bookMetadata.seriesName,
+        libraryId: books.libraryId,
+        libraryName: libraries.name,
+        updatedAt: books.updatedAt,
+      })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .innerJoin(libraries, eq(libraries.id, books.libraryId))
+      .leftJoin(matchedAuthors, eq(matchedAuthors.bookId, books.id))
+      .leftJoin(matchedSeries, eq(matchedSeries.bookId, books.id))
+      .where(
+        and(
+          inArray(books.libraryId, libraryIds),
+          ne(books.status, 'processing'),
+          or(
+            accentInsensitiveIlike(bookMetadata.title, pattern),
+            accentInsensitiveIlike(bookMetadata.seriesName, pattern),
+            isNotNull(matchedAuthors.bookId),
+            isNotNull(matchedSeries.bookId),
+          ),
+          ...contentFilterClauses,
+        ),
+      )
+      .orderBy(bookMetadata.title)
+      .limit(limit);
+
+    const bookIds = rows.map((r) => r.id);
+
+    const authorRows =
+      bookIds.length > 0
+        ? await this.db
+            .select({ bookId: bookAuthors.bookId, name: authors.name })
+            .from(bookAuthors)
+            .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+            .where(inArray(bookAuthors.bookId, bookIds))
+            .orderBy(bookAuthors.displayOrder)
+        : [];
+
+    const authorsByBook = new Map<number, string[]>();
+    for (const row of authorRows) {
+      const list = authorsByBook.get(row.bookId) ?? [];
+      list.push(row.name);
+      authorsByBook.set(row.bookId, list);
+    }
+
+    const formatRows =
+      bookIds.length > 0
+        ? await this.db
+            .select({ bookId: bookFiles.bookId, format: bookFiles.format })
+            .from(bookFiles)
+            .where(and(inArray(bookFiles.bookId, bookIds), inArray(bookFiles.format, [...SUPPORTED_BOOK_FORMATS])))
+        : [];
+
+    const formatsByBook = new Map<number, string[]>();
+    for (const row of formatRows) {
+      if (row.format) {
+        const list = formatsByBook.get(row.bookId) ?? [];
+        if (!list.includes(row.format)) list.push(row.format);
+        formatsByBook.set(row.bookId, list);
+      }
+    }
+
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      seriesName: r.seriesName,
+      authors: authorsByBook.get(r.id) ?? [],
+      libraryId: r.libraryId,
+      libraryName: r.libraryName,
+      updatedAt: r.updatedAt?.toISOString() ?? null,
+      formats: formatsByBook.get(r.id) ?? [],
+    }));
+  }
+
+  async countWhere(where: SQL | undefined): Promise<number> {
+    const [{ total }] = await this.db
+      .select({ total: count() })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(this.visibleWhere(where));
+    return Number(total);
+  }
+
+  async findLibraryIdsByBookIds(bookIds: number[]): Promise<{ id: number; libraryId: number }[]> {
+    if (bookIds.length === 0) return [];
+    return this.db.select({ id: books.id, libraryId: books.libraryId }).from(books).where(inArray(books.id, bookIds));
+  }
+
+  async findDeletionAuditBooksByIds(bookIds: number[]): Promise<{ id: number; title: string | null }[]> {
+    if (bookIds.length === 0) return [];
+    return this.db
+      .select({ id: books.id, title: bookMetadata.title })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(inArray(books.id, bookIds));
+  }
+
+  async findRecommendationTitlesByBookIds(bookIds: number[]): Promise<BookRecommendation[]> {
+    if (bookIds.length === 0) return [];
+
+    const [rows, authorRows] = await Promise.all([
+      this.db
+        .select({
+          id: books.id,
+          title: bookMetadata.title,
+          coverAspectRatio: libraries.coverAspectRatio,
+          updatedAt: books.updatedAt,
+          coverSource: bookMetadata.coverSource,
+          primaryFormat: bookFiles.format,
+        })
+        .from(books)
+        .innerJoin(libraries, eq(libraries.id, books.libraryId))
+        .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .leftJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+        .where(inArray(books.id, bookIds)),
+      this.db
+        .select({ bookId: bookAuthors.bookId, name: authors.name })
+        .from(bookAuthors)
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(inArray(bookAuthors.bookId, bookIds)),
+    ]);
+
+    const authorsByBook = new Map<number, string[]>();
+    for (const row of authorRows) {
+      const names = authorsByBook.get(row.bookId) ?? [];
+      names.push(row.name);
+      authorsByBook.set(row.bookId, names);
+    }
+
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      coverAspectRatio: normalizeCoverAspectRatio(r.coverAspectRatio),
+      updatedAt: r.updatedAt?.toISOString() ?? null,
+      hasCover: r.coverSource !== null,
+      authors: authorsByBook.get(r.id) ?? [],
+      isAudiobook: r.primaryFormat != null ? isAudioFormat(r.primaryFormat) : false,
+      isComic: r.primaryFormat != null ? isComicFormat(r.primaryFormat) : false,
+    }));
+  }
+
+  async findPatternMetadataByBookIds(bookIds: number[]): Promise<PatternMetadataRow[]> {
+    if (bookIds.length === 0) return [];
+
+    const [metaRows, authorRows] = await Promise.all([
+      this.db
+        .select({
+          bookId: books.id,
+          title: bookMetadata.title,
+          subtitle: bookMetadata.subtitle,
+          publisher: bookMetadata.publisher,
+          publishedDate: bookMetadata.publishedDate,
+          publishedYear: bookMetadata.publishedYear,
+          language: bookMetadata.language,
+          seriesId: bookMetadata.seriesId,
+          seriesName: bookMetadata.seriesName,
+          seriesIndex: bookMetadata.seriesIndex,
+          isbn13: bookMetadata.isbn13,
+        })
+        .from(books)
+        .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(inArray(books.id, bookIds)),
+      this.db
+        .select({ bookId: bookAuthors.bookId, name: authors.name })
+        .from(bookAuthors)
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(inArray(bookAuthors.bookId, bookIds))
+        .orderBy(bookAuthors.displayOrder),
+    ]);
+
+    const authorsByBookId = new Map<number, string[]>();
+    for (const row of authorRows) {
+      const list = authorsByBookId.get(row.bookId) ?? [];
+      list.push(row.name);
+      authorsByBookId.set(row.bookId, list);
+    }
+
+    return metaRows.map((row) => ({ ...row, authors: authorsByBookId.get(row.bookId) ?? [] }));
+  }
+
+  async findAllIds(): Promise<number[]> {
+    const rows = await this.db.select({ id: books.id }).from(books);
+    return rows.map((r) => r.id);
+  }
+
+  async findIdsByWhere(where: SQL | undefined): Promise<number[]> {
+    const rows = await this.db
+      .select({ id: books.id })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(this.visibleWhere(where));
+    return rows.map((r) => r.id);
+  }
+
+  async findPrimaryFile(bookId: number): Promise<{ absolutePath: string; format: string | null } | null> {
+    const [row] = await this.db
+      .select({ absolutePath: bookFiles.absolutePath, format: bookFiles.format })
+      .from(books)
+      .innerJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+      .where(eq(books.id, bookId))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findPrimaryFilesByBookIds(
+    bookIds: number[],
+  ): Promise<{ bookId: number; absolutePath: string; format: string | null; sizeBytes: number | null }[]> {
+    if (bookIds.length === 0) return [];
+    return this.db
+      .select({ bookId: books.id, absolutePath: bookFiles.absolutePath, format: bookFiles.format, sizeBytes: bookFiles.sizeBytes })
+      .from(books)
+      .innerJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+      .where(inArray(books.id, bookIds))
+      .orderBy(asc(books.id));
+  }
+
+  async findPrimaryReaderFilesByBookIds(
+    bookIds: number[],
+  ): Promise<{ id: number; bookId: number; absolutePath: string; format: string | null; fileHash: string | null; sizeBytes: number | null }[]> {
+    if (bookIds.length === 0) return [];
+    return this.db
+      .select({
+        id: bookFiles.id,
+        bookId: books.id,
+        absolutePath: bookFiles.absolutePath,
+        format: bookFiles.format,
+        fileHash: bookFiles.fileHash,
+        sizeBytes: bookFiles.sizeBytes,
+      })
+      .from(books)
+      .innerJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+      .where(inArray(books.id, bookIds))
+      .orderBy(asc(books.id));
+  }
+
+  async findAllFilesByBookIds(
+    bookIds: number[],
+  ): Promise<{ bookId: number; absolutePath: string; format: string | null; sizeBytes: number | null; sortOrder: number }[]> {
+    if (bookIds.length === 0) return [];
+    return this.db
+      .select({
+        bookId: bookFiles.bookId,
+        absolutePath: bookFiles.absolutePath,
+        format: bookFiles.format,
+        sizeBytes: bookFiles.sizeBytes,
+        sortOrder: bookFiles.sortOrder,
+      })
+      .from(bookFiles)
+      .where(inArray(bookFiles.bookId, bookIds))
+      .orderBy(asc(bookFiles.bookId), asc(bookFiles.sortOrder), asc(bookFiles.id));
+  }
+
+  async deleteByIds(bookIds: number[]): Promise<void> {
+    await this.db.delete(books).where(inArray(books.id, bookIds));
+  }
+
+  async bulkSetRating(bookIds: number[], rating: number | null, userId: number): Promise<void> {
+    if (bookIds.length === 0) return;
+
+    await this.db
+      .insert(userBookRatings)
+      .values(bookIds.map((bookId) => ({ userId, bookId, rating })))
+      .onConflictDoUpdate({
+        target: [userBookRatings.userId, userBookRatings.bookId],
+        set: { rating, updatedAt: new Date() },
+      });
+  }
+
+  async findTagsByBookIds(bookIds: number[], executor: MetadataReadExecutor = this.db): Promise<Map<number, string[]>> {
+    if (bookIds.length === 0) return new Map();
+    const rows = await executor
+      .select({ bookId: bookTags.bookId, name: tags.name })
+      .from(bookTags)
+      .innerJoin(tags, eq(bookTags.tagId, tags.id))
+      .where(inArray(bookTags.bookId, bookIds));
+    const result = new Map<number, string[]>();
+    for (const row of rows) {
+      const existing = result.get(row.bookId) ?? [];
+      existing.push(row.name);
+      result.set(row.bookId, existing);
+    }
+    return result;
+  }
+
+  async findAuthorsByBookIds(bookIds: number[], executor: MetadataReadExecutor = this.db): Promise<Map<number, string[]>> {
+    if (bookIds.length === 0) return new Map();
+    const rows = await executor
+      .select({ bookId: bookAuthors.bookId, name: authors.name })
+      .from(bookAuthors)
+      .innerJoin(authors, eq(bookAuthors.authorId, authors.id))
+      .where(inArray(bookAuthors.bookId, bookIds))
+      .orderBy(asc(bookAuthors.bookId), asc(bookAuthors.displayOrder));
+    const result = new Map<number, string[]>();
+    for (const row of rows) {
+      const existing = result.get(row.bookId) ?? [];
+      existing.push(row.name);
+      result.set(row.bookId, existing);
+    }
+    return result;
+  }
+
+  async findGenresByBookIds(bookIds: number[], executor: MetadataReadExecutor = this.db): Promise<Map<number, string[]>> {
+    if (bookIds.length === 0) return new Map();
+    const rows = await executor
+      .select({ bookId: bookGenres.bookId, name: genres.name })
+      .from(bookGenres)
+      .innerJoin(genres, eq(bookGenres.genreId, genres.id))
+      .where(inArray(bookGenres.bookId, bookIds));
+    const result = new Map<number, string[]>();
+    for (const row of rows) {
+      const existing = result.get(row.bookId) ?? [];
+      existing.push(row.name);
+      result.set(row.bookId, existing);
+    }
+    return result;
+  }
+
+  async findNarratorsByBookIds(bookIds: number[], executor: MetadataReadExecutor = this.db): Promise<Map<number, string[]>> {
+    if (bookIds.length === 0) return new Map();
+    const rows = await executor
+      .select({ bookId: bookNarrators.bookId, name: narrators.name })
+      .from(bookNarrators)
+      .innerJoin(narrators, eq(bookNarrators.narratorId, narrators.id))
+      .where(inArray(bookNarrators.bookId, bookIds))
+      .orderBy(asc(bookNarrators.bookId), asc(bookNarrators.displayOrder));
+    const result = new Map<number, string[]>();
+    for (const row of rows) {
+      const existing = result.get(row.bookId) ?? [];
+      existing.push(row.name);
+      result.set(row.bookId, existing);
+    }
+    return result;
+  }
+
+  async updateMetadataFields(
+    bookId: number,
+    fields: Partial<typeof bookMetadata.$inferInsert>,
+    executor: MetadataUpdateExecutor = this.db,
+  ): Promise<void> {
+    const shouldSyncSeries =
+      Object.prototype.hasOwnProperty.call(fields, 'seriesName') || Object.prototype.hasOwnProperty.call(fields, 'seriesIndex');
+    const patch = (await this.seriesIdentity?.resolveMetadataPatch(fields, executor)) ?? fields;
+    await executor.update(bookMetadata).set(patch).where(eq(bookMetadata.bookId, bookId));
+    if (shouldSyncSeries) {
+      await this.seriesMemberships?.syncPrimaryFromMetadata(bookId, executor);
+    }
+    await executor.update(books).set({ updatedAt: new Date() }).where(eq(books.id, bookId));
+  }
+
+  async replaceCommunityRatings(
+    bookId: number,
+    ratings: Array<{ provider: string; rating: number; ratingCount: number | null }>,
+    executor: MetadataUpdateExecutor = this.db,
+  ): Promise<void> {
+    const now = new Date();
+    await executor.delete(bookCommunityRatings).where(eq(bookCommunityRatings.bookId, bookId));
+    if (ratings.length > 0) {
+      await executor.insert(bookCommunityRatings).values(
+        ratings.map((rating) => ({
+          bookId,
+          provider: rating.provider,
+          rating: rating.rating,
+          ratingCount: rating.ratingCount,
+          updatedAt: now,
+        })),
+      );
+    }
+    await executor.update(books).set({ updatedAt: now }).where(eq(books.id, bookId));
+  }
+
+  async bulkUpdateMetadataFields(
+    bookIds: number[],
+    fields: Partial<typeof bookMetadata.$inferInsert>,
+    executor: MetadataUpdateExecutor = this.db,
+  ): Promise<void> {
+    if (bookIds.length === 0) return;
+    const shouldSyncSeries =
+      Object.prototype.hasOwnProperty.call(fields, 'seriesName') || Object.prototype.hasOwnProperty.call(fields, 'seriesIndex');
+    const patch = (await this.seriesIdentity?.resolveMetadataPatch(fields, executor)) ?? fields;
+    await executor.update(bookMetadata).set(patch).where(inArray(bookMetadata.bookId, bookIds));
+    if (shouldSyncSeries) {
+      await this.seriesMemberships?.syncPrimaryFromMetadataForBooks(bookIds, executor);
+    }
+    await executor.update(books).set({ updatedAt: new Date() }).where(inArray(books.id, bookIds));
+  }
+
+  async upsertProgress(
+    userId: number,
+    fileId: number,
+    cfi: string | null,
+    pageNumber: number | null,
+    percentage: number,
+    positionSeconds?: number | null,
+    koboLocationSource?: string | null,
+    koboLocationType?: string | null,
+    koboLocationValue?: string | null,
+    koboContentSourceProgressPercent?: number | null,
+    koreaderProgress?: string | null,
+  ) {
+    const now = new Date();
+    const normalizedKoboLocationSource = this.normalizeKoboLocationPart(koboLocationSource);
+    const normalizedKoboLocationType = this.normalizeKoboLocationPart(koboLocationType);
+    const normalizedKoboLocationValue = this.normalizeKoboLocationPart(koboLocationValue);
+    const normalizedKoboContentSourceProgressPercent = this.clampNullableProgressPercentage(koboContentSourceProgressPercent);
+    const normalizedKoreaderProgress = this.normalizeKoreaderProgress(koreaderProgress);
+    await this.db
+      .insert(readingProgress)
+      .values({
+        userId,
+        bookFileId: fileId,
+        cfi,
+        pageNumber,
+        percentage,
+        positionSeconds: positionSeconds ?? null,
+        koboLocationSource: normalizedKoboLocationSource,
+        koboLocationType: normalizedKoboLocationType,
+        koboLocationValue: normalizedKoboLocationValue,
+        koboContentSourceProgressPercent: normalizedKoboContentSourceProgressPercent,
+        koreaderProgress: normalizedKoreaderProgress,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [readingProgress.bookFileId, readingProgress.userId],
+        set: {
+          cfi,
+          pageNumber,
+          percentage,
+          positionSeconds: positionSeconds ?? null,
+          koboLocationSource: normalizedKoboLocationSource,
+          koboLocationType: normalizedKoboLocationType,
+          koboLocationValue: normalizedKoboLocationValue,
+          koboContentSourceProgressPercent: normalizedKoboContentSourceProgressPercent,
+          koreaderProgress: normalizedKoreaderProgress,
+          updatedAt: now,
+        },
+      });
+  }
+
+  async syncKoboReadingStateFromProgress(
+    userId: number,
+    fileId: number,
+    percentage: number,
+    koboLocationSource?: string | null,
+    koboLocationType?: string | null,
+    koboLocationValue?: string | null,
+    koboContentSourceProgressPercent?: number | null,
+  ): Promise<boolean> {
+    const [file] = await this.db
+      .select({
+        bookId: bookFiles.bookId,
+        primaryFileId: books.primaryFileId,
+        format: bookFiles.format,
+        markAsFinishedPercentComplete: libraries.markAsFinishedPercentComplete,
+      })
+      .from(bookFiles)
+      .innerJoin(books, eq(books.id, bookFiles.bookId))
+      .innerJoin(libraries, eq(libraries.id, books.libraryId))
+      .where(eq(bookFiles.id, fileId))
+      .limit(1);
+
+    if (!file || file.primaryFileId !== fileId || file.format !== 'epub') return false;
+
+    const clampedPercentage = this.clampProgressPercentage(percentage);
+    const normalizedKoboLocationSource = this.normalizeKoboLocationPart(koboLocationSource);
+    const normalizedKoboLocationType = this.normalizeKoboLocationPart(koboLocationType);
+    const normalizedKoboLocationValue = this.normalizeKoboLocationPart(koboLocationValue);
+    const normalizedKoboContentSourceProgressPercent = this.clampNullableProgressPercentage(koboContentSourceProgressPercent);
+    // Location values are optional: without them the bookmark advances percent-wise
+    // and the precise KoboSpan Location is computed server-side at delivery time.
+    const hasLocation = Boolean(normalizedKoboLocationSource && normalizedKoboLocationType === 'KoboSpan' && normalizedKoboLocationValue);
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    const [existing] = await this.db
+      .select({
+        entitlementId: koboReadingStates.entitlementId,
+        createdAtKobo: koboReadingStates.createdAtKobo,
+        currentBookmark: koboReadingStates.currentBookmark,
+        statistics: koboReadingStates.statistics,
+        statusInfo: koboReadingStates.statusInfo,
+      })
+      .from(koboReadingStates)
+      .where(and(eq(koboReadingStates.userId, userId), eq(koboReadingStates.bookId, file.bookId)))
+      .limit(1);
+
+    const existingBookmark = this.asJsonObj(existing?.currentBookmark);
+    if (
+      hasLocation &&
+      this.isKoboBookmarkCurrent(
+        existingBookmark,
+        clampedPercentage,
+        normalizedKoboLocationSource,
+        normalizedKoboLocationType,
+        normalizedKoboLocationValue,
+        normalizedKoboContentSourceProgressPercent,
+      )
+    ) {
+      return true;
+    }
+    if (!hasLocation && this.isKoboBookmarkPercentCurrent(existingBookmark, clampedPercentage)) {
+      return true;
+    }
+
+    const currentBookmark: JsonObj = {
+      ...(existingBookmark ?? {}),
+      LastModified: nowIso,
+      ProgressPercent: clampedPercentage,
+      ...(hasLocation
+        ? {
+            Location: {
+              Source: normalizedKoboLocationSource,
+              Type: normalizedKoboLocationType,
+              Value: normalizedKoboLocationValue,
+            },
+          }
+        : {}),
+    };
+    if (hasLocation && normalizedKoboContentSourceProgressPercent !== null) {
+      currentBookmark.ContentSourceProgressPercent = normalizedKoboContentSourceProgressPercent;
+    } else if (hasLocation) {
+      delete currentBookmark.ContentSourceProgressPercent;
+    }
+    const statusInfo = {
+      ...(this.asJsonObj(existing?.statusInfo) ?? {}),
+      LastModified: nowIso,
+      Status: this.deriveKoboStatus(clampedPercentage, file.markAsFinishedPercentComplete),
+    };
+    const statistics = this.asJsonObj(existing?.statistics) ?? { LastModified: nowIso };
+
+    await this.db
+      .insert(koboReadingStates)
+      .values({
+        userId,
+        bookId: file.bookId,
+        entitlementId: existing?.entitlementId ?? String(file.bookId),
+        createdAtKobo: existing?.createdAtKobo ?? nowIso,
+        lastModifiedKobo: nowIso,
+        priorityTimestamp: nowIso,
+        currentBookmark,
+        statistics,
+        statusInfo,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [koboReadingStates.userId, koboReadingStates.bookId],
+        set: {
+          lastModifiedKobo: nowIso,
+          priorityTimestamp: nowIso,
+          currentBookmark,
+          statistics,
+          statusInfo,
+          updatedAt: now,
+        },
+      });
+
+    await this.markKoboSnapshotBookUnsyncedForReadingState(userId, file.bookId);
+    return true;
+  }
+
+  async isKoboTwoWayProgressSyncEnabled(userId: number): Promise<boolean> {
+    const [settings] = await this.db
+      .select({ twoWayProgressSync: koboSyncSettings.twoWayProgressSync })
+      .from(koboSyncSettings)
+      .where(eq(koboSyncSettings.userId, userId))
+      .limit(1);
+    return settings?.twoWayProgressSync === true;
+  }
+
+  async clearFileProgress(userId: number, fileId: number): Promise<void> {
+    await this.db.delete(readingProgress).where(and(eq(readingProgress.userId, userId), eq(readingProgress.bookFileId, fileId)));
+    await this.db.delete(audiobookProgress).where(and(eq(audiobookProgress.userId, userId), eq(audiobookProgress.currentFileId, fileId)));
+  }
+
+  async clearBookProgress(userId: number, bookId: number): Promise<void> {
+    const fileIds = this.db.select({ id: bookFiles.id }).from(bookFiles).where(eq(bookFiles.bookId, bookId));
+    await this.db.transaction(async (tx) => {
+      await tx.delete(readingProgress).where(and(eq(readingProgress.userId, userId), inArray(readingProgress.bookFileId, fileIds)));
+      await tx.delete(audiobookProgress).where(and(eq(audiobookProgress.userId, userId), eq(audiobookProgress.bookId, bookId)));
+    });
+  }
+
+  async findAudioProgress(userId: number, bookId: number) {
+    const [row] = await this.db
+      .select()
+      .from(audiobookProgress)
+      .where(and(eq(audiobookProgress.userId, userId), eq(audiobookProgress.bookId, bookId)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async upsertAudioProgress(userId: number, bookId: number, currentFileId: number, positionSeconds: number, percentage: number) {
+    const now = new Date();
+    const [row] = await this.db
+      .insert(audiobookProgress)
+      .values({ userId, bookId, currentFileId, positionSeconds, percentage, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [audiobookProgress.userId, audiobookProgress.bookId],
+        set: { currentFileId, positionSeconds, percentage, updatedAt: now },
+      })
+      .returning();
+    return row;
+  }
+
+  private clampProgressPercentage(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(100, value));
+  }
+
+  private clampNullableProgressPercentage(value: number | null | undefined): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? this.clampProgressPercentage(value) : null;
+  }
+
+  private normalizeKoboLocationPart(value: string | null | undefined): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private normalizeKoreaderProgress(value: string | null | undefined): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.startsWith('/body/DocFragment[') ? trimmed : null;
+  }
+
+  private asJsonObj(value: unknown): JsonObj | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as JsonObj;
+  }
+
+  private extractKoboPercent(bookmark: JsonObj | null): number | null {
+    const candidate = bookmark?.ProgressPercent;
+    return typeof candidate === 'number' ? this.clampProgressPercentage(candidate) : null;
+  }
+
+  private extractKoboContentSourceProgressPercent(bookmark: JsonObj | null): number | null {
+    const candidate = bookmark?.ContentSourceProgressPercent;
+    return typeof candidate === 'number' ? this.clampProgressPercentage(candidate) : null;
+  }
+
+  private isKoboBookmarkCurrent(
+    bookmark: JsonObj | null,
+    percentage: number,
+    koboLocationSource: string | null,
+    koboLocationType: string | null,
+    koboLocationValue: string | null,
+    koboContentSourceProgressPercent: number | null,
+  ): boolean {
+    const existingPercent = this.extractKoboPercent(bookmark);
+    if (existingPercent === null || Math.abs(existingPercent - percentage) >= PROGRESS_EPSILON) return false;
+
+    if (!koboLocationSource || !koboLocationType || !koboLocationValue) return !this.hasNonInternalBookmarkFields(bookmark);
+
+    const location = this.asJsonObj(bookmark?.Location);
+    if (location?.Source !== koboLocationSource || location.Type !== koboLocationType || location.Value !== koboLocationValue) return false;
+
+    if (koboContentSourceProgressPercent === null) {
+      return this.extractKoboContentSourceProgressPercent(bookmark) === null;
+    }
+    const existingSourcePercent = this.extractKoboContentSourceProgressPercent(bookmark);
+    return existingSourcePercent !== null && Math.abs(existingSourcePercent - koboContentSourceProgressPercent) < PROGRESS_EPSILON;
+  }
+
+  private hasNonInternalBookmarkFields(bookmark: JsonObj | null): boolean {
+    if (!bookmark) return false;
+    return Object.keys(bookmark).some((key) => key !== 'LastModified' && key !== 'ProgressPercent');
+  }
+
+  private isKoboBookmarkPercentCurrent(bookmark: JsonObj | null, percentage: number): boolean {
+    const existingPercent = this.extractKoboPercent(bookmark);
+    return existingPercent !== null && Math.abs(existingPercent - percentage) < PROGRESS_EPSILON;
+  }
+
+  /**
+   * Uses the library's finished threshold so the device agrees with the read status
+   * BookOrbit derives from the same percentage; requiring 100 left books BookOrbit
+   * calls read showing as Reading on Kobo.
+   */
+  private deriveKoboStatus(percentage: number, markAsFinishedPercentComplete: number): string {
+    const threshold = Number.isFinite(markAsFinishedPercentComplete) ? Math.min(100, Math.max(1, markAsFinishedPercentComplete)) : 100;
+    if (percentage >= threshold) return 'Finished';
+    return percentage > 0 ? 'Reading' : 'ReadyToRead';
+  }
+
+  private async markKoboSnapshotBookUnsyncedForReadingState(userId: number, bookId: number): Promise<void> {
+    await this.db.execute(sql`
+      UPDATE ${koboSnapshotBooks} AS sb
+      SET synced = false,
+          is_new = false
+      FROM ${koboLibrarySnapshots} AS snap
+      WHERE snap.id = sb.snapshot_id
+        AND snap.user_id = ${userId}
+        AND sb.book_id = ${bookId}
+        AND sb.synced = true
+        AND sb.pending_delete = false
+        AND sb.removed_by_device = false
+    `);
+  }
+}

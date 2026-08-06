@@ -1,0 +1,1013 @@
+import { createHash } from 'crypto';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { basename } from 'path';
+
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
+import type { FastifyReply } from 'fastify';
+
+import { DEFAULT_KOREADER_DEVICE_PATTERN, resolveUploadPath } from '@bookorbit/types';
+import type {
+  KoreaderCatalogBookDetail,
+  KoreaderCatalogBookListItem,
+  KoreaderCatalogBrowseCounts,
+  KoreaderCatalogDashboardResponse,
+  KoreaderCatalogDashboardSection,
+  KoreaderCatalogDashboardSectionResponse,
+  KoreaderCatalogDiscoverResponse,
+  KoreaderDashboardSectionConfig,
+  KoreaderCatalogEntry,
+  KoreaderCatalogFile,
+  KoreaderCatalogManifestBook,
+  KoreaderCatalogManifestFile,
+  KoreaderCatalogManifestPage,
+  KoreaderCatalogPage,
+  KoreaderCatalogProgress,
+  KoreaderCatalogRatingResult,
+  KoreaderCatalogReadStatusResult,
+  KoreaderCatalogRelatedBook,
+  KoreaderCatalogRelatedSection,
+  KoreaderCatalogSection,
+  KoreaderCatalogSectionResponse,
+  KoreaderCatalogSeriesSummary,
+  KoreaderCatalogSettableReadStatus,
+  KoreaderCatalogSort,
+  KoreaderCatalogSortOrder,
+} from '@bookorbit/types';
+import { bookThumbnailPath } from '../../common/book-cover-storage';
+import { MAX_OFFSET_ROWS, isOffsetWithinLimit } from '../../common/constants/pagination.constants';
+import { imageContentTypeFromPath } from '../../common/image-content-type';
+import type { RequestUser } from '../../common/types/request-user';
+import { contentDispositionHeader } from '../../common/utils/content-disposition.utils';
+import { storageConfig } from '../../config/config';
+import { BookReadService } from '../book/book-read.service';
+import { BookService } from '../book/book.service';
+import { BrowseCountsService } from '../browse-counts/browse-counts.service';
+import type { BookDetailDto } from '../book/dto/book-detail.dto';
+import { DashboardService } from '../dashboard/dashboard.service';
+import { DashboardWidgetService } from '../dashboard/dashboard-widget.service';
+import { fileMimeType } from '../opds/opds-xml.helpers';
+import { OpdsBookEntry, OpdsBookService } from '../opds/opds-book.service';
+import type { OpdsManifestBookRow } from '../opds/opds-book.service';
+import { RecommendationService } from '../recommendation/recommendation.service';
+import { UserBookStatusService } from '../user-book-status/user-book-status.service';
+import { KoreaderCatalogBooksQueryDto, KoreaderCatalogManifestQueryDto } from './dto/koreader-catalog-query.dto';
+import { AppSettingsService } from '../app-settings/app-settings.service';
+import { KoreaderPluginService } from './koreader-plugin.service';
+import { KoreaderService } from './koreader.service';
+
+type OpdsSortOrder = Parameters<OpdsBookService['getBooksPage']>[1];
+type BookProgressRow = Awaited<ReturnType<BookReadService['findProgressByBook']>>[number];
+type ProgressCandidate = BookProgressRow & { percentage: number; updatedAt: Date };
+type BatchProgressRow = Awaited<ReturnType<BookReadService['findProgressByBooks']>>[number];
+type BatchProgressCandidate = BatchProgressRow & { percentage: number; updatedAt: Date };
+
+const CATALOG_BASE = '/api/v1/koreader/plugin/catalog';
+const AUTHOR_SERIES_PAGE_SIZE = 60;
+const DASHBOARD_CONTINUE_READING_LIMIT = 5;
+const DASHBOARD_DISCOVER_LIMIT = 12;
+const DASHBOARD_SECTION_LIMIT = 12;
+const DETAIL_RELATED_LIMIT = 8;
+const MANIFEST_DEFAULT_PAGE_SIZE = 100;
+const MANIFEST_CURSOR_VERSION = 1;
+const MANIFEST_CURSOR_CONTRACT_CHANGED = Symbol('manifest-cursor-contract-changed');
+
+const NATURAL_SORT_ORDER: Record<KoreaderCatalogSort, KoreaderCatalogSortOrder> = {
+  title: 'asc',
+  author: 'asc',
+  series: 'asc',
+  recently_added: 'desc',
+  recently_updated: 'desc',
+  recently_read: 'desc',
+};
+
+const ROOT_SECTIONS: KoreaderCatalogEntry[] = [
+  {
+    id: 'continue-reading',
+    title: 'Continue reading',
+    section: 'continue-reading',
+    booksHref: `${CATALOG_BASE}/books?sort=recently_read&readStatus=reading`,
+  },
+  {
+    id: 'recent',
+    title: 'Recently added',
+    section: 'recent',
+    booksHref: `${CATALOG_BASE}/books?sort=recently_added`,
+  },
+  {
+    id: 'libraries',
+    title: 'Libraries',
+    section: 'libraries',
+    href: `${CATALOG_BASE}/sections/libraries`,
+  },
+  {
+    id: 'collections',
+    title: 'Collections',
+    section: 'collections',
+    href: `${CATALOG_BASE}/sections/collections`,
+  },
+  {
+    id: 'smart-scopes',
+    title: 'SmartScopes',
+    section: 'smart-scopes',
+    href: `${CATALOG_BASE}/sections/smart-scopes`,
+  },
+  {
+    id: 'authors',
+    title: 'Authors',
+    section: 'authors',
+    href: `${CATALOG_BASE}/sections/authors`,
+  },
+  {
+    id: 'series',
+    title: 'Series',
+    section: 'series',
+    href: `${CATALOG_BASE}/sections/series`,
+  },
+  {
+    id: 'all-books',
+    title: 'All Books',
+    section: 'all-books',
+    booksHref: `${CATALOG_BASE}/books?sort=title`,
+  },
+];
+
+@Injectable()
+export class KoreaderCatalogService {
+  constructor(
+    private readonly opdsBookService: OpdsBookService,
+    private readonly bookService: BookService,
+    private readonly bookReadService: BookReadService,
+    private readonly userBookStatusService: UserBookStatusService,
+    private readonly dashboardService: DashboardService,
+    private readonly dashboardWidgetService: DashboardWidgetService,
+    private readonly browseCountsService: BrowseCountsService,
+    private readonly recommendationService: RecommendationService,
+    private readonly appSettingsService: AppSettingsService,
+    private readonly koreaderService: KoreaderService,
+    private readonly pluginService: KoreaderPluginService,
+    @Inject(storageConfig.KEY) private readonly storage: ConfigType<typeof storageConfig>,
+  ) {}
+
+  getRoot(): { sections: KoreaderCatalogEntry[] } {
+    return { sections: ROOT_SECTIONS.map((section) => ({ ...section })) };
+  }
+
+  async getDashboard(user: RequestUser, section?: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogDashboardResponse> {
+    const continueReadingQuery = Object.assign(new KoreaderCatalogBooksQueryDto(), {
+      page: 1,
+      size: DASHBOARD_CONTINUE_READING_LIMIT,
+      sort: 'recently_read' as const,
+      readStatus: 'reading' as const,
+    });
+
+    const [continueReading, discover, dashboardSection, readingGoal, readingStreak, highlightOfTheDay, totalBooks, browseCounts] = await Promise.all([
+      this.getBooksPage(user, continueReadingQuery),
+      section ? Promise.resolve<KoreaderCatalogBookListItem[]>([]) : this.buildDiscover(user),
+      section ? this.buildDashboardSection(user, section) : Promise.resolve(undefined),
+      this.dashboardWidgetService.getReadingGoal(user),
+      this.dashboardWidgetService.getReadingStreak(user),
+      this.dashboardWidgetService.getHighlightOfTheDay(user),
+      this.countBooks(user, {}),
+      this.buildBrowseCounts(user),
+    ]);
+
+    return {
+      generatedAt: new Date().toISOString(),
+      username: user.username,
+      displayName: user.name || user.username,
+      totalBooks,
+      browseCounts,
+      sections: ROOT_SECTIONS.map((rootSection) => ({ ...rootSection })),
+      continueReading: continueReading.items,
+      discover,
+      ...(dashboardSection ? { section: dashboardSection } : {}),
+      readingGoal,
+      readingStreak,
+      highlightOfTheDay,
+    };
+  }
+
+  async getDiscover(user: RequestUser): Promise<KoreaderCatalogDiscoverResponse> {
+    return { discover: await this.buildDiscover(user) };
+  }
+
+  async getDashboardSection(user: RequestUser, section: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogDashboardSectionResponse> {
+    return { section: await this.buildDashboardSection(user, section) };
+  }
+
+  private async buildDashboardSection(user: RequestUser, section: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogDashboardSection> {
+    return {
+      type: section.type,
+      smartScopeId: section.smartScopeId ?? null,
+      books: await this.buildSectionBooks(user, section),
+    };
+  }
+
+  private async buildSectionBooks(user: RequestUser, section: KoreaderDashboardSectionConfig): Promise<KoreaderCatalogBookListItem[]> {
+    // Random keeps its original implementation so the row and its reroll stay
+    // byte-for-byte what the Discover row already returned.
+    if (section.type === 'random') return this.buildDiscover(user);
+
+    const bookIds =
+      section.type === 'smart-scope'
+        ? await this.dashboardService.getSmartScopeBookIds(section.smartScopeId, user, DASHBOARD_SECTION_LIMIT)
+        : await this.dashboardService.getScrollerBookIds(section.type, user, DASHBOARD_SECTION_LIMIT);
+
+    return this.loadBookListItemsByIds(user, bookIds);
+  }
+
+  // Selection order carries the section's meaning (series position, recency), so
+  // it is restored after the books query re-sorts by its own criteria.
+  private async loadBookListItemsByIds(user: RequestUser, bookIds: number[]): Promise<KoreaderCatalogBookListItem[]> {
+    if (bookIds.length === 0) return [];
+    const query = Object.assign(new KoreaderCatalogBooksQueryDto(), { page: 1, size: bookIds.length, ids: bookIds });
+    const { items } = await this.getBooksPage(user, query);
+    const byId = new Map(items.map((item) => [item.id, item]));
+    return bookIds.map((id) => byId.get(id)).filter((item): item is KoreaderCatalogBookListItem => item !== undefined);
+  }
+
+  private async buildDiscover(user: RequestUser): Promise<KoreaderCatalogBookListItem[]> {
+    const entries = await this.opdsBookService.getRandomBooks(user.id, DASHBOARD_DISCOVER_LIMIT, user.isSuperuser, user.contentFilters);
+    if (entries.length === 0) return [];
+
+    const localEntries = entries.filter((entry): entry is OpdsBookEntry & { id: number } => typeof entry.id === 'number');
+    const bookIds = localEntries.map((entry) => entry.id);
+    const [progressMap, statusMap] = await Promise.all([
+      this.findBestProgressMap(user.id, bookIds),
+      this.userBookStatusService.findByBookIds(user.id, bookIds),
+    ]);
+    return localEntries.map((entry) => this.mapBookListItem(entry, progressMap.get(entry.id) ?? null, statusMap.get(entry.id)?.status ?? null));
+  }
+
+  async getSectionEntries(user: RequestUser, section: string, query: { page?: number; q?: string } = {}): Promise<KoreaderCatalogSectionResponse> {
+    switch (section) {
+      case 'libraries':
+        return { section, items: await this.getLibraryEntries(user) };
+      case 'collections':
+        return { section, items: await this.getCollectionEntries(user) };
+      case 'smart-scopes':
+        return { section, items: await this.getSmartScopeEntries(user) };
+      case 'authors':
+        return this.getAuthorsSection(user, query);
+      case 'series':
+        return this.getSeriesSection(user, query);
+      default:
+        throw new BadRequestException('Unknown catalog section');
+    }
+  }
+
+  async getBooksPage(user: RequestUser, query: KoreaderCatalogBooksQueryDto): Promise<KoreaderCatalogPage<KoreaderCatalogBookListItem>> {
+    const page = query.page ?? 1;
+    const size = query.size ?? 20;
+    this.assertPaginationWindow(page, size);
+
+    const filters = this.buildBookFilters(query);
+    const sort = this.mapSort(query.sort ?? 'recently_added', query.order);
+    const { entries, total } = await this.opdsBookService.getBooksPage(user.id, sort, page, size, filters, user.isSuperuser, user.contentFilters);
+
+    const localEntries = entries.filter((entry): entry is OpdsBookEntry & { id: number } => typeof entry.id === 'number');
+    const bookIds = localEntries.map((entry) => entry.id);
+    const [progressMap, statusMap, seriesSummary] = await Promise.all([
+      this.findBestProgressMap(user.id, bookIds),
+      this.userBookStatusService.findByBookIds(user.id, bookIds),
+      filters.seriesId !== undefined || filters.series ? this.computeSeriesSummary(user, filters) : Promise.resolve(null),
+    ]);
+
+    const items = localEntries.map((entry) =>
+      this.mapBookListItem(entry, progressMap.get(entry.id) ?? null, statusMap.get(entry.id)?.status ?? null),
+    );
+    return this.paginate(items, total, page, size, query, seriesSummary);
+  }
+
+  async setReadStatus(user: RequestUser, bookId: number, status: KoreaderCatalogSettableReadStatus): Promise<KoreaderCatalogReadStatusResult> {
+    await this.bookService.verifyBookAccess(bookId, user);
+    await this.userBookStatusService.setManual(user.id, bookId, status);
+    return { readStatus: status };
+  }
+
+  async setRating(user: RequestUser, bookId: number, rating: number | null): Promise<KoreaderCatalogRatingResult> {
+    const normalized = rating ?? null;
+    await this.bookService.bulkSetRating([bookId], normalized, user);
+    return { rating: normalized };
+  }
+
+  // Bulk download enumeration. One page carries everything selection and
+  // transfer need, so a bulk run performs no per-book detail request and no
+  // per-file match request.
+  async getBulkManifest(user: RequestUser, query: KoreaderCatalogManifestQueryDto): Promise<KoreaderCatalogManifestPage> {
+    const size = query.size ?? MANIFEST_DEFAULT_PAGE_SIZE;
+    const filters = this.buildBookFilters(query);
+    const filterKey = this.manifestFilterKey(query, filters);
+    const manifestVersion = await this.pluginService.getLibraryVersion(user.id);
+
+    let afterId: number | undefined;
+    // The version the run started against, carried forward so every cursor of a run
+    // stays bound to one snapshot identity.
+    let runVersion = manifestVersion;
+    if (query.cursor) {
+      const cursor = this.decodeManifestCursor(query.cursor);
+      if (cursor === MANIFEST_CURSOR_CONTRACT_CHANGED) {
+        return { items: [], hasNext: false, nextCursor: null, manifestVersion, restartRequired: true };
+      }
+      if (cursor.userId !== user.id || cursor.filterKey !== filterKey) {
+        throw new BadRequestException('manifest cursor does not match this request');
+      }
+      // A version change no longer restarts enumeration. The keyset orders by immutable
+      // book id, so a concurrent insert or delete can neither skip nor duplicate a row,
+      // and restarting during a live import would refetch every earlier page. The new
+      // version travels in the response instead, which is what refreshes match state.
+      runVersion = cursor.manifestVersion;
+      afterId = cursor.afterId;
+    }
+
+    const { rows, hasNext } = await this.opdsBookService.getBookManifestPage(
+      user.id,
+      { filters, afterId, limit: size },
+      user.isSuperuser,
+      user.contentFilters,
+    );
+
+    const [userDefaultPattern, deviceOrganization, sanitizeForCrossPlatform] = await Promise.all([
+      this.koreaderService.getKoreaderUserDefaultPattern(user.id),
+      query.deviceId ? this.koreaderService.getDeviceFileNamingPattern(user.id, query.deviceId) : Promise.resolve(null),
+      this.appSettingsService.isCrossPlatformPathSanitizationEnabled(),
+    ]);
+    const defaultPattern = deviceOrganization?.fileNamingPattern?.trim() || userDefaultPattern?.trim() || DEFAULT_KOREADER_DEVICE_PATTERN;
+
+    const items = rows.map((row) => {
+      const groupedPattern = row.seriesName
+        ? deviceOrganization?.seriesFileNamingPattern?.trim() || ''
+        : deviceOrganization?.standaloneFileNamingPattern?.trim() || '';
+      const pattern = groupedPattern || defaultPattern;
+      return this.mapManifestBook(row, pattern, sanitizeForCrossPlatform);
+    });
+
+    const lastId = rows.length > 0 ? rows[rows.length - 1]!.id : afterId;
+    return {
+      items,
+      hasNext,
+      nextCursor: hasNext && lastId !== undefined ? this.encodeManifestCursor(user.id, filterKey, runVersion, lastId) : null,
+      manifestVersion,
+      restartRequired: false,
+    };
+  }
+
+  private mapManifestBook(row: OpdsManifestBookRow, pattern: string, sanitizeForCrossPlatform: boolean): KoreaderCatalogManifestBook {
+    const authorNames = row.authors.join(', ');
+    const files = row.files.map<KoreaderCatalogManifestFile>((file) => {
+      const extension = this.normalizeFormat(file.format);
+      return {
+        id: file.id,
+        format: extension,
+        sizeBytes: file.sizeBytes,
+        contentVersion: file.contentVersion.toISOString(),
+        fileHash: file.fileHash,
+        downloadUrl: `${CATALOG_BASE}/files/${file.id}/download`,
+        devicePath:
+          resolveUploadPath(
+            pattern,
+            {
+              title: row.title,
+              subtitle: row.subtitle ?? '',
+              authors: authorNames,
+              year: row.publishedYear ? String(row.publishedYear) : '',
+              series: row.seriesName ?? '',
+              seriesIndex: row.seriesIndex == null ? '' : String(row.seriesIndex),
+              language: row.language ?? '',
+              publisher: row.publisher ?? '',
+              isbn: row.isbn13 ?? row.isbn10 ?? '',
+              originalFilename: basename(file.filename ?? row.title, `.${extension}`),
+              extension,
+            },
+            extension,
+            { sanitizeForCrossPlatform },
+          ) ??
+          file.filename ??
+          `${row.title}.${extension}`,
+      };
+    });
+
+    return {
+      id: row.id,
+      title: row.title,
+      authors: row.authors,
+      seriesName: row.seriesName,
+      seriesIndex: row.seriesIndex,
+      formats: this.uniqueFormats(files.map((file) => file.format)),
+      files,
+    };
+  }
+
+  // Identifies the normalized filter a cursor was minted against, so a cursor
+  // can never be replayed against a different selection.
+  private manifestFilterKey(query: KoreaderCatalogManifestQueryDto, filters: ReturnType<KoreaderCatalogService['buildBookFilters']>): string {
+    const parts = [
+      `ids=${filters.ids ? [...filters.ids].sort((a, b) => a - b).join('.') : ''}`,
+      `library=${filters.libraryId ?? ''}`,
+      `collection=${filters.collectionId ?? ''}`,
+      `smartScope=${filters.smartScopeId ?? ''}`,
+      `author=${filters.author ?? ''}`,
+      `series=${filters.series ?? ''}`,
+      `seriesId=${filters.seriesId ?? ''}`,
+      `q=${filters.q ?? ''}`,
+      `readStatus=${filters.readStatus ?? ''}`,
+      `format=${filters.format ?? ''}`,
+      `device=${query.deviceId ?? ''}`,
+    ];
+    return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
+  }
+
+  private encodeManifestCursor(userId: number, filterKey: string, manifestVersion: string, afterId: number): string {
+    const payload = { v: MANIFEST_CURSOR_VERSION, u: userId, k: filterKey, m: manifestVersion, a: afterId };
+    return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  }
+
+  /**
+   * Returns the decoded cursor, or the contract-changed marker when the payload is a
+   * well-formed cursor from another cursor contract. That is the one case left where the
+   * client has to restart enumeration; a moved manifest snapshot no longer is.
+   */
+  private decodeManifestCursor(
+    cursor: string,
+  ): { userId: number; filterKey: string; manifestVersion: string; afterId: number } | typeof MANIFEST_CURSOR_CONTRACT_CHANGED {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    } catch {
+      throw new BadRequestException('invalid manifest cursor');
+    }
+    const value = payload as { v?: unknown; u?: unknown; k?: unknown; m?: unknown; a?: unknown };
+    if (typeof value?.v === 'number' && value.v !== MANIFEST_CURSOR_VERSION) {
+      return MANIFEST_CURSOR_CONTRACT_CHANGED;
+    }
+    if (
+      value?.v !== MANIFEST_CURSOR_VERSION ||
+      typeof value.u !== 'number' ||
+      typeof value.k !== 'string' ||
+      typeof value.m !== 'string' ||
+      typeof value.a !== 'number' ||
+      !Number.isInteger(value.a)
+    ) {
+      throw new BadRequestException('invalid manifest cursor');
+    }
+    return { userId: value.u, filterKey: value.k, manifestVersion: value.m, afterId: value.a };
+  }
+
+  async getBookDetail(user: RequestUser, bookId: number, deviceId?: string): Promise<KoreaderCatalogBookDetail> {
+    const [detail, relatedSections, userDefaultPattern, sanitizeForCrossPlatform] = await Promise.all([
+      this.bookService.getDetail(bookId, user),
+      this.buildRelatedSections(user, bookId),
+      this.koreaderService.getKoreaderUserDefaultPattern(user.id),
+      this.appSettingsService.isCrossPlatformPathSanitizationEnabled(),
+    ]);
+    const [progress, deviceOrganization] = await Promise.all([
+      this.findBestProgress(user.id, detail.id),
+      deviceId ? this.koreaderService.getDeviceFileNamingPattern(user.id, deviceId) : Promise.resolve(null),
+    ]);
+    const effectiveDefaultPattern = deviceOrganization?.fileNamingPattern?.trim() || userDefaultPattern?.trim() || DEFAULT_KOREADER_DEVICE_PATTERN;
+    const groupedPattern = detail.seriesName
+      ? deviceOrganization?.seriesFileNamingPattern?.trim() || ''
+      : deviceOrganization?.standaloneFileNamingPattern?.trim() || '';
+    const selectedPattern = groupedPattern.trim() || effectiveDefaultPattern;
+    return this.mapBookDetail(detail, progress, relatedSections, selectedPattern, sanitizeForCrossPlatform);
+  }
+
+  async streamThumbnail(user: RequestUser, bookId: number, reply: FastifyReply, ifNoneMatch?: string): Promise<void> {
+    await this.bookService.verifyBookAccess(bookId, user);
+    const thumbnailPath = bookThumbnailPath(this.storage.appDataPath, bookId);
+    try {
+      const { mtimeMs } = await stat(thumbnailPath);
+      const etag = `"${Math.floor(mtimeMs)}"`;
+      if (ifNoneMatch === etag) {
+        reply.status(304).send();
+        return;
+      }
+      reply.header('Cache-Control', 'no-cache');
+      reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+      reply.header('ETag', etag);
+      reply.type(imageContentTypeFromPath(thumbnailPath));
+      reply.send(createReadStream(thumbnailPath));
+    } catch {
+      throw new NotFoundException('No thumbnail');
+    }
+  }
+
+  async streamFile(user: RequestUser, fileId: number, reply: FastifyReply): Promise<void> {
+    const file = await this.bookService.verifyFileAccess(fileId, user);
+    if (file.role !== 'content') {
+      throw new NotFoundException('File not found');
+    }
+
+    const format = this.normalizeFormat(file.format);
+    const filename = await this.bookService.resolveDownloadFilename({
+      bookId: file.bookId,
+      absolutePath: file.absolutePath,
+      format: file.format,
+    });
+
+    try {
+      const { size } = await stat(file.absolutePath);
+      reply.header('Content-Disposition', contentDispositionHeader('attachment', filename, 'download'));
+      reply.header('Content-Length', size);
+      reply.type(fileMimeType(format));
+      reply.send(createReadStream(file.absolutePath));
+    } catch {
+      throw new NotFoundException('File not found on disk');
+    }
+  }
+
+  private async getLibraryEntries(user: RequestUser): Promise<KoreaderCatalogEntry[]> {
+    const rows = await this.opdsBookService.getAccessibleLibraries(user.id, user.isSuperuser);
+    return Promise.all(
+      rows.map(async (row) => {
+        const count = await this.countBooks(user, { libraryId: row.id });
+        return {
+          id: String(row.id),
+          title: row.name,
+          section: 'libraries',
+          count,
+          booksHref: this.booksHref({ libraryId: row.id, sort: 'title' }),
+        };
+      }),
+    );
+  }
+
+  private async getCollectionEntries(user: RequestUser): Promise<KoreaderCatalogEntry[]> {
+    const rows = await this.opdsBookService.getUserCollections(user.id);
+    return Promise.all(
+      rows.map(async (row) => {
+        const count = await this.countBooks(user, { collectionId: row.id });
+        return {
+          id: String(row.id),
+          title: row.name,
+          section: 'collections',
+          count,
+          booksHref: this.booksHref({ collectionId: row.id, sort: 'title' }),
+        };
+      }),
+    );
+  }
+
+  private async getSmartScopeEntries(user: RequestUser): Promise<KoreaderCatalogEntry[]> {
+    const rows = await this.opdsBookService.getUserSmartScopes(user.id);
+    return rows.map((row) => ({
+      id: String(row.id),
+      title: row.name,
+      section: 'smart-scopes',
+      icon: row.icon ?? null,
+      booksHref: this.booksHref({ smartScopeId: row.id, sort: 'title' }),
+    }));
+  }
+
+  private async getAuthorsSection(user: RequestUser, query: { page?: number; q?: string }): Promise<KoreaderCatalogSectionResponse> {
+    const page = query.page ?? 1;
+    const offset = (page - 1) * AUTHOR_SERIES_PAGE_SIZE;
+    const { items, hasNext } = await this.opdsBookService.getDistinctAuthorsPage(
+      user.id,
+      { q: query.q, limit: AUTHOR_SERIES_PAGE_SIZE, offset },
+      user.isSuperuser,
+      user.contentFilters,
+    );
+    const entries: KoreaderCatalogEntry[] = items.map((row) => ({
+      id: row.name,
+      title: row.name,
+      section: 'authors',
+      count: row.bookCount,
+      booksHref: this.booksHref({ author: row.name, sort: 'title' }),
+    }));
+    return this.buildSectionPage('authors', entries, page, hasNext, query.q);
+  }
+
+  private async getSeriesSection(user: RequestUser, query: { page?: number; q?: string }): Promise<KoreaderCatalogSectionResponse> {
+    const page = query.page ?? 1;
+    const offset = (page - 1) * AUTHOR_SERIES_PAGE_SIZE;
+    const { items, hasNext } = await this.opdsBookService.getDistinctSeriesPage(
+      user.id,
+      { q: query.q, limit: AUTHOR_SERIES_PAGE_SIZE, offset },
+      user.isSuperuser,
+      user.contentFilters,
+    );
+    const entries: KoreaderCatalogEntry[] = items.map((row) => ({
+      id: this.seriesEntryId(row.id),
+      title: row.name,
+      section: 'series',
+      count: row.bookCount,
+      seriesId: row.id,
+      booksHref: this.booksHref({ seriesId: row.id, sort: 'series' }),
+    }));
+    return this.buildSectionPage('series', entries, page, hasNext, query.q);
+  }
+
+  private seriesEntryId(seriesId: number): string {
+    return `series:${seriesId}`;
+  }
+
+  private buildSectionPage(
+    section: KoreaderCatalogSection,
+    items: KoreaderCatalogEntry[],
+    page: number,
+    hasNext: boolean,
+    q?: string,
+  ): KoreaderCatalogSectionResponse {
+    const hasPrevious = page > 1;
+    return {
+      section,
+      items,
+      page,
+      hasNext,
+      hasPrevious,
+      nextUrl: hasNext ? this.sectionHref(section, page + 1, q) : null,
+      previousUrl: hasPrevious ? this.sectionHref(section, page - 1, q) : null,
+      query: q?.trim() ? q.trim() : null,
+    };
+  }
+
+  private sectionHref(section: KoreaderCatalogSection, page: number, q?: string): string {
+    const search = new URLSearchParams();
+    if (page > 1) search.set('page', String(page));
+    if (q?.trim()) search.set('q', q.trim());
+    const suffix = search.toString();
+    return suffix ? `${CATALOG_BASE}/sections/${section}?${suffix}` : `${CATALOG_BASE}/sections/${section}`;
+  }
+
+  // Badges for the dashboard Browse tiles. Every total here is a count query:
+  // authors and series reuse the cached ones the web sidebar already asks for,
+  // and the rest deliberately avoid the list methods behind the section
+  // endpoints, which aggregate per-entity book counts a badge never reads.
+  private async buildBrowseCounts(user: RequestUser): Promise<KoreaderCatalogBrowseCounts> {
+    const [inProgress, sidebarCounts, libraryIds, collections, smartScopes] = await Promise.all([
+      this.countBooks(user, { readStatus: 'reading' }),
+      this.browseCountsService.getCounts(user),
+      this.opdsBookService.getAccessibleLibraryIds(user.id, user.isSuperuser),
+      this.opdsBookService.countUserCollections(user.id),
+      this.opdsBookService.countUserSmartScopes(user.id),
+    ]);
+
+    return {
+      inProgress,
+      libraries: libraryIds.length,
+      authors: sidebarCounts.authors,
+      series: sidebarCounts.series,
+      collections,
+      smartScopes,
+    };
+  }
+
+  private async countBooks(
+    user: RequestUser,
+    filters: {
+      libraryId?: number;
+      collectionId?: number;
+      series?: string;
+      seriesId?: number;
+      readStatus?: 'unread' | 'reading' | 'finished';
+    },
+  ): Promise<number> {
+    return this.opdsBookService.countBooks(user.id, filters, user.isSuperuser, user.contentFilters);
+  }
+
+  private async computeSeriesSummary(user: RequestUser, filters: { series?: string; seriesId?: number }): Promise<KoreaderCatalogSeriesSummary> {
+    const [total, finished] = await Promise.all([this.countBooks(user, filters), this.countBooks(user, { ...filters, readStatus: 'finished' })]);
+    return { total, finished };
+  }
+
+  private mapBookListItem(entry: OpdsBookEntry, progress: KoreaderCatalogProgress | null, readStatus: string | null): KoreaderCatalogBookListItem {
+    const formats = this.uniqueFormats(entry.files.map((file) => file.format));
+    return {
+      id: typeof entry.id === 'number' ? entry.id : 0,
+      title: entry.title,
+      authors: entry.authors,
+      seriesId: entry.seriesId ?? null,
+      seriesName: entry.seriesName,
+      seriesIndex: entry.seriesIndex,
+      progressPercentage: progress?.percentage ?? null,
+      lastReadAt: progress?.updatedAt ?? null,
+      readStatus,
+      formats,
+      hasCover: entry.hasCover,
+      thumbnailUrl: entry.hasCover ? `${CATALOG_BASE}/books/${entry.id}/thumbnail` : null,
+      detailUrl: `${CATALOG_BASE}/books/${entry.id}`,
+      addedAt: entry.addedAt.toISOString(),
+      updatedAt: entry.updatedAt.toISOString(),
+    };
+  }
+
+  private mapBookDetail(
+    detail: BookDetailDto,
+    progress: KoreaderCatalogProgress | null,
+    relatedSections: KoreaderCatalogRelatedSection[] = [],
+    filePattern = DEFAULT_KOREADER_DEVICE_PATTERN,
+    sanitizeForCrossPlatform = true,
+  ): KoreaderCatalogBookDetail {
+    const title = detail.title ?? (basename(detail.folderPath) || `Book ${detail.id}`);
+    const files = detail.files
+      .filter((file) => file.role === 'primary' || file.role === 'content')
+      .map<KoreaderCatalogFile>((file) => {
+        const extension = this.normalizeFormat(file.format);
+        return {
+          id: file.id,
+          format: extension,
+          role: file.role,
+          sizeBytes: file.sizeBytes,
+          durationSeconds: file.durationSeconds,
+          downloadUrl: `${CATALOG_BASE}/files/${file.id}/download`,
+          devicePath:
+            resolveUploadPath(
+              filePattern,
+              {
+                title,
+                subtitle: detail.subtitle ?? '',
+                authors: detail.authors.map((author) => author.name).join(', '),
+                year: detail.publishedYear ? String(detail.publishedYear) : '',
+                series: detail.seriesName ?? '',
+                seriesIndex: detail.seriesIndex == null ? '' : String(detail.seriesIndex),
+                language: detail.language ?? '',
+                publisher: detail.publisher ?? '',
+                isbn: detail.isbn13 ?? detail.isbn10 ?? '',
+                originalFilename: basename(file.filename ?? title, `.${extension}`),
+                extension,
+              },
+              extension,
+              { sanitizeForCrossPlatform },
+            ) ??
+            file.filename ??
+            `${title}.${extension}`,
+        };
+      });
+
+    return {
+      id: detail.id,
+      title,
+      authors: detail.authors.map((author) => author.name),
+      seriesId: detail.seriesId,
+      seriesName: detail.seriesName,
+      seriesIndex: detail.seriesIndex,
+      progressPercentage: progress?.percentage ?? null,
+      lastReadAt: progress?.updatedAt ?? null,
+      readStatus: detail.readStatus?.status ?? null,
+      formats: this.uniqueFormats(files.map((file) => file.format)),
+      hasCover: detail.coverSource !== null,
+      thumbnailUrl: detail.coverSource !== null ? `${CATALOG_BASE}/books/${detail.id}/thumbnail` : null,
+      detailUrl: `${CATALOG_BASE}/books/${detail.id}`,
+      addedAt: detail.addedAt.toISOString(),
+      updatedAt: (detail.updatedAt ?? detail.addedAt).toISOString(),
+      subtitle: detail.subtitle,
+      description: detail.description,
+      publisher: detail.publisher,
+      publishedDate: detail.publishedDate,
+      publishedYear: detail.publishedYear,
+      language: detail.language,
+      isbn10: detail.isbn10,
+      isbn13: detail.isbn13,
+      libraryId: detail.libraryId,
+      libraryName: detail.libraryName,
+      rating: detail.rating,
+      pageCount: detail.pageCount,
+      collections: detail.collections,
+      genres: detail.genres,
+      tags: detail.tags,
+      progress,
+      files,
+      relatedSections,
+    };
+  }
+
+  private async buildRelatedSections(user: RequestUser, bookId: number): Promise<KoreaderCatalogRelatedSection[]> {
+    const [seriesBooks, authorBooks, similarBooks] = await Promise.all([
+      this.safeRelatedLookup(() => this.recommendationService.getSeriesBooks(bookId, user)),
+      this.safeRelatedLookup(() => this.recommendationService.getAuthorBooks(bookId, user)),
+      this.safeRelatedLookup(() => this.recommendationService.getRecommendations(bookId, user)),
+    ]);
+
+    const sections: KoreaderCatalogRelatedSection[] = [];
+    const excludedFromSimilar = new Set<number>([bookId]);
+    const series = seriesBooks.filter((book) => book.id !== bookId).slice(0, DETAIL_RELATED_LIMIT);
+    for (const book of series) excludedFromSimilar.add(book.id);
+    if (series.length > 0) {
+      sections.push({
+        id: 'series',
+        title: 'More in series',
+        books: series.map((book) => this.mapRelatedBook(book)),
+      });
+    }
+
+    const authors = authorBooks.filter((book) => book.id !== bookId).slice(0, DETAIL_RELATED_LIMIT);
+    for (const book of authors) excludedFromSimilar.add(book.id);
+    if (authors.length > 0) {
+      sections.push({
+        id: 'author',
+        title: 'Also by this author',
+        books: authors.map((book) => this.mapRelatedBook(book)),
+      });
+    }
+
+    const similar = similarBooks.filter((book) => !excludedFromSimilar.has(book.id)).slice(0, DETAIL_RELATED_LIMIT);
+    if (similar.length > 0) {
+      sections.push({
+        id: 'similar',
+        title: 'Similar books',
+        books: similar.map((book) => this.mapRelatedBook(book)),
+      });
+    }
+
+    return sections;
+  }
+
+  private async safeRelatedLookup<T>(lookup: () => Promise<T[]>): Promise<T[]> {
+    try {
+      return await lookup();
+    } catch {
+      return [];
+    }
+  }
+
+  private mapRelatedBook(book: {
+    id: number;
+    title: string | null;
+    authors: string[];
+    seriesIndex?: number | null;
+    hasCover: boolean;
+    updatedAt: string | null;
+    isAudiobook?: boolean;
+    isComic?: boolean;
+  }): KoreaderCatalogRelatedBook {
+    return {
+      id: book.id,
+      title: book.title,
+      authors: book.authors,
+      seriesIndex: book.seriesIndex ?? null,
+      hasCover: book.hasCover,
+      thumbnailUrl: book.hasCover ? `${CATALOG_BASE}/books/${book.id}/thumbnail` : null,
+      detailUrl: `${CATALOG_BASE}/books/${book.id}`,
+      updatedAt: book.updatedAt,
+      isAudiobook: book.isAudiobook,
+      isComic: book.isComic,
+    };
+  }
+
+  private async findBestProgress(userId: number, bookId: number): Promise<KoreaderCatalogProgress | null> {
+    const rows = await this.bookReadService.findProgressByBook(userId, bookId);
+    let best: ProgressCandidate | null = null;
+    for (const row of rows) {
+      if (row.percentage == null || row.updatedAt == null) continue;
+      const candidate = row as ProgressCandidate;
+      if (!best || candidate.updatedAt > best.updatedAt) {
+        best = candidate;
+      }
+    }
+
+    return best ? this.mapProgress(best) : null;
+  }
+
+  private async findBestProgressMap(userId: number, bookIds: number[]): Promise<Map<number, KoreaderCatalogProgress>> {
+    const map = new Map<number, KoreaderCatalogProgress>();
+    if (bookIds.length === 0) return map;
+
+    const rows = await this.bookReadService.findProgressByBooks(userId, bookIds);
+    const best = new Map<number, BatchProgressCandidate>();
+    for (const row of rows) {
+      if (row.percentage == null || row.updatedAt == null) continue;
+      const candidate = row as BatchProgressCandidate;
+      const current = best.get(row.bookId);
+      if (!current || candidate.updatedAt > current.updatedAt) {
+        best.set(row.bookId, candidate);
+      }
+    }
+
+    for (const [bookId, candidate] of best) {
+      map.set(bookId, {
+        fileId: candidate.fileId,
+        percentage: candidate.percentage,
+        koreaderProgress: candidate.koreaderProgress ?? null,
+        updatedAt: candidate.updatedAt.toISOString(),
+      });
+    }
+    return map;
+  }
+
+  private mapProgress(row: ProgressCandidate): KoreaderCatalogProgress {
+    return {
+      fileId: row.fileId,
+      percentage: row.percentage ?? 0,
+      koreaderProgress: row.koreaderProgress ?? null,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  private buildBookFilters(query: KoreaderCatalogBooksQueryDto | KoreaderCatalogManifestQueryDto): {
+    libraryId?: number;
+    collectionId?: number;
+    smartScopeId?: number;
+    author?: string;
+    series?: string;
+    seriesId?: number;
+    q?: string;
+    readStatus?: 'unread' | 'reading' | 'finished';
+    format?: string;
+    ids?: number[];
+  } {
+    return {
+      ...(query.libraryId !== undefined ? { libraryId: query.libraryId } : {}),
+      ...(query.collectionId !== undefined ? { collectionId: query.collectionId } : {}),
+      ...(query.smartScopeId !== undefined ? { smartScopeId: query.smartScopeId } : {}),
+      ...(query.author ? { author: query.author } : {}),
+      ...(query.seriesId !== undefined ? { seriesId: query.seriesId } : {}),
+      ...(query.series ? { series: query.series } : {}),
+      ...(query.q?.trim() ? { q: query.q.trim() } : {}),
+      ...(query.readStatus ? { readStatus: query.readStatus } : {}),
+      ...(query.format?.trim() ? { format: query.format.trim().toLowerCase() } : {}),
+      ...(query.ids ? { ids: query.ids } : {}),
+    };
+  }
+
+  private mapSort(sort: KoreaderCatalogSort, order?: KoreaderCatalogSortOrder): OpdsSortOrder {
+    const direction = order ?? NATURAL_SORT_ORDER[sort];
+    const descending = direction === 'desc';
+    switch (sort) {
+      case 'title':
+        return descending ? 'title_desc' : 'title_asc';
+      case 'author':
+        return descending ? 'author_desc' : 'author_asc';
+      case 'recently_updated':
+        return descending ? 'updated' : 'updated_asc';
+      case 'recently_read':
+        return descending ? 'recently_read' : 'recently_read_asc';
+      case 'series':
+        return descending ? 'series_desc' : 'series_asc';
+      case 'recently_added':
+      default:
+        return descending ? 'recent' : 'recent_asc';
+    }
+  }
+
+  private paginate<T>(
+    items: T[],
+    total: number,
+    page: number,
+    size: number,
+    query: KoreaderCatalogBooksQueryDto,
+    seriesSummary: KoreaderCatalogSeriesSummary | null = null,
+  ): KoreaderCatalogPage<T> {
+    const hasNext = page * size < total;
+    const hasPrevious = page > 1;
+    return {
+      items,
+      total,
+      page,
+      size,
+      hasNext,
+      hasPrevious,
+      nextUrl: hasNext ? this.pageHref(query, page + 1, size) : null,
+      previousUrl: hasPrevious ? this.pageHref(query, page - 1, size) : null,
+      seriesSummary,
+    };
+  }
+
+  private pageHref(query: KoreaderCatalogBooksQueryDto, page: number, size: number): string {
+    return this.booksHref({ ...query, page, size });
+  }
+
+  private booksHref(params: Partial<KoreaderCatalogBooksQueryDto>): string {
+    const search = new URLSearchParams();
+    const orderedKeys = [
+      'page',
+      'size',
+      'sort',
+      'order',
+      'q',
+      'readStatus',
+      'format',
+      'ids',
+      'libraryId',
+      'collectionId',
+      'smartScopeId',
+      'author',
+      'seriesId',
+      'series',
+    ] as const;
+    for (const key of orderedKeys) {
+      const value = params[key];
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, Array.isArray(value) ? value.join(',') : String(value));
+      }
+    }
+    const suffix = search.toString();
+    return suffix ? `${CATALOG_BASE}/books?${suffix}` : `${CATALOG_BASE}/books`;
+  }
+
+  private assertPaginationWindow(page: number, size: number): void {
+    if (!isOffsetWithinLimit((page - 1) * size)) {
+      throw new BadRequestException(`pagination window is too deep; (page - 1) * size must be <= ${MAX_OFFSET_ROWS}`);
+    }
+  }
+
+  private normalizeFormat(format: string | null | undefined): string {
+    return (format ?? 'bin').toLowerCase();
+  }
+
+  private uniqueFormats(formats: string[]): string[] {
+    return [...new Set(formats.map((format) => this.normalizeFormat(format)).filter(Boolean))];
+  }
+}

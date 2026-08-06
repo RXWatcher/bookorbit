@@ -1,0 +1,16 @@
+2026-06-05 09:55 EDT - Feature: source-backed ebook email resend parity. Status: Complete. Notes: Email send logs now retain nullable source-backed ebook refs so resend can rebuild the normal email path after a current user access preflight without treating remote ids as local book ids.
+
+Verification:
+- Baseline: pnpm run typecheck
+- Baseline: pnpm run test
+- Red test: pnpm --filter server exec vitest run src/modules/email/email-send-orchestrator.service.test.ts
+- Focused green: pnpm --filter server exec vitest run src/modules/email/email-send-orchestrator.service.test.ts src/modules/email/dto/email-dto-validation.test.ts src/modules/email/email.module.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts
+- pnpm run typecheck
+- pnpm --filter server lint:check
+- pnpm run lint:check
+- pnpm run test
+- git diff --check
+
+Review checkpoint:
+- Fixed the Drizzle metadata blocker by adding current 0023 and 0024 snapshots.
+- Fixed the resend access blocker by preflighting source-backed ebook ownership through a lightweight warehouse service assertion before creating a replacement send log.

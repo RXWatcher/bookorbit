@@ -1,0 +1,193 @@
+<script setup lang="ts">
+import { computed, ref, useAttrs } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { Aperture, BookMarked, BookmarkPlus, ChevronLeft, ChevronRight, Headphones, ListOrdered, RefreshCw, Shuffle, Sparkles } from '@lucide/vue'
+
+import type { BookCard, ScrollerType } from '@bookorbit/types'
+import BookCoverCard from '@/features/book/components/BookCoverCard.vue'
+import BookQuickView from '@/features/book/components/BookQuickView.vue'
+import AddToCollectionSheet from '@/features/collection/components/AddToCollectionSheet.vue'
+import DeleteBookDialog from '@/features/book/components/DeleteBookDialog.vue'
+import { useDashboardScroller } from '../composables/useDashboardScroller'
+import { useDeleteBook } from '@/features/book/composables/useDeleteBook'
+
+defineOptions({
+  inheritAttrs: false,
+})
+
+const props = defineProps<{
+  type: ScrollerType
+  title: string
+  limit?: number
+  smartScopeId?: number
+}>()
+
+const attrs = useAttrs()
+const { t } = useI18n()
+
+const { books, loading, error, refresh } = useDashboardScroller(props.type, props.limit, props.smartScopeId)
+
+const scrollEl = ref<HTMLElement | null>(null)
+
+function scrollBy(delta: number) {
+  scrollEl.value?.scrollBy({ left: delta, behavior: 'smooth' })
+}
+
+const typeIcon = computed(() => {
+  if (props.type === 'continue-reading') return BookMarked
+  if (props.type === 'continue-listening') return Headphones
+  if (props.type === 'want-to-read') return BookmarkPlus
+  if (props.type === 'up-next-in-series') return ListOrdered
+  if (props.type === 'recently-added') return Sparkles
+  if (props.type === 'smart-scope') return Aperture
+  return Shuffle
+})
+
+const SKELETONS = Array.from({ length: 8 })
+const PORTRAIT_COVER_WIDTH_CLASS = 'w-[120px]'
+const SQUARE_COVER_WIDTH_CLASS = 'w-[150px]'
+
+// 'move-to-library' is part of the shared card contract; this view does not
+// opt in, so it never fires here.
+type BookActionType = 'quick-view' | 'edit-metadata' | 'add-to-collection' | 'move-to-library' | 'delete'
+
+const quickViewBookId = ref<number | null>(null)
+const quickViewOpen = ref(false)
+
+const addToCollectionOpen = ref(false)
+const addToCollectionBookId = ref<number | null>(null)
+
+const {
+  pendingId: deleteBookId,
+  deleting: deletingBook,
+  promptDelete,
+  cancelDelete,
+  confirmDelete,
+} = useDeleteBook((id) => {
+  books.value = books.value.filter((b) => b.id !== id)
+})
+
+function handleBookAction(book: BookCard, action: BookActionType) {
+  if (action === 'quick-view') {
+    quickViewBookId.value = book.id
+    quickViewOpen.value = true
+    return
+  }
+  if (action === 'add-to-collection') {
+    addToCollectionBookId.value = book.id
+    addToCollectionOpen.value = true
+    return
+  }
+  if (action === 'delete') {
+    promptDelete(book.id)
+  }
+}
+
+function coverWidthClass(book: BookCard): string {
+  return book.coverAspectRatio === '1/1' ? SQUARE_COVER_WIDTH_CLASS : PORTRAIT_COVER_WIDTH_CLASS
+}
+</script>
+
+<template>
+  <section v-bind="attrs" class="group/scroller overflow-hidden rounded-2xl border border-primary/40 bg-card/30 shadow-sm backdrop-blur-[1px]">
+    <!-- Header -->
+    <div class="mb-2 flex items-center justify-between px-5 pt-4">
+      <div class="flex items-center gap-2.5">
+        <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50">
+          <component :is="typeIcon" :size="14" class="text-foreground" />
+        </div>
+        <h2 class="text-[15px] font-bold tracking-tight">{{ title }}</h2>
+        <span
+          v-if="!loading && !error && books.length > 0"
+          class="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-bold tabular-nums text-foreground"
+        >
+          {{ books.length }}
+        </span>
+      </div>
+      <div class="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/scroller:opacity-100">
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          @click="scrollBy(-560)"
+        >
+          <ChevronLeft :size="16" />
+        </button>
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          @click="scrollBy(560)"
+        >
+          <ChevronRight :size="16" />
+        </button>
+      </div>
+    </div>
+
+    <!-- Skeleton -->
+    <div v-if="loading" class="flex gap-3 overflow-hidden px-5 pb-5">
+      <div v-for="(_, n) in SKELETONS" :key="n" class="w-[120px] shrink-0">
+        <div class="w-full animate-pulse rounded-lg bg-muted" style="aspect-ratio: 2/3" />
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div v-else-if="error" class="flex items-center gap-2.5 px-5 pb-4 pt-1 text-sm text-muted-foreground">
+      <span>{{ t('dashboard.scroller.failedToLoad') }}</span>
+      <button class="flex items-center gap-1.5 text-xs text-primary hover:underline" @click="refresh">
+        <RefreshCw :size="12" />
+        {{ t('dashboard.common.retry') }}
+      </button>
+    </div>
+
+    <!-- Empty -->
+    <div v-else-if="books.length === 0" class="flex flex-col items-center justify-center py-10 gap-3 text-center animate-fade-up">
+      <div class="h-12 w-12 rounded-full bg-muted flex items-center justify-center animate-scale-in">
+        <component :is="typeIcon" :size="20" class="text-muted-foreground" />
+      </div>
+      <p class="text-sm text-muted-foreground">
+        <template v-if="type === 'continue-reading'">{{ t('dashboard.scroller.empty.continueReading') }}</template>
+        <template v-else-if="type === 'continue-listening'">{{ t('dashboard.scroller.empty.continueListening') }}</template>
+        <template v-else-if="type === 'want-to-read'">{{ t('dashboard.scroller.empty.wantToRead') }}</template>
+        <template v-else-if="type === 'up-next-in-series'">{{ t('dashboard.scroller.empty.upNextInSeries') }}</template>
+        <template v-else-if="type === 'recently-added'">{{ t('dashboard.scroller.empty.recentlyAdded') }}</template>
+        <template v-else-if="type === 'smart-scope'">{{ t('dashboard.scroller.empty.smartScope') }}</template>
+        <template v-else>{{ t('dashboard.scroller.empty.default') }}</template>
+      </p>
+    </div>
+
+    <!-- Books row -->
+    <div v-else ref="scrollEl" class="flex items-end gap-5 overflow-x-auto px-5 pb-5 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        v-for="(book, index) in books"
+        :key="book.id"
+        class="shrink-0"
+        :class="coverWidthClass(book)"
+        style="animation: dashboardFadeUp 0.35s ease both"
+        :style="{ animationDelay: `${index * 35}ms` }"
+      >
+        <BookCoverCard :book="book" :cover-aspect-ratio="book.coverAspectRatio" @action="handleBookAction(book, $event)" />
+      </div>
+    </div>
+  </section>
+
+  <BookQuickView :book-id="quickViewBookId" :open="quickViewOpen" @update:open="quickViewOpen = $event" />
+
+  <AddToCollectionSheet
+    :open="addToCollectionOpen"
+    :selection-payload="{ bookIds: addToCollectionBookId ? [addToCollectionBookId] : [] }"
+    :selected-count="addToCollectionBookId ? 1 : 0"
+    @update:open="addToCollectionOpen = $event"
+  />
+
+  <DeleteBookDialog :open="deleteBookId !== null" :deleting="deletingBook" @confirm="confirmDelete" @cancel="cancelDelete" />
+</template>
+
+<style scoped>
+@keyframes dashboardFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+</style>

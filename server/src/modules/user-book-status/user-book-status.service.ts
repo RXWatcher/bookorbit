@@ -1,0 +1,343 @@
+import { Injectable, InternalServerErrorException, Logger, Optional } from '@nestjs/common';
+import type { ReadStatus, UserBookStatus } from '@bookorbit/types';
+import { UserBookStatusRepository } from './user-book-status.repository';
+import type { UserBookStatusRow } from '../../db/schema';
+import { isReadStatus, isReadStatusSource } from './user-book-status.constants';
+import { AchievementEventsService, ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED } from '../achievement/achievement-events.service';
+import { KoboStatusProjectionRepository } from './kobo-status-projection.repository';
+import { ReadingAttemptService } from './reading-attempt.service';
+import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
+
+const DEFAULT_FINISH_THRESHOLD = 98;
+const READING_THRESHOLD = 0.25;
+const MIN_PERCENTAGE = 0;
+const MAX_PERCENTAGE = 100;
+
+type ManualStatusPatch = {
+  status?: ReadStatus;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+};
+
+export type AutoReadingActivity = {
+  occurredOn?: string;
+  origin?: 'bookorbit' | 'kobo' | 'koreader';
+  strongRereadEvidence?: boolean;
+  meaningfulActivity?: boolean;
+};
+
+@Injectable()
+export class UserBookStatusService {
+  private readonly logger = new Logger(UserBookStatusService.name);
+
+  constructor(
+    private readonly repo: UserBookStatusRepository,
+    private readonly achievementEvents: AchievementEventsService,
+    private readonly koboProjection: KoboStatusProjectionRepository,
+    @Optional() private readonly attempts?: ReadingAttemptService,
+  ) {}
+
+  async setManual(userId: number, bookId: number, status: ReadStatus): Promise<void> {
+    await this.updateManual(userId, bookId, { status });
+  }
+
+  async updateManual(
+    userId: number,
+    bookId: number,
+    patch: ManualStatusPatch,
+    dateKeys?: { startedOn?: string | null; endedOn?: string | null },
+  ): Promise<UserBookStatus> {
+    const { state, statusChanged } = await this.applyManualStatus(userId, bookId, patch, dateKeys);
+    if (statusChanged) {
+      await this.projectToKobo(userId, [bookId], state.status);
+    }
+    return state;
+  }
+
+  private async applyManualStatus(
+    userId: number,
+    bookId: number,
+    patch: ManualStatusPatch,
+    dateKeys?: { startedOn?: string | null; endedOn?: string | null },
+  ): Promise<{ state: UserBookStatus; statusChanged: boolean }> {
+    const existing = await this.repo.findOne(userId, bookId);
+    const now = new Date();
+    const hasStatus = Object.prototype.hasOwnProperty.call(patch, 'status');
+    const hasStartedAt = Object.prototype.hasOwnProperty.call(patch, 'startedAt');
+    const hasFinishedAt = Object.prototype.hasOwnProperty.call(patch, 'finishedAt');
+
+    if (this.attempts) {
+      const nextStatus = patch.status ?? existing?.status ?? 'unread';
+      const today = new Date().toISOString().slice(0, 10);
+      const updated = await this.attempts.applyManualStatus(
+        userId,
+        bookId,
+        nextStatus,
+        hasStartedAt ? (dateKeys?.startedOn ?? patch.startedAt?.toISOString().slice(0, 10) ?? null) : undefined,
+        hasFinishedAt ? (dateKeys?.endedOn ?? patch.finishedAt?.toISOString().slice(0, 10) ?? null) : undefined,
+        today,
+      );
+      const previousStatus = existing?.status ?? null;
+      const statusChanged = hasStatus && updated.status !== previousStatus;
+      if (statusChanged) {
+        this.achievementEvents.emit(ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED, {
+          userId,
+          bookId,
+          newStatus: updated.status,
+          previousStatus,
+        });
+      }
+      return { state: updated, statusChanged };
+    }
+
+    const nextStatus = patch.status ?? existing?.status ?? 'unread';
+    let nextStartedAt = hasStartedAt ? (patch.startedAt ?? null) : (existing?.startedAt ?? null);
+    let nextFinishedAt = hasFinishedAt ? (patch.finishedAt ?? null) : (existing?.finishedAt ?? null);
+
+    if (nextStatus === 'unread' || nextStatus === 'want_to_read') {
+      nextStartedAt = null;
+      nextFinishedAt = null;
+    }
+
+    // When dates were not explicitly provided and would be null, seed from session history.
+    // Explicit null patches (user clearing a date) are preserved as-is.
+    // Mirror the same status guard used in repo.upsert(): unread/want_to_read always have null dates.
+    const needsStartedAt = !hasStartedAt && nextStartedAt === null && nextStatus !== 'unread' && nextStatus !== 'want_to_read';
+    const needsFinishedAt = !hasFinishedAt && nextFinishedAt === null && nextStatus === 'read';
+    if (needsStartedAt || needsFinishedAt) {
+      const boundaries = await this.repo.findSessionBoundariesForBook(userId, bookId);
+      if (needsStartedAt) nextStartedAt = boundaries.firstStartedAt;
+      if (needsFinishedAt) {
+        const seeded = boundaries.lastEndedAt;
+        // Only apply if the seeded end is not before the current startedAt.
+        if (seeded !== null && (nextStartedAt === null || seeded >= nextStartedAt)) {
+          nextFinishedAt = seeded;
+        }
+      }
+    }
+
+    const shouldPersist = existing !== null || hasStatus || nextStartedAt !== null || nextFinishedAt !== null;
+    if (shouldPersist) {
+      await this.repo.upsertState(userId, bookId, {
+        status: nextStatus,
+        source: 'manual',
+        startedAt: nextStartedAt,
+        finishedAt: nextFinishedAt,
+        updatedAt: now,
+      });
+    }
+
+    const previousStatus = existing?.status ?? null;
+    const statusChanged = hasStatus && nextStatus !== previousStatus;
+    if (statusChanged) {
+      this.achievementEvents.emit(ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED, {
+        userId,
+        bookId,
+        newStatus: nextStatus,
+        previousStatus,
+      });
+    }
+
+    return {
+      state: {
+        status: nextStatus,
+        source: 'manual',
+        startedAt: nextStartedAt?.toISOString() ?? null,
+        finishedAt: nextFinishedAt?.toISOString() ?? null,
+        updatedAt: now.toISOString(),
+      },
+      statusChanged,
+    };
+  }
+
+  async bulkSetManual(userId: number, bookIds: number[], status: ReadStatus): Promise<void> {
+    if (bookIds.length === 0) return;
+    // Grouped by resulting status because reading-attempt projection can settle on a
+    // different status than requested (a completed book set to "reading" becomes "rereading").
+    const changedByStatus = new Map<ReadStatus, number[]>();
+    const recordChange = (resolved: ReadStatus, bookId: number) => {
+      const ids = changedByStatus.get(resolved);
+      if (ids) ids.push(bookId);
+      else changedByStatus.set(resolved, [bookId]);
+    };
+
+    if (this.attempts) {
+      const batchSize = 50;
+      for (let offset = 0; offset < bookIds.length; offset += batchSize) {
+        const batch = bookIds.slice(offset, offset + batchSize);
+        const results = await Promise.all(batch.map((bookId) => this.applyManualStatus(userId, bookId, { status })));
+        results.forEach((result, index) => {
+          if (result.statusChanged) recordChange(result.state.status, batch[index]!);
+        });
+      }
+      await this.projectGroupsToKobo(userId, changedByStatus);
+      return;
+    }
+
+    const now = new Date();
+    const existing = await this.repo.findByBookIds(userId, bookIds);
+    const existingMap = new Map(existing.map((row) => [row.bookId, row]));
+    await Promise.all(
+      bookIds.map((bookId) => {
+        const current = existingMap.get(bookId) ?? null;
+        const clearsLifecycle = status === 'unread' || status === 'want_to_read';
+        return this.repo.upsertState(userId, bookId, {
+          status,
+          source: 'manual',
+          startedAt: clearsLifecycle ? null : (current?.startedAt ?? null),
+          finishedAt: clearsLifecycle ? null : (current?.finishedAt ?? null),
+          updatedAt: now,
+        });
+      }),
+    );
+    for (const bookId of bookIds) {
+      const previousStatus = existingMap.get(bookId)?.status ?? null;
+      if (status !== previousStatus) {
+        this.achievementEvents.emit(ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED, {
+          userId,
+          bookId,
+          newStatus: status,
+          previousStatus,
+        });
+        recordChange(status, bookId);
+      }
+    }
+    await this.projectGroupsToKobo(userId, changedByStatus);
+  }
+
+  private async projectGroupsToKobo(userId: number, changedByStatus: Map<ReadStatus, number[]>): Promise<void> {
+    for (const [status, ids] of changedByStatus) {
+      await this.projectToKobo(userId, ids, status);
+    }
+  }
+
+  /**
+   * Mirrors the new read status onto the Kobo reading state so devices pick it up on
+   * the next sync. Best-effort: a Kobo projection failure must not fail the status change.
+   */
+  private async projectToKobo(userId: number, bookIds: number[], status: ReadStatus): Promise<void> {
+    if (bookIds.length === 0) return;
+    const startedAt = Date.now();
+    try {
+      if (!(await this.koboProjection.isEnabled(userId))) return;
+      await this.koboProjection.project(userId, bookIds, status);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.warn(
+        `[user_book_status.kobo_projection] [fail] userId=${userId} count=${bookIds.length} status=${status} durationMs=${Date.now() - startedAt} errorClass=${err.constructor.name} error="${sanitizeLogValue(err.message)}" - kobo status projection failed`,
+      );
+    }
+  }
+
+  async autoUpdate(
+    userId: number,
+    bookId: number,
+    percentage: number,
+    readingThreshold?: number | null,
+    finishThreshold?: number | null,
+    activity: AutoReadingActivity = {},
+  ): Promise<void> {
+    const existing = await this.repo.findOne(userId, bookId);
+
+    const normalizedPercentage = this.normalizePercentage(percentage);
+    const { readThreshold, finishThreshold: normalizedFinishThreshold } = this.normalizeThresholds(readingThreshold, finishThreshold);
+    const derived: ReadStatus =
+      normalizedPercentage >= normalizedFinishThreshold ? 'read' : normalizedPercentage >= readThreshold ? 'reading' : 'unread';
+
+    if (this.attempts) {
+      const updated = await this.attempts.recordActivity({
+        userId,
+        bookId,
+        occurredOn: activity.occurredOn ?? new Date().toISOString().slice(0, 10),
+        origin: activity.origin ?? 'bookorbit',
+        progress: normalizedPercentage,
+        finishThreshold: normalizedFinishThreshold,
+        strongRereadEvidence: activity.strongRereadEvidence === true,
+        meaningfulActivity: activity.meaningfulActivity === true,
+      });
+      if (updated && updated.status !== (existing?.status ?? null)) {
+        this.achievementEvents.emit(ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED, {
+          userId,
+          bookId,
+          newStatus: updated.status,
+          previousStatus: existing?.status ?? null,
+        });
+      }
+      return;
+    }
+
+    if (existing?.source === 'manual' && (existing.status !== 'want_to_read' || derived === 'unread')) return;
+
+    if (!existing && derived === 'unread') return;
+    if (existing?.status === derived) return;
+
+    const previousStatus = existing?.status ?? null;
+    await this.repo.upsert(userId, bookId, derived, 'auto', new Date(), existing);
+    this.achievementEvents.emit(ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED, {
+      userId,
+      bookId,
+      newStatus: derived,
+      previousStatus,
+    });
+  }
+
+  async findOne(userId: number, bookId: number): Promise<UserBookStatus | null> {
+    const row = await this.repo.findOne(userId, bookId);
+    return row ? this.toDto(row) : null;
+  }
+
+  async findByBookIds(userId: number, bookIds: number[]): Promise<Map<number, UserBookStatus>> {
+    const rows = await this.repo.findByBookIds(userId, bookIds);
+    const map = new Map<number, UserBookStatus>();
+    for (const row of rows) {
+      map.set(row.bookId, this.toDto(row));
+    }
+    return map;
+  }
+
+  private toDto(row: UserBookStatusRow): UserBookStatus {
+    const status = this.toReadStatus(row.status);
+    const source = this.toReadStatusSource(row.source);
+
+    return {
+      status,
+      source,
+      startedAt: row.startedAt?.toISOString() ?? null,
+      finishedAt: row.finishedAt?.toISOString() ?? null,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  private normalizePercentage(value: number): number {
+    if (!Number.isFinite(value)) return MIN_PERCENTAGE;
+    return Math.min(MAX_PERCENTAGE, Math.max(MIN_PERCENTAGE, value));
+  }
+
+  private normalizeThresholds(readingThreshold?: number | null, finishThreshold?: number | null) {
+    const normalizedReading = this.normalizeThreshold(readingThreshold, READING_THRESHOLD);
+    const normalizedFinish = this.normalizeThreshold(finishThreshold, DEFAULT_FINISH_THRESHOLD);
+    if (normalizedReading <= normalizedFinish) {
+      return { readThreshold: normalizedReading, finishThreshold: normalizedFinish };
+    }
+    return { readThreshold: normalizedFinish, finishThreshold: normalizedFinish };
+  }
+
+  private normalizeThreshold(value: number | null | undefined, fallback: number): number {
+    if (value == null || !Number.isFinite(value)) return fallback;
+    return Math.min(MAX_PERCENTAGE, Math.max(MIN_PERCENTAGE, value));
+  }
+
+  private toReadStatus(value: string): ReadStatus {
+    if (!isReadStatus(value)) {
+      throw new InternalServerErrorException(`Invalid read status value: ${String(value)}`);
+    }
+    return value;
+  }
+
+  private toReadStatusSource(value: string): 'auto' | 'manual' {
+    if (!isReadStatusSource(value)) {
+      throw new InternalServerErrorException(`Invalid read status source value: ${String(value)}`);
+    }
+    return value;
+  }
+}

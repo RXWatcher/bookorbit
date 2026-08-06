@@ -1,0 +1,54 @@
+Book Warehouse Request Sync Progress
+2026-06-03
+
+Completed:
+- Task 1: Repository request sync candidate query.
+  - c5f55163 feat: select request sync candidates
+  - 3fd5ea7b fix: harden request sync candidates
+  - Spec and quality reviews passed.
+
+- Task 2: Request sync service.
+  - 8dbf0790 feat: sync request status mirrors
+  - f5eae4c6 fix: preserve audiobook request remote ids
+  - b9fc3966 fix: skip terminal request sync candidates
+  - d6b2afd1 fix: preserve audiobook refresh remote ids
+  - 8a7943fc fix: sync catalog on completed request refresh
+  - Spec review passed after audiobook remote IDs were preserved by the client mapper.
+  - Quality review passed after terminal-row filtering and completed-refresh catalog triggers were hardened.
+
+- Task 3: Scheduled request sync job.
+  - 5a1958e0 feat: schedule request status sync
+  - d21938ac fix: prevent overlapping request sync jobs
+  - Spec review passed.
+  - Quality review passed after the cron handler was hardened against overlapping in-process runs.
+
+- Task 4: Request sync phase verification.
+  - 1e0bd2cb fix: atomically claim terminal request transitions
+  - a7e2a824 fix: guard nonterminal request sync writes
+  - Final full-phase review passed after all upstream status sync writes were guarded by open-row claims.
+
+Latest Task 2 verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request.service.test.ts --testNamePattern "lists audiobook requests by syncing|refreshes only after local ownership" => 2 passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request.service.test.ts => 31 passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request-sync.service.test.ts => 14 passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-client.service.test.ts --testNamePattern "listAudiobookRequests encodes" => passed
+- pnpm --filter server type-check => passed
+- git status --short => clean
+
+Latest Task 3 verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request-sync.job.test.ts --testNamePattern "does not start a second sync" => passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request-sync.job.test.ts => 6 passed
+- pnpm --filter server type-check => passed
+- git status --short => clean
+
+Latest Task 4 verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse.repository.test.ts --testNamePattern "request sync|claims only open" => 4 passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request-sync.service.test.ts src/modules/warehouse/warehouse-request-sync.job.test.ts => 22 passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-request.service.test.ts --testNamePattern "audiobook status notifications|refreshes only after local ownership|lists audiobook requests|open-row claim|stale non-terminal" => 6 passed
+- pnpm run typecheck => passed
+- pnpm run lint:check => passed
+- Final full-phase reviewer => PASS
+- git status --short => clean
+
+Next:
+- Request sync phase complete.

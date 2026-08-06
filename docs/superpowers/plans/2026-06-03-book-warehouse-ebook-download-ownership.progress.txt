@@ -1,0 +1,18 @@
+Feature: User-scoped catalog ebook downloads
+Started: 2026-06-03 14:41 EDT
+Completed: 2026-06-03 14:41 EDT
+Status: Complete
+
+Scope:
+- Enforce current-user catalog ownership before proxying catalog ebook downloads.
+- Keep unauthorized/missing cases on the same safe not-available response.
+- Preserve server-side credentials and fixed attachment-header behavior from the download proxy slice.
+
+Verification so far:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.service.test.ts --testNamePattern "ebook download"
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.controller.test.ts --testNamePattern "ebook download"
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse-catalog.controller.test.ts
+- pnpm run typecheck
+
+Final verification:
+- pnpm run verify

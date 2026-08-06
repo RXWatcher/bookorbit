@@ -1,0 +1,1403 @@
+[2026-06-03 01:57] Feature: Upstream ebook request client
+Status: Complete
+Notes: Binary request/stream helpers now return stream-backed wrappers and upstream error details are scrubbed before WarehouseApiError messages surface.
+
+[2026-06-03 02:02] Feature: Restore client test storage baseline
+Status: Complete
+Notes: Vitest now installs an in-memory Storage/localStorage shim before client tests so the full repo baseline runs under Node without --localstorage-file.
+
+[2026-06-03 02:35] Feature: Request repository mirror
+Status: Complete
+Notes: Request mirror upserts and updates are scoped by user/media type, and persisted payload summaries strip provider identity, secrets, URLs, and nested unsafe values before storage.
+
+[2026-06-03 03:12] Feature: Ebook request service and controller
+Status: Complete
+Notes: Regular request APIs are native BookOrbit routes with user/media scoping, safe stream fallback, and public sanitizers that strip upstream ids, source/provider wording, URLs, hostnames, secrets, and token-shaped values.
+
+[2026-06-03 03:29] Feature: Ebook request client API and composable
+Status: Complete
+Notes: Client request helpers and composable now use native request routes, safe fallback errors, stale-list preservation, and explicit JSON request headers for submit.
+
+[2026-06-03 03:46] Feature: Full ebook request phase verification
+Status: Complete
+Notes: Final review hardening preserves mirror metadata on partial refresh responses and keeps stale client list loads from overwriting newer request mutations.
+
+[2026-06-03 04:06] Feature: Audiobook request contracts
+Status: Complete
+Notes: Audiobook request contracts and DTOs are native title/author shapes; public payload summaries are allowlisted to safe title/author while upstream-backed discovery and queue fields tolerate nulls.
+
+[2026-06-03 04:22] Feature: Upstream audiobook request client
+Status: Complete
+Notes: Audiobook request submit/list/queue calls now use header auth only, omit blank authors, normalize tolerant list wrappers, scrub HTTP errors, and replace raw network failures with generic catalog-source errors.
+
+[2026-06-03 04:50] Feature: Audiobook request service and controller
+Status: Complete
+Notes: Native audiobook request APIs now search, submit, mirror, sync, refresh, and expose safe queue state with user-scoped local rows, transition notifications, and isolated notification side effects.
+
+[2026-06-03 05:07] Feature: Audiobook request client API and composable
+Status: Complete
+Notes: Client request helpers and audiobook composable now use native request routes with queue/status refresh, stale-data preservation, safe fallback errors, and stale in-flight load protection.
+
+[2026-06-03 12:56] Feature: Native global search for owned catalog items
+Status: Complete
+Notes: Global search now merges local books with current-user-owned synced catalog items from local SQL cache and routes catalog hits to a native detail page without exposing warehouse/provider wording.
+
+[2026-06-03 13:47] Feature: Dashboard catalog additions shelf
+Status: Complete
+Notes: Dashboard now includes a configurable Catalog Additions shelf backed by current-user-owned synced catalog items, safe dashboard response types, a native endpoint, and catalog detail navigation without exposing integration wording.
+
+[2026-06-03 14:02] Feature: Smart Scope catalog preview
+Status: Complete
+Notes: Smart Scope pages now surface read-only Catalog Matches from current-user-owned catalog items through a native query endpoint, conservative rule translation, and catalog detail navigation without exposing integration wording.
+
+[2026-06-03 14:13] Feature: Catalog recommendations
+Status: Complete
+Notes: Book detail pages now show native More From Catalog recommendations from current-user-owned catalog items, using local target series/author metadata and catalog detail navigation without exposing integration wording.
+
+[2026-06-03 14:27] Feature: Catalog discovery dashboard shelf
+Status: Complete
+Notes: Dashboard now includes a configurable Explore Catalog shelf backed by current-user-owned synced catalog items, using the shared catalog card UI and native catalog detail navigation without exposing integration wording.
+
+[2026-06-03 14:36] Feature: Native catalog ebook download proxy
+Status: Complete
+Notes: Catalog ebook downloads now proxy through a native route after cached-item verification, using server-side credentials, allowlisted content types, safe errors, and fixed attachment filenames.
+
+[2026-06-03 14:41] Feature: User-scoped catalog ebook downloads
+Status: Complete
+Notes: Catalog ebook downloads now require the current user's catalog state to include the item before any live binary client call is made.
+
+[2026-06-03 14:53] Feature: Native catalog ebook cover proxy
+Status: Complete
+Notes: Catalog ebook covers now proxy documented thumbnail/medium/original sizes through a native user-scoped image route with safe ebook error copy and private browser caching.
+
+[2026-06-03 15:01] Feature: User-scoped catalog audiobook binaries
+Status: Complete
+Notes: Catalog audiobook cover, stream, download, and file-download routes now require the current user's catalog state to include the item before any live binary client call is made.
+
+[2026-06-03 15:10] Feature: Native catalog ebook detail media actions
+Status: Complete
+Notes: Catalog ebook detail pages now use native cover and download media URLs, with tests ensuring no audiobook player or integration wording leaks into the ebook detail surface.
+
+[2026-06-03 15:27] Feature: Native catalog audiobook file actions
+Status: Complete
+Notes: Catalog audiobook detail pages now render cached files with native per-file download links, preserving encoded IDs and avoiding integration wording in the user surface.
+
+[2026-06-03 15:34] Feature: Native catalog audiobook playback progress
+Status: Complete
+Notes: Catalog audiobook detail playback now persists paused position and progress through native catalog user state, marking pre-reading items as reading without overwriting explicit statuses.
+
+[2026-06-03 15:47] Feature: Range-aware catalog binary proxy
+Status: Complete
+Notes: Catalog binary proxies now forward only validated single byte-range requests, strip content-type parameters, and emit safe 206/416 range metadata without reflecting upstream headers, URLs, or credentials.
+
+[2026-06-03 16:03] Feature: Native catalog audiobook resume position
+Status: Complete
+Notes: Catalog audiobook detail playback now restores saved listening position on metadata load without saving or changing read status, clamping beyond-duration positions safely.
+
+[2026-06-03 16:16] Feature: Completed request catalog links
+Status: Complete
+Notes: Completed ebook and audiobook requests now expose a native Open item link only when a sanitized completed catalog item id is available, preserving modified-click behavior and hiding integration wording.
+
+[2026-06-03 16:30] Feature: OPDS catalog ebook acquisition feed
+Status: Complete
+Notes: OPDS now exposes current-user-owned synced catalog ebooks through native acquisition, download, and cover routes without integration wording or private upstream URLs.
+
+[2026-06-03 16:52] Feature: OPDS merged catalog ebook feeds
+Status: Complete
+Notes: OPDS All Books/search and Recent now merge current-user-owned synced catalog ebooks when catalog access is enabled, while local-only library/collection/smart-scope filters stay on the existing local book path.
+
+[2026-06-03 17:31] Feature: Kobo catalog ebook compatibility
+Status: Complete
+Notes: Kobo sync now exposes current-user-owned catalog ebooks with opaque BookOrbit IDs, user-scoped media routes, and catalog-backed reading state without exposing source identifiers.
+
+[2026-06-03 17:55] Feature: KOReader catalog ebook progress compatibility
+Status: Complete
+Notes: KOReader now syncs progress for current-user-owned catalog ebooks downloaded through OPDS by recording full-file document hashes and mapping them to catalog-backed user state without exposing source identifiers.
+
+[2026-06-03 18:14] Feature: ABS-style catalog audiobook item mapping
+Status: Complete
+Notes: Read-only ABS-style compatibility now maps owned cached catalog audiobooks through opaque local IDs, synthetic track/file/chapter/progress identifiers, and native progress state without leaking upstream filenames or source identifiers.
+
+[2026-06-03 18:40] Feature: Persistent catalog ebook cover cache
+Status: Complete
+Notes: Catalog ebook covers now use a user-authorized read-through filesystem cache with credential-scoped hashed keys, raster-only sanitized content types, checksum validation, stream-safe write-through behavior, and no upstream filenames or identifiers in cached responses.
+
+[2026-06-03 18:55] Feature: Persistent catalog audiobook cover cache
+Status: Complete
+Notes: Catalog audiobook covers now share the hardened credential-scoped cover cache while preserving per-user authorization, media-type cache isolation, sanitized raster-only responses, and live-only behavior for audiobook stream/download routes.
+
+[2026-06-03 19:05] Feature: Admin catalog cache status
+Status: Complete
+Notes: Admin integration settings can now read aggregate catalog cover cache status with total and per-media entry/byte counts, validating cache metadata checksums without exposing paths, source keys, remote IDs, filenames, or credentials.
+
+[2026-06-03 19:15] Feature: Admin catalog cover cache clear
+Status: Complete
+Notes: Admin integration settings can now clear the catalog cover cache with aggregate cleared counts and post-clear status, scoped to the cover-cache root and hardened so in-flight cover responses survive concurrent clear/write races.
+
+[2026-06-03 19:25] Feature: Admin catalog cover cache UI
+Status: Complete
+Notes: Admin integration settings now load cover cache status, display aggregate ebook/audiobook cover counts with human-readable bytes, and expose a native clear action without regular-user or provider-facing wording.
+
+[2026-06-03 19:35] Feature: Catalog audiobook browse dimensions
+Status: Complete
+Notes: Native catalog routes now expose audiobook authors, narrators, and series from local synced catalog rows, plus author/series detail listings, using opaque name-based IDs and no live provider calls or source identifiers.
+
+[2026-06-03 19:42] Feature: Catalog genre dimensions
+Status: Complete
+Notes: Catalog sync now keeps safe genre/tag arrays, and native catalog routes expose ebook/audiobook genre dimensions plus genre-filtered listings from local cache only, with opaque name-based IDs and no provider-facing data.
+
+[2026-06-03 21:42] Feature: Book Warehouse admin naming
+Status: Complete
+Notes: Admin-only integration settings now use Book Warehouse naming and the production base URL default while keeping regular catalog surfaces on native BookOrbit copy.
+
+[2026-06-03 21:55] Feature: Native available catalog browse pages
+Status: Complete
+Notes: Regular users now have Ebook Library and Audiobook Library navigation backed by local synced catalog rows, with native copy and detail links while audiobook visibility remains dependent on an audiobook sync run.
+
+[2026-06-03 22:00] Feature: Book Warehouse integration tab baseline
+Status: Complete
+Notes: Full client tests now expect the admin-only integrations tab to use Book Warehouse naming, matching the implemented settings copy while preserving native regular-user catalog wording elsewhere.
+
+[2026-06-03 22:07] Feature: Live catalog sync progress telemetry
+Status: Complete
+Notes: Catalog sync runs now persist fetched/saved counts after each full page and the admin settings page polls those counts during manual ebook or audiobook sync requests so long-running syncs no longer look frozen.
+
+[2026-06-03 22:23] Feature: Catalog sync interruption recovery
+Status: Complete
+Notes: Admin sync status now marks stale database-running catalog syncs as interrupted only after owner/progress metadata ages out, keeps all in-process syncs active, and prevents old rows from leaving audiobook sync disabled after a container restart.
+
+[2026-06-03 22:57] Feature: Catalog sync timeout resilience
+Status: Complete
+Notes: Catalog page syncs now use a longer batch-job request timeout, retry transient page fetch failures, and persist current page/attempt metadata so slow audiobook pages do not fail silently.
+
+[2026-06-03 23:13] Feature: Source-backed library placement and shelf layout
+Status: Complete
+Notes: Ebook and audiobook catalog shelves now live inside the Libraries sidebar section and use the shared local-library header/display controls with cover-grid shelf cards.
+
+[2026-06-03 22:23] Feature: Available catalog loading visibility
+Status: Complete
+Notes: Ebook and audiobook library browse pages now begin in a loading state, hide initial zero-count controls until the first page resolves, and format large catalog totals with thousands separators.
+
+[2026-06-03 23:56] Feature: Source-backed collection membership
+Status: Complete
+Notes: Catalog detail pages now reuse native Manage Collections with source-backed title refs stored in an additive join table; upstream/main already has a different 0013 migration, so reconcile/renumber the warehouse migration stack before upstream merge.
+
+[2026-06-04 00:07] Feature: Source-backed collection display
+Status: Complete
+Notes: Collection pages now show source-backed catalog titles from collection membership as native catalog cards with search-aware counts while preserving the existing local-book table/grid/list path.
+
+[2026-06-04 00:11] Feature: Smart scope catalog ebook covers
+Status: Complete
+Notes: Smart scope catalog previews now use the native ebook cover proxy for source-backed ebook matches instead of falling back to icons while audiobook cover behavior remains unchanged.
+
+[2026-06-04 00:16] Feature: Dashboard catalog ebook covers
+Status: Complete
+Notes: Dashboard catalog shelves now use the native ebook cover proxy for source-backed ebook cards, matching audiobook cover behavior without touching migrations.
+
+[2026-06-04 00:20] Feature: Catalog recommendation ebook covers
+Status: Complete
+Notes: Local book detail recommendation shelves now use the native ebook cover proxy for source-backed ebook cards, matching audiobook behavior without touching migrations.
+
+[2026-06-04 00:28] Feature: Source-backed library UI cleanup
+Status: Complete
+Notes: Catalog ebook/audiobook library pages now use native empty-state copy and tests guard the cover-grid layout without touching migrations.
+
+[2026-06-04 00:32] Feature: Native search library labels
+Status: Complete
+Notes: Global search now labels source-backed results as Ebook Library or Audio Library instead of Catalog while preserving catalog-detail routing.
+
+[2026-06-04 00:37] Feature: Global search ebook cover previews
+Status: Complete
+Notes: Global search now uses the native ebook cover proxy for source-backed ebook result thumbnails while preserving audiobook previews and catalog-detail routing.
+
+[2026-06-04 00:42] Feature: Native collection source-backed heading
+Status: Complete
+Notes: Collection pages now label source-backed collection items as Library titles instead of Catalog titles, with a copy guard test and no migration changes.
+
+[2026-06-04 00:47] Feature: Native dashboard source-backed labels
+Status: Complete
+Notes: Dashboard source-backed shelves now use Library Additions/Explore Libraries labels and item badges report Ebook Library or Audio Library without migration changes.
+
+[2026-06-04 01:06] Feature: Cloud library global search parity
+Status: Complete
+Notes: Global search now queries synced Ebook Library and Audio Library rows as normal library inventory while respecting the catalog enabled setting and user content filters, with no migration changes.
+
+[2026-06-04 01:17] Feature: Warehouse migration stack reconciliation
+Status: Complete
+Notes: Imported upstream series-id migration 0013, renumbered warehouse migrations to 0014-0019, and updated Drizzle journal/snapshot metadata so upstream merge no longer has duplicate 0013 tags.
+
+[2026-06-04 01:35] Feature: Source-backed library bookmarks
+Status: Complete
+Notes: Added user-scoped source-backed bookmark storage/routes/client helpers as native library reader state; next parity loop should audit Authors, Series, Dashboard, and other library surfaces so warehouse-backed libraries behave like filesystem libraries everywhere.
+
+[2026-06-04 01:57] Feature: Native Series cloud library summaries
+Status: Complete
+Notes: Normal Series listing now merges filesystem and source-backed Ebook/Audio Library series, including cloud-only users; next slice should introduce shared library-item detail/card behavior so warehouse-only Series entries do not route into local-only detail assumptions.
+
+[2026-06-04 02:40] Feature: Dashboard library overview cloud inventory
+Status: Complete
+Notes: Dashboard library overview now merges filesystem counts with synced Ebook Library and Audio Library inventory through the normal widget contract while leaving storage bytes filesystem-only.
+
+[2026-06-04 02:58] Feature: Native Authors cloud library summaries
+Status: Complete
+Notes: Normal Authors listing now includes source-backed Ebook/Audio Library author summaries with stable virtual ids and read-only cloud author detail; next loop should wire source-backed author book grids.
+
+[2026-06-04 03:25] Feature: Native Author cloud library book grids
+Status: Complete
+Notes: Author detail Books pages now merge local book cards with source-backed Ebook/Audio Library items through the native author-books contract; next loop should continue auditing remaining library surfaces that still assume filesystem-only rows.
+
+[2026-06-04 03:39] Feature: Dashboard currently reading cloud progress
+Status: Complete
+Notes: Currently Reading now merges local book progress with source-backed Ebook/Audio Library user state through the native widget contract; next loop should continue reader-state parity where visible reader controls still assume filesystem books.
+
+[2026-06-04 03:58] Feature: Native source-backed library routes
+Status: Complete
+Notes: Ebook Library and Audio Library now come from the native libraries contract and route through /library/-1 and /library/-2 while filesystem-only screens keep the default local-library list.
+
+[2026-06-04 04:23] Feature: Source-backed EPUB reader parity
+Status: Complete
+Notes: Source-backed EPUBs now launch through the native reader with catalog-backed progress, session saves, bookmarks, and per-item local reader settings; PDF/CBZ source-backed reader support still needs local-file-id-safe handling.
+
+[2026-06-04 04:37] Feature: Source-backed EPUB annotations
+Status: Complete
+Notes: Source-backed EPUB highlights and notes now use native reader controls backed by additive warehouse_annotations storage and scoped catalog item annotation routes.
+
+[2026-06-04 05:03] Feature: Source-backed PDF reader launch
+Status: Complete
+Notes: Source-backed PDFs now launch through the native PDF reader via the catalog download proxy with catalog-backed progress/session saves and remote-aware settings; CBZ/CBR/CB7 still need a page API loop.
+
+[2026-06-04 05:13] Feature: Dashboard source-backed library presence
+Status: Complete
+Notes: Dashboard startup now counts source-backed Ebook Library and Audio Library rows as real libraries, so cloud-only users see the normal dashboard instead of the first-library welcome.
+
+[2026-06-04 05:19] Feature: Dashboard source-backed continue reading
+Status: Complete
+Notes: Currently Reading now opens source-backed EPUB/PDF progress directly in the native catalog reader while unsupported source-backed formats keep the safe detail fallback.
+
+[2026-06-04 05:30] Feature: Source-backed library list mode
+Status: Complete
+Notes: Ebook Library and Audio Library browse pages now honor the normal grid/list display mode with native list rows; next library-surface slice should add filtered source-backed library queries.
+
+[2026-06-04 06:07] Feature: Source-backed library query filters
+Status: Complete
+Notes: Ebook Library and Audio Library now load through native BookQuery-shaped library item endpoints with supported search/filter/sort/pagination while keeping warehouse rows user-scoped and read-only.
+
+[2026-06-04 06:18] Feature: Source-backed library read-only routes
+Status: Complete
+Notes: Ebook Library and Audio Library detail/stats now resolve through native read-only library routes while editor/owner filesystem routes stay positive-ID only.
+
+[2026-06-04 06:33] Feature: Source-backed native library books route
+Status: Complete
+Notes: The normal /libraries/:id/books query route now supports Ebook Library and Audio Library through a typed LibraryBooksPage union while keeping local filesystem book queries unchanged.
+
+[2026-06-04 06:55] Feature: Source-backed global book query
+Status: Complete
+Notes: Native /books/query now merges local books with accessible Ebook Library and Audio Library catalog items through LibraryBooksPage while keeping negative cloud ids out of local SQL.
+
+[2026-06-04 07:19] Feature: Source-backed dashboard Recently Added scroller
+Status: Complete
+Notes: The normal Recently Added dashboard shelf now mixes local books with accessible Ebook Library and Audio Library items, ordered by user library-item recency and rendered with native detail/collection actions.
+
+[2026-06-04 07:42] Feature: Source-backed Reading Goal parity
+Status: Complete
+Notes: Reading Goal now counts local completions plus source-backed Ebook Library and Audio Library completions using an additive warehouse_user_state.finished_at timestamp instead of updated_at, with idempotent migration 0022.
+
+[2026-06-04 07:51] Feature: Source-backed dashboard Random scroller
+Status: Complete
+Notes: The normal Random dashboard shelf now samples local and accessible source-backed libraries together by candidate population, scopes Ebook/Audio cloud rows by actual library access, and keeps Explore Libraries discovery behavior unchanged.
+
+[2026-06-04 08:28] Feature: Source-backed dashboard Up Next In Series scroller
+Status: Complete
+Notes: Up Next In Series now merges local books with accessible Ebook Library and Audio Library catalog rows using promoted source-backed series_index metadata and native user-state completion semantics.
+
+[2026-06-04 08:41] Feature: Source-backed Highlight of the Day widget
+Status: Complete
+Notes: Highlight of the Day now samples local and source-backed Ebook/Audio Library annotations through one native widget pool; next loop should normalize source-backed collection members into the main collection grid/list/table instead of the separate Library titles shelf.
+
+[2026-06-04 08:52] Feature: Source-backed collection main-surface parity
+Status: Complete
+Notes: Collection detail now renders Ebook/Audio Library members in the main grid/list/table surface with catalog pagination and direct source-backed removal; true globally sorted mixed pagination would need a new unified collection items API.
+
+[2026-06-04 09:14] Feature: Source-backed smart scope main-surface parity
+Status: Complete
+Notes: Smart Scope detail now renders Ebook/Audio Library matches in the main grid/list/table result surface with shared totals/loading and mixed table paging; next loop should unify Smart Scope server paging/counts for true cross-source global sort.
+
+[2026-06-04 09:30] Feature: Source-backed smart scope unified query
+Status: Complete
+Notes: Smart Scope counts and books query now flow through the unified source-aware library query path, so Ebook Library and Audio Library matches are counted and paged as normal library results.
+
+[2026-06-04 09:47] Feature: Native completed request item routes
+Status: Complete
+Notes: Completed ebook and audiobook requests now open source-backed titles through native Ebook Library and Audio Library item URLs while keeping legacy catalog detail routes compatible.
+
+[2026-06-04 10:26] Feature: Source-backed audiobook native reader parity
+Status: Complete
+Notes: Source-backed Audio Library items now launch through the native audiobook reader from detail and Currently Reading with catalog stream/progress/bookmark adapters, MIME format normalization, status preservation, and stale resume clamping.
+
+[2026-06-04 10:57] Feature: Source-backed native item route parity
+Status: Complete
+Notes: Source-backed Ebook Library and Audio Library clicks now open native library item URLs across global search, dashboard shelves/widgets, recommendations, library browse, Authors, Series, Collections, and Smart Scopes using a shared media-type-to-library route helper; catalog detail remains as a compatibility route and catalog reader routes are unchanged.
+
+[2026-06-04 11:05] Feature: Source-backed item detail native copy
+Status: Complete
+Notes: Source-backed item detail now labels titles as Ebook Library or Audio Library entries and uses library-item unavailable copy, keeping catalog route/API internals and reader routes unchanged.
+
+[2026-06-04 11:13] Feature: Source-backed recommendation native copy
+Status: Complete
+Notes: Local book detail source-backed recommendations now say More From Libraries instead of More From Catalog while keeping recommendation routing and API internals unchanged.
+
+[2026-06-04 11:21] Feature: Source-backed recommendation DTO library names
+Status: Complete
+Notes: Source-backed recommendation DTOs now report Ebook Library or Audio Library library names instead of Catalog while preserving recommendation query and routing behavior.
+
+[2026-06-04 11:30] Feature: Source-backed item detail related library rows
+Status: Complete
+Notes: Source-backed Ebook Library and Audio Library detail pages now load related same-library rows through the native library query endpoint and render them as More From Libraries while excluding the current remote item.
+
+[2026-06-04 11:45] Feature: Completed ebook request downloads
+Status: Complete
+Notes: Completed ebook request rows now expose the native request download stream while audiobook requests still avoid unsupported stream/download/cancel actions.
+
+[2026-06-04 11:59] Feature: Source-backed HomeView library shell parity
+Status: Complete
+Notes: Ebook Library and Audio Library now render through the normal HomeView library grid/list/table shell and `/libraries/:id/books` data path; scan/live-upload hooks remain filesystem-only.
+
+[2026-06-04 12:21] Feature: Dashboard source-backed empty copy
+Status: Complete
+Notes: Source-backed dashboard shelves now use native library empty-state copy and tests guard against catalog/warehouse wording.
+
+[2026-06-04 12:28] Feature: Author source-backed library route filters
+Status: Complete
+Notes: Author list route hydration now preserves Ebook Library and Audio Library filter ids, matching normal library filter behavior without schema changes.
+
+[2026-06-04 12:38] Feature: Dashboard Continue Reading source-backed parity
+Status: Complete
+Notes: Continue Reading now merges local progress with user-owned Ebook Library and Audio Library progress, sorted by latest activity and scoped by actual virtual-library access.
+
+[2026-06-04 12:47] Feature: Global search source-backed library ownership
+Status: Complete
+Notes: Global search now searches user-owned Ebook Library and Audio Library rows only when those libraries are accessible, applying content filters and avoiding broad catalog discovery.
+
+[2026-06-04 12:55] Feature: Dashboard library overview source-backed ownership
+Status: Complete
+Notes: Dashboard Library Overview now counts only current-user-owned Ebook Library and Audio Library rows when those virtual libraries are accessible, avoiding broad cached catalog totals.
+
+[2026-06-04 13:08] Feature: Dashboard reading streak source-backed activity
+Status: Complete
+Notes: Reading Streak now combines filesystem reading days with user-owned Ebook Library and Audio Library activity days scoped by actual virtual-library access and content filters.
+
+[2026-06-04 13:23] Feature: Dashboard reading goal source-backed access scope
+Status: Complete
+Notes: Reading Goal now counts source-backed completions only for the user's accessible Ebook Library and Audio Library media scopes while preserving local completion counts.
+
+[2026-06-04 13:32] Feature: Dashboard highlight source-backed access scope
+Status: Complete
+Notes: Highlight of the Day now samples source-backed annotations only from the user's accessible Ebook Library and Audio Library media scopes.
+
+[2026-06-04 13:48] Feature: Statistics source-backed library aggregates
+Status: Complete
+Notes: Statistics filters now include Ebook Library and Audio Library, and core summary/top aggregate charts merge user-owned source-backed rows without treating virtual-library-only scopes as all local libraries.
+
+[2026-06-04 14:16] Feature: OPDS Ebook Library navigation parity
+Status: Complete
+Notes: OPDS now exposes source-backed ebooks as the normal Ebook Library in Libraries navigation and accepts libraryId=-1 catalog feeds, leaving the old catalog-ebooks route as unadvertised compatibility.
+
+[2026-06-04 14:43] Feature: Dashboard Library Overview source-backed route parity
+Status: Complete
+Notes: Library Overview now uses source-backed Ebook Library and Audio Library rows when routing the Books stat, so cloud-only dashboards open the normal library page instead of leaving the tile inert.
+
+[2026-06-04 14:56] Feature: Source-backed author/series ownership scope
+Status: Complete
+Notes: Authors and Series source-backed rows now derive from current-user Ebook Library and Audio Library membership instead of broad cached catalog rows.
+
+[2026-06-04 15:11] Feature: Dashboard Reading Rhythm source-backed activity
+Status: Complete
+Notes: Reading Rhythm now treats Ebook Library and Audio Library activity days as normal library activity while preserving local reading seconds for overlapping days.
+
+[2026-06-04 15:28] Feature: Dashboard Diversity Score source-backed activity
+Status: Complete
+Notes: Diversity Score now treats Ebook Library and Audio Library rows as normal library inputs, merging normalized identities so local/source-backed genre, author, and language overlaps are counted once.
+
+[2026-06-04 15:44] Feature: Dashboard Year Projection source-backed activity
+Status: Complete
+Notes: Year Projection now includes accessible Ebook Library and Audio Library completion pace, using cached ebook page metadata and audiobook durations without adding schema.
+
+[2026-06-04 16:05] Feature: Dashboard Reading DNA source-backed activity
+Status: Complete
+Notes: Reading DNA now treats accessible Ebook Library and Audio Library rows as normal library inputs, merging normalized genre/day/hour traits with filesystem data while keeping source-backed speed unavailable until reader-session deltas exist.
+
+[2026-06-04 16:17] Feature: Dashboard Monthly Challenge source-backed activity
+Status: Complete
+Notes: Monthly Challenge now includes accessible Ebook Library and Audio Library progress, merging normalized genre/author/day identities with filesystem challenge inputs and deriving source-backed pages from ebook page metadata or audiobook duration without adding schema.
+
+[2026-06-04 16:36] Feature: Dashboard Neglected Gems source-backed activity
+Status: Complete
+Notes: Neglected Gems now treats accessible Ebook Library and Audio Library rows as normal high-rated unread library items, with native detail routing, cover proxies, and queue state without adding schema.
+
+[2026-06-04 16:49] Feature: Dashboard Long Wait source-backed activity
+Status: Complete
+Notes: The Long Wait now chooses the oldest unstarted item across filesystem and accessible Ebook/Audio Library rows, using native catalog routes and reader starts without adding schema.
+
+[2026-06-04 16:57] Feature: Dashboard Currently Reading source-backed access scope
+Status: Complete
+Notes: Currently Reading now derives source-backed media scope from accessible Ebook/Audio Library ids, preventing unavailable virtual libraries from contributing progress rows without adding schema.
+
+[2026-06-04 17:03] Feature: Collection source-backed library labels
+Status: Complete
+Notes: Collection source-backed item cards now receive Ebook Library or Audio Library from the service mapper instead of a generic Catalog label.
+
+[2026-06-04 17:10] Feature: Book detail source-backed recommendation access scope
+Status: Complete
+Notes: Source-backed book detail recommendations now query only accessible Ebook/Audio Library media scopes and carry content filters into the owned catalog query.
+
+[2026-06-04 17:14] Feature: Book detail source-backed recommendation fixture labels
+Status: Complete
+Notes: Recommendation row tests now model source-backed payloads as Ebook Library or Audio Library instead of preserving generic Catalog labels.
+
+[2026-06-04 17:24] Feature: Authors and Series source-backed access scope
+Status: Complete
+Notes: Authors and Series now derive warehouse media participation from accessible Ebook/Audio Library ids before querying source-backed summaries, details, or items.
+
+[2026-06-04 17:32] Feature: Source-backed series index metadata
+Status: Complete
+Notes: Source-backed series rows now carry seriesIndex through native library item DTOs and sort alongside local books by series order.
+
+[2026-06-04 17:47] Feature: Source-backed author mutation guards
+Status: Complete
+Notes: Source-backed authors remain normal read-only author rows while refresh/delete/edit/image/merge paths now accept only mutable local author ids.
+
+[2026-06-04 17:55] Feature: Global search Audio Library creator display
+Status: Complete
+Notes: Global search now displays audiobook narrators for Audio Library results without authors, preserving native creator context for narrator-only matches.
+
+[2026-06-04 18:08] Feature: Source-backed comic archive page API
+Status: Complete
+Notes: Server CBZ routes can now count and stream source-backed ebook archive pages from authorized Ebook Library downloads with user-scoped cache; client reader wiring remains next.
+
+[2026-06-04 18:18] Feature: Source-backed comic reader launch
+Status: Complete
+Notes: Source-backed CBZ/CBR/CB7 ebooks now expose the native Read action and open through the comic reader with catalog page URLs plus remote-scoped progress, sessions, and settings.
+
+[2026-06-04 18:26] Feature: Dashboard source-backed comic reader actions
+Status: Complete
+Notes: Currently Reading and The Long Wait now route source-backed CBZ/CBR/CB7 Ebook Library actions into the native catalog reader instead of falling back to item detail.
+
+[2026-06-04 18:35] Feature: Unified sidebar library list
+Status: Complete
+Notes: The sidebar now renders source-backed and filesystem libraries through one ordered navigation path; reorder persistence remains scoped to positive filesystem ids until virtual library order has durable storage.
+
+[2026-06-04 18:40] Feature: Source-backed library filter options
+Status: Complete
+Notes: Shared book filter builders now request source-backed libraries so search/filter controls can target Ebook Library and Audio Library like filesystem libraries.
+
+[2026-06-04 18:49] Feature: Legacy catalog item route normalization
+Status: Complete
+Notes: Legacy /catalog item detail URLs now redirect into native /library/:id/items/:remoteId routes while preserving query/hash context.
+
+[2026-06-04 18:59] Feature: Native source-backed reader routes
+Status: Complete
+Notes: Source-backed Read/Listen/Continue actions now use /read/library/:id/items/:remoteId with Ebook Library or Audio Library ids, leaving /read/catalog links as compatibility redirects.
+
+[2026-06-04 19:09] Feature: Smart Scope library match copy
+Status: Complete
+Notes: Smart Scope source-backed previews now say Library Matches and use library-item count/error wording so the results surface does not expose catalog terminology.
+
+[2026-06-04 19:13] Feature: Request search native copy
+Status: Complete
+Notes: Ebook and audiobook request search failures now say Failed to search titles across dialogs, composables, and API helpers instead of exposing catalog terminology.
+
+[2026-06-04 19:17] Feature: Request fallback library title
+Status: Complete
+Notes: Untitled request rows now fall back to Library request, and the visible copy snapshot rejects catalog terminology for request UI.
+
+[2026-06-04 19:25] Feature: Mixed sidebar library reorder
+Status: Complete
+Notes: Sidebar library reorder now exposes drag handles for Ebook/Audio Library rows, persists the mixed virtual/filesystem order locally, and still sends only filesystem ids to the server reorder endpoint.
+
+[2026-06-04 19:30] Feature: Library item state native copy
+Status: Complete
+Notes: Source-backed user-state load/save failures now say library item state across API helpers and composables, preserving native favorites/ratings/progress/read-status error copy.
+
+[2026-06-04 19:34] Feature: Long Wait audio action copy
+Status: Complete
+Notes: The Long Wait dashboard widget now labels source-backed Audio Library reader actions as Start Listening while preserving native /read/library routing.
+
+[2026-06-04 19:37] Feature: OPDS native library copy
+Status: Complete
+Notes: OPDS root navigation and OpenSearch descriptions now call merged local/source-backed inventory a library instead of a catalog while retaining stable OPDS route URLs.
+
+[2026-06-04 19:43] Feature: Library media error copy
+Status: Complete
+Notes: Source-backed item/media availability errors now use shared native library copy across warehouse routes, user-state writes, OPDS, Kobo, and request stream proxies.
+
+[2026-06-04 19:47] Feature: Request notification native copy
+Status: Complete
+Notes: Request notification titles and sanitized request row fallbacks now use Request completed/failed and Library request instead of catalog request wording.
+
+[2026-06-04 19:49] Feature: Request error native copy
+Status: Complete
+Notes: Request unavailable/not-found errors now use native request wording instead of catalog request terminology.
+
+[2026-06-04 19:57] Feature: Source-backed publisher sort parity
+Status: Complete
+Notes: Global library queries now sort source-backed Ebook/Audio Library items by publisher alongside filesystem books by carrying publisher through the shared library item DTO.
+
+[2026-06-04 20:03] Feature: Source-backed rating sort parity
+Status: Complete
+Notes: Global library queries now sort source-backed Ebook/Audio Library items by per-user rating via warehouse_user_state without adding schema or exposing source terminology.
+
+[2026-06-04 20:10] Feature: Source-backed read-progress sort parity
+Status: Complete
+Notes: Global library queries now sort source-backed Ebook/Audio Library items by read progress and also fix the merged local-book sorter to read BookCard.readingProgress.
+
+[2026-06-04 20:14] Feature: Source-backed last-read sort parity
+Status: Complete
+Notes: Global library queries now sort source-backed Ebook/Audio Library items by last read activity using warehouse_user_state.updated_at with stable source-backed SQL tie-breakers.
+
+[2026-06-04 20:20] Feature: Source-backed finished-date sort parity
+Status: Complete
+Notes: Global library queries now sort source-backed Ebook/Audio Library items by finished date using warehouse_user_state.finished_at with stable source-backed SQL tie-breakers.
+
+[2026-06-04 20:26] Feature: Source-backed read-status sort parity
+Status: Complete
+Notes: Global library queries and Smart Scope mixed-result sorting now sort source-backed Ebook/Audio Library items by read status using warehouse_user_state.read_status and the native catalog item readStatus DTO field.
+
+[2026-06-04 20:39] Feature: Smart Scope source-backed publisher sort parity
+Status: Complete
+Notes: Smart Scope mixed-result sorting now uses source-backed publisher metadata alongside filesystem publisher values, keeping null publishers last.
+
+[2026-06-04 20:43] Feature: Smart Scope source-backed rating sort parity
+Status: Complete
+Notes: Smart Scope mixed-result sorting now uses source-backed per-user ratings alongside filesystem ratings, keeping unrated items last.
+
+[2026-06-04 20:46] Feature: Smart Scope source-backed read-progress sort parity
+Status: Complete
+Notes: Smart Scope mixed-result sorting now uses source-backed read-progress metadata alongside filesystem progress values, keeping missing progress last.
+
+[2026-06-04 20:50] Feature: Smart Scope source-backed last-read sort parity
+Status: Complete
+Notes: Smart Scope mixed-result sorting now uses source-backed last-read activity alongside filesystem read-status updates, keeping missing activity last.
+
+[2026-06-04 20:55] Feature: Smart Scope source-backed finished-date sort parity
+Status: Complete
+Notes: Smart Scope mixed-result sorting now uses source-backed finished-date metadata alongside filesystem finished dates, keeping unfinished items last.
+
+[2026-06-04 20:59] Feature: Smart Scope source-backed series-index sort parity
+Status: Complete
+Notes: Smart Scope mixed-result sorting now uses source-backed series index metadata alongside filesystem series indexes, keeping missing indexes last.
+
+[2026-06-04 21:07] Feature: Source-backed published-year sort parity
+Status: Complete
+Notes: Native library queries and Smart Scope mixed-result sorting now derive source-backed publication years from cached raw metadata without adding schema.
+
+[2026-06-04 21:19] Feature: Source-backed page-count sort parity
+Status: Complete
+Notes: Native library queries and Smart Scope mixed-result sorting now derive source-backed page counts from cached raw metadata or audiobook duration without adding schema.
+
+[2026-06-04 21:35] Feature: Source-backed updated-time sort parity
+Status: Complete
+Notes: Native library queries, Smart Scope mixed-result sorting, and Smart Scope catalog previews now sort source-backed Ebook/Audio Library items by cached catalog updated_at without adding schema; last-read sorting remains user activity based.
+
+[2026-06-04 21:44] Feature: Source-backed file-size sort parity
+Status: Complete
+Notes: Native library queries, Smart Scope mixed-result sorting, and Smart Scope catalog previews now sort source-backed Ebook/Audio Library items by cached primary file size metadata from list/detail payloads without adding schema.
+
+[2026-06-04 21:59] Feature: Source-backed metadata-score sort parity
+Status: Complete
+Notes: Native library queries, Smart Scope mixed-result sorting, and Smart Scope catalog previews now sort source-backed Ebook/Audio Library items by cache-derived metadata completeness scores without adding schema or exposing raw payloads.
+
+[2026-06-04 22:09] Feature: Source-backed read-status Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now support read-status includes/excludes/empty operators through existing user state, and OR groups keep supported source-backed predicates when mixed with local-only rules.
+
+[2026-06-04 22:16] Feature: Source-backed rating Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now support rating comparison and empty/not-empty operators through existing per-user rating state, including numeric-string rule values, without adding schema.
+
+[2026-06-04 22:23] Feature: Source-backed read-progress Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now support unread/in-progress/finished progress operators through existing per-user progress state, with totals using the same user-state join as page rows.
+
+[2026-06-04 22:30] Feature: Source-backed published-year Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now support published-year numeric and empty/not-empty operators through cached raw publication metadata without adding schema.
+
+[2026-06-04 22:37] Feature: Source-backed page-count Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now support page-count comparison, between, and empty/not-empty operators through cached raw page metadata and audiobook duration-derived virtual pages without adding schema.
+
+[2026-06-04 22:51] Feature: Source-backed genre Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now use exact cached genre membership for includes/all/excludes plus empty/not-empty operators without adding schema.
+
+[2026-06-04 22:57] Feature: Source-backed tag Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now use exact cached tag membership for includes/all/excludes plus empty/not-empty operators without adding schema.
+
+[2026-06-04 23:03] Feature: Source-backed format Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now use exact cached format values for includes/excludes operators without adding schema.
+
+[2026-06-04 23:10] Feature: Source-backed ISBN Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now match ISBN equality and empty/not-empty rules through cached identifiers and raw detail payloads without adding schema.
+
+[2026-06-04 23:26] Feature: Source-backed metadata-score Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope filters now use the cache-derived metadata score for comparison, between, and empty/not-empty operators without adding schema.
+
+[2026-06-04 23:32] Feature: Source-backed title negative Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope title filters now support not-contains and not-equals operators through cached title matching without adding schema.
+
+[2026-06-04 23:42] Feature: Source-backed publisher set Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope publisher filters now support includes/excludes set operators through exact cached publisher values without adding schema.
+
+[2026-06-04 23:57] Feature: Source-backed author Smart Scope filter parity
+Status: Complete
+Notes: Source-backed Ebook/Audio Library Smart Scope author filters now use exact cached author membership for includes/all/excludes plus empty/not-empty operators without adding schema.
+
+[2026-06-05 00:17] Feature: Source-backed library cached-inventory browse
+Status: Complete
+Notes: Ebook Library and Audio Library browse now use the full locally synced Book Warehouse cache as normal library contents while overlaying per-user state when present, so empty interaction rows no longer make warehouse libraries appear empty.
+
+[2026-06-05 00:26] Feature: Source-backed library title fallback parity
+Status: Complete
+Notes: Ebook/Audio Library route and page titles now hide internal negative virtual ids before metadata hydration, while filesystem libraries retain their numeric loading fallback.
+
+[2026-06-05 00:37] Feature: Source-backed cached cover poster parity
+Status: Complete
+Notes: Ebook/Audio Library poster cover endpoints now work for cached library rows without user item rows, preserving stricter ownership checks for downloads and streams.
+
+[2026-06-05 00:52] Feature: Source-backed library quick details parity
+Status: Complete
+Notes: Ebook/Audio Library browse rows now have a native quick-details sidebar with read/listen, details, and collection actions while preserving full-detail navigation.
+
+[2026-06-05 00:59] Feature: Source-backed friendly library routes
+Status: Complete
+Notes: Sidebar and catalog-library redirects now use /library/ebooks and /library/audiobooks while the client parses those aliases back to internal virtual ids for API state.
+
+[2026-06-05 01:14] Feature: Source-backed author identity dedupe
+Status: Complete
+Notes: Author, series, statistics, search, and Smart Scope read models now treat simple Last/First author variants as one identity without rewriting cached warehouse payloads or adding migrations.
+
+[2026-06-05 01:29] Feature: Source-backed friendly item routes and mixed quick details
+Status: Complete
+Notes: Source-backed item/reader navigation now emits friendly ebook/audiobook library URL params, and Author/Series mixed rows can open source-backed titles in the native quick-details sidebar.
+
+[2026-06-05 01:38] Feature: Collection and Smart Scope source-backed quick details
+Status: Complete
+Notes: Collection and Smart Scope mixed grid/list/table rows now open Ebook/Audio Library items in the native quick-details sidebar; dashboard shelf quick-details remains the next audited gap.
+
+[2026-06-05 01:43] Feature: Dashboard source-backed shelf quick details
+Status: Complete
+Notes: Dashboard mixed source-backed shelf cards now use the native quick-details sidebar for their Details action while preserving card detail navigation and collection actions.
+
+[2026-06-05 01:47] Feature: Dashboard source-backed friendly overview routes
+Status: Complete
+Notes: The dashboard Library Overview Books tile now routes source-backed-only libraries through /library/ebooks or /library/audiobooks instead of exposing internal virtual ids.
+
+[2026-06-05 01:51] Feature: Dashboard catalog-only source-backed quick details
+Status: Complete
+Notes: Dashboard catalog additions/discovery shelves now expose native Ebook/Audio Library quick details from a Details action while preserving card detail navigation.
+
+[2026-06-05 01:56] Feature: Book detail source-backed recommendation quick details
+Status: Complete
+Notes: More From Libraries recommendations now open source-backed items in native quick details without leaving the local book detail page.
+
+[2026-06-05 02:01] Feature: Currently Reading source-backed quick details
+Status: Complete
+Notes: The Currently Reading dashboard widget now opens source-backed progress items in native quick details while preserving card detail routes and reader continuation.
+
+[2026-06-05 02:06] Feature: Highlight of the Day source-backed quick details
+Status: Complete
+Notes: Source-backed daily highlights now open Ebook/Audio Library quick details from a Details action while preserving highlight row detail navigation.
+
+[2026-06-05 02:12 EDT] Feature: Source-backed library URL normalization
+Status: Complete
+Notes: Legacy /library/-1, /library/-2, item detail, and reader URLs now normalize to friendly /library/ebooks or /library/audiobooks routes while preserving internal virtual IDs for API state.
+
+[2026-06-05 02:16 EDT] Feature: Long Wait source-backed quick details
+Status: Complete
+Notes: The Long Wait dashboard widget now opens source-backed waiting items in native quick details while preserving cover/title detail routes and reader start actions.
+
+[2026-06-05 02:19 EDT] Feature: Neglected Gems source-backed quick details
+Status: Complete
+Notes: The Neglected Gems dashboard widget now opens source-backed gem items in native quick details while preserving cover/title detail routes and queue-state actions.
+
+[2026-06-05 02:25 EDT] Feature: Source-backed library lazy-scroll guard
+Status: Complete
+Notes: HomeView now has a regression guard proving source-backed libraries use the native infinite-scroll load path and do not render legacy catalog pager controls.
+
+[2026-06-05 02:30 EDT] Feature: Mixed highlight source-backed offset stability
+Status: Complete
+Notes: The mixed local/source-backed Highlight of the Day service regression now pins its test clock so source-backed offset selection does not flip with the current date.
+
+[2026-06-05 02:35 EDT] Feature: Settings source-backed friendly library routes
+Status: Complete
+Notes: Settings > Libraries now uses the shared native library route helper for Ebook Library and Audio Library links, preventing internal virtual ids like /library/-1 and /library/-2 from leaking into user-facing navigation.
+
+[2026-06-05 02:42 EDT] Feature: Global search source-backed quick details
+Status: Complete
+Notes: Global search now opens Ebook/Audio Library results in the native quick-details sidebar from an icon action while preserving normal row navigation to friendly library item routes.
+
+[2026-06-05 02:46 EDT] Feature: Request completed-item quick details
+Status: Complete
+Notes: Completed ebook and audiobook request rows now open the completed Ebook/Audio Library item in native quick details while preserving Open item and supported download actions.
+
+[2026-06-05 02:50 EDT] Feature: Smart Scope preview source-backed quick details
+Status: Complete
+Notes: Smart Scope library-match preview cards now open Ebook/Audio Library items in native quick details without losing the existing card navigation behavior.
+
+[2026-06-05 02:56 EDT] Feature: Pre-auth source-backed library URL normalization
+Status: Complete
+Notes: The source-backed library URL normalizer now runs as a global guard before auth, so logged-out visits to legacy /library/-1 or /library/-2 preserve friendly /library/ebooks or /library/audiobooks redirects through login.
+
+[2026-06-05 03:12 EDT] Feature: Source-backed achievement inventory counts
+Status: Complete
+Notes: Library-builder and multi-format achievement progress now counts cached accessible Ebook Library and Audio Library inventory alongside filesystem books without adding migrations.
+
+[2026-06-05 03:20 EDT] Feature: Source-backed finished-book achievement counts
+Status: Complete
+Notes: Total, yearly, and monthly finished-book achievement progress now includes completed Ebook Library and Audio Library user-state rows scoped by accessible virtual libraries.
+
+[2026-06-05 03:25 EDT] Feature: Source-backed achievement diversity counts
+Status: Complete
+Notes: Genre-explorer and polyglot achievement progress now dedupes completed Ebook Library and Audio Library genre/language metadata with filesystem read metadata.
+
+[2026-06-05 03:46 EDT] Feature: Source-backed achievement publication-era counts
+Status: Complete
+Notes: Century-span and decade-sampler achievement progress now dedupes completed source-backed publication years with filesystem read metadata without adding migrations.
+
+[2026-06-05 04:03 EDT] Feature: Source-backed achievement page-count counts
+Status: Complete
+Notes: Short-book and thick/thin achievement progress now includes completed Ebook Library page counts and Audio Library duration-derived virtual pages.
+
+[2026-06-05 04:09 EDT] Feature: Source-backed achievement release-year checks
+Status: Complete
+Notes: Old-soul and new-release backfill checks now include completed source-backed publication years while preserving cutoff and exact-year semantics.
+
+[2026-06-05 04:18 EDT] Feature: Source-backed achievement same-author counts
+Status: Complete
+Notes: Same-author achievement progress now merges completed source-backed author arrays with local read authors using the established comma-form canonical key.
+
+[2026-06-05 04:26 EDT] Feature: Source-backed achievement same-genre counts
+Status: Complete
+Notes: Same-genre achievement progress now merges completed source-backed genre arrays with local read genres using a trimmed lowercase key and per-item dedupe.
+
+[2026-06-05 04:50 EDT] Feature: Source-backed friendly URL canonicalization
+Status: Complete
+Notes: Auth/OIDC redirects and Authors/Series filters now show ebooks/audiobooks route values while preserving internal virtual library ids for API state.
+
+[2026-06-05 04:58 EDT] Feature: Source-backed achievement distinct-genre counts
+Status: Complete
+Notes: Genre-explorer progress now joins filesystem read genres to names and canonicalizes them with completed source-backed genre arrays.
+
+[2026-06-05 05:04 EDT] Feature: Source-backed achievement distinct-language counts
+Status: Complete
+Notes: Polyglot progress now trims and lowercases filesystem and source-backed language metadata before distinct counting.
+
+[2026-06-05 05:10 EDT] Feature: Source-backed first-series achievement backfill
+Status: Complete
+Notes: First-series backfill now counts completed Ebook Library and Audio Library rows with cached series metadata when no local series book matches.
+
+[2026-06-05 05:18 EDT] Feature: Source-backed trilogy-master achievement counts
+Status: Complete
+Notes: Trilogy-master progress now falls back to completed target-size source-backed series groups scoped by accessible virtual libraries.
+
+[2026-06-05 05:30 EDT] Feature: Source-backed achievement evaluation on read transitions
+Status: Complete
+Notes: Ebook Library and Audio Library transitions into read now queue native achievement backfill for the current user without treating remote ids as local book ids.
+
+[2026-06-05 05:39 EDT] Feature: Source-backed friendly library redirect actions
+Status: Complete
+Notes: New-library redirects and upload-complete navigation now use the shared friendly library route helper for source-backed library ids.
+
+[2026-06-05 06:29 EDT] Feature: Source-backed author detail summary merge
+Status: Complete
+Notes: Local author detail headers now merge matching Ebook Library and Audio Library author summary counts and latest-added timestamps using the same comma-form canonicalization as the authors list.
+
+[2026-06-05 06:40 EDT] Feature: Source-backed quick detail user state
+Status: Complete
+Notes: Catalog quick view now loads native source-backed user state and exposes add-to-library, favorite, rating, read status, progress, and save-error feedback like the full item detail page.
+
+[2026-06-05 06:58 EDT] Feature: Source-backed bulk read-status selection
+Status: Complete
+Notes: Bulk read-status query selections for Ebook Library and Audio Library now update matching cached warehouse rows through per-user source-backed state instead of resolving only local book ids.
+
+[2026-06-05 07:16 EDT] Feature: Source-backed selection user-state actions
+Status: Complete
+Notes: Source-backed library selections now show catalog-safe normal selection controls for read status and rating, patch warehouse user state, and avoid local-book bulk endpoints.
+
+[2026-06-05 07:20 EDT] Feature: Author library route query baseline
+Status: Complete
+Notes: Author library filters now reject array query values before parsing source-backed or filesystem ids, restoring the full client unit suite.
+
+[2026-06-05 07:32 EDT] Feature: Source-backed library URL canonicalization
+Status: Complete
+Notes: Home library mounts now replace leaked internal Ebook/Audio Library ids with friendly aliases while preserving the virtual ids for data loading.
+
+[2026-06-05 07:39 EDT] Feature: Source-backed all-matching user-state selection
+Status: Complete
+Notes: Ebook Library and Audio Library selections can now promote all loaded rows to all matching query results and apply read status or rating through warehouse user state.
+
+[2026-06-05 07:45 EDT] Feature: Source-backed item and reader route aliases
+Status: Complete
+Notes: Source-backed item details and reader entries now accept friendly Ebook/Audio Library route aliases through the shared parser, keeping internal virtual ids out of user-facing library URLs.
+
+[2026-06-05 07:56 EDT] Feature: OPDS source-backed collection parity
+Status: Complete
+Notes: OPDS collection feeds and collection navigation counts now include current-user-owned Ebook Library members from native collection membership without new migrations.
+
+[2026-06-05 08:08 EDT] Feature: OPDS source-backed author/series navigation parity
+Status: Complete
+Notes: OPDS Authors and Series navigation now includes current-user-owned Ebook Library summaries, including cloud-only users, while preserving the non-empty content-filter guard.
+
+[2026-06-05 08:16 EDT] Feature: OPDS source-backed surprise parity
+Status: Complete
+Notes: OPDS Surprise now samples current-user-owned Ebook Library entries alongside filesystem random books, including cloud-only users, while preserving the non-empty content-filter guard.
+
+[2026-06-05 08:29 EDT] Feature: OPDS source-backed Smart Scope parity
+Status: Complete
+Notes: OPDS Smart Scope feeds now merge current-user-owned Ebook Library matches through the source-backed smart-scope query path, including cloud-only users, while preserving the non-empty content-filter guard.
+
+[2026-06-05 08:47 EDT] Feature: Source-backed metadata export parity
+Status: Complete
+Notes: Metadata export preflight and all-matching JSON exports now resolve Ebook Library and Audio Library rows through the source-backed library query path instead of local filesystem book queries.
+
+[2026-06-05 09:07 EDT] Feature: Source-backed metadata export selection UI parity
+Status: Complete
+Notes: Ebook Library and Audio Library all-matching selections now expose the normal metadata export action while keeping selected remote ids out of local selected-book export paths.
+
+[2026-06-05 09:26 EDT] Feature: Source-backed ebook email send parity
+Status: Complete
+Notes: Ebook Library item details now use the normal email dialog with catalog ebook refs, streaming attachments through the user-scoped source-backed download path without treating remote ids as local book ids.
+
+[2026-06-05 09:55 EDT] Feature: Source-backed ebook email resend parity
+Status: Complete
+Notes: Email send logs now retain nullable source-backed ebook refs so resend can rebuild the normal email path after a current user access preflight without treating remote ids as local book ids.
+
+[2026-06-05 10:16 EDT] Feature: Source-backed series-index sort parity
+Status: Complete
+Notes: Mixed global/native book queries now sort Ebook Library and Audio Library rows by source-backed series index in both the catalog SQL window and final merge, matching filesystem library ordering.
+
+[2026-06-05 10:28 EDT] Feature: Native request notification preference label
+Status: Complete
+Notes: Notification preferences now show Library Requests instead of Catalog Requests while preserving the existing preference key and notification type values.
+
+[2026-06-05 10:36 EDT] Feature: Source-backed settings library cards
+Status: Complete
+Notes: Settings > Libraries now includes Ebook Library and Audio Library as read-only library cards with friendly links and source-backed sync actions, while keeping filesystem scan/edit/delete controls local-only.
+
+[2026-06-05 10:50 EDT] Feature: Source-backed author/series synced inventory
+Status: Complete
+Notes: Authors and Series now browse all synced Ebook Library and Audio Library catalog rows as library inventory, overlaying user state without requiring membership rows.
+
+[2026-06-05 10:57 EDT] Feature: Source-backed initial library load
+Status: Complete
+Notes: The native library loader now lets valid uninitialized source-backed library pages fetch their first page before total counts are known.
+
+[2026-06-05 10:59 EDT] Feature: Kobo source-backed content-filter visibility
+Status: Complete
+Notes: Kobo source-backed ebook snapshot and metadata lookup now withhold Ebook Library rows when user content filters are active, matching the existing conservative OPDS visibility guard without migrations.
+
+[2026-06-05 11:10 EDT] Feature: Source-backed table cover parity
+Status: Complete
+Notes: Ebook Library and Audio Library table rows now render the same native cover artwork and cached cover URLs as grid/list rows, without schema or migration changes.
+
+[2026-06-05 11:18 EDT] Feature: Collection source-backed table covers
+Status: Complete
+Notes: Mixed collection table rows now include normal cover cells for Ebook Library and Audio Library items, and source-backed Audio Library table artwork preserves fill-crop rendering without schema changes.
+
+[2026-06-05 11:26 EDT] Feature: Collection source-backed table lazy scroll
+Status: Complete
+Notes: Mixed collection table mode now keeps the native infinite-scroll sentinel active for source-backed members so additional Ebook Library and Audio Library collection pages can load without pagination controls.
+
+[2026-06-05 11:32 EDT] Feature: Smart Scope source-backed table lazy scroll
+Status: Complete
+Notes: Mixed Smart Scope table mode now uses the native infinite-scroll sentinel for source-backed results instead of an explicit Load more button, preserving endless loading without schema changes.
+
+[2026-06-05 11:45 EDT] Feature: Series source-backed table covers
+Status: Complete
+Notes: Mixed series table rows now render native cover cells for Ebook Library and Audio Library items, preserving square Audio Library artwork and encoded cached cover URLs without schema changes.
+
+[2026-06-05 11:45 EDT] Feature: Native source-backed reader error copy
+Status: Complete
+Notes: Source-backed reader unavailable and unsupported-format errors now use native library item wording instead of catalog ebook copy.
+
+[2026-06-05 11:53 EDT] Feature: Native dashboard source-backed error copy
+Status: Complete
+Notes: Source-backed dashboard additions/discovery load failures now use native library wording instead of catalog shelf copy.
+
+[2026-06-05 11:54 EDT] Feature: Source-backed user-state error copy
+Status: Complete
+Notes: Source-backed bookmark and annotation errors now use native library item wording instead of catalog item terminology while preserving existing HTTP behavior.
+
+[2026-06-05 12:01 EDT] Feature: Native dashboard route error copy
+Status: Complete
+Notes: Generic dashboard scroller errors now refer to library additions and library discovery endpoints instead of catalog additions/discovery terminology.
+
+[2026-06-05 12:02 EDT] Feature: Native dashboard scroller endpoint copy
+Status: Complete
+Notes: Generic dashboard scroller rejections for source-backed additions/discovery now point to native library endpoints instead of catalog endpoints.
+
+[2026-06-05 12:01 EDT] Feature: Source-backed collection error copy
+Status: Complete
+Notes: Collection membership failures for source-backed refs now use native library item wording instead of catalog item terminology.
+
+[2026-06-05 12:14 EDT] Feature: Native author deletion copy
+Status: Complete
+Notes: Author deletion confirmations now use native library wording instead of catalog terminology so source-backed libraries continue to read as normal libraries.
+
+[2026-06-05 12:16 EDT] Feature: Source-backed item membership UI parity
+Status: Complete
+Notes: Ebook Library and Audio Library quick/detail item surfaces no longer expose add/remove library membership controls; user state controls remain focused on favorite, rating, read status, progress, collections, reader, download, and email actions.
+
+[2026-06-05 12:23 EDT] Feature: Dashboard saved source-backed shelf labels
+Status: Complete
+Notes: Dashboard config normalization now upgrades old default Catalog Additions and Explore Catalog shelf labels to Library Additions and Explore Libraries while preserving custom shelf names.
+
+[2026-06-05 12:28 EDT] Feature: Author source-backed library filter carry-through
+Status: Complete
+Notes: Authors list navigation now carries selected Ebook Library or Audio Library filters into author detail, and author detail hydrates that filter before its initial books load.
+
+[2026-06-05 12:24 EDT] Feature: OPDS Ebook Library cached inventory parity
+Status: Complete
+Notes: OPDS Ebook Library acquisition pages now query cached Ebook Library inventory directly and overlay per-user timestamps when available instead of requiring source-backed membership rows.
+
+[2026-06-05 12:38 EDT] Feature: OPDS author and series cached inventory parity
+Status: Complete
+Notes: OPDS Authors and Series navigation now counts locally cached Ebook Library inventory directly instead of requiring source-backed membership rows, while keeping active content filters local-only.
+
+[2026-06-05 12:48 EDT] Feature: Global search cached inventory parity
+Status: Complete
+Notes: Global search now searches locally cached Ebook Library and Audio Library inventory through media-scoped catalog cache search instead of requiring source-backed membership rows.
+
+[2026-06-05 12:55 EDT] Feature: Source-backed library filter route aliases
+Status: Complete
+Notes: Author and Series library filters now render Ebook Library and Audio Library as friendly route aliases while continuing to emit internal numeric ids for API state.
+
+[2026-06-05 13:05 EDT] Feature: Dashboard library overview cached inventory parity
+Status: Complete
+Notes: Dashboard Library Overview now counts accessible locally cached Ebook Library and Audio Library inventory instead of requiring source-backed membership rows, while keeping storage bytes filesystem-only.
+
+[2026-06-05 13:05 EDT] Feature: OPDS Surprise cached inventory parity
+Status: Complete
+Notes: OPDS Surprise now samples locally cached Ebook Library inventory directly and overlays per-user timestamps instead of requiring source-backed membership rows.
+
+[2026-06-05 13:16 EDT] Feature: Dashboard recent source-backed additions cached inventory parity
+Status: Complete
+Notes: Dashboard Recently Added and Library Additions now read accessible Ebook Library and Audio Library cache rows directly instead of requiring source-backed membership rows.
+
+[2026-06-05 13:16 EDT] Feature: Smart Scope cached inventory parity
+Status: Complete
+Notes: Smart Scope source-backed match queries now read accessible locally cached Ebook Library and Audio Library inventory with user-state overlays instead of requiring source-backed membership rows.
+
+[2026-06-05 13:30 EDT] Feature: Dashboard Explore Libraries cached inventory parity
+Status: Complete
+Notes: Dashboard Explore Libraries now samples accessible locally cached Ebook Library and Audio Library inventory directly instead of requiring source-backed membership rows.
+
+[2026-06-05 13:35 EDT] Feature: Book detail recommendations cached inventory parity
+Status: Complete
+Notes: Local book detail source-backed recommendations now query accessible locally cached Ebook Library and Audio Library inventory instead of requiring source-backed membership rows.
+
+[2026-06-05 13:45 EDT] Feature: OPDS Smart Scope cached inventory parity
+Status: Complete
+Notes: OPDS Smart Scope ebook feeds now query locally cached Ebook Library inventory instead of requiring source-backed membership rows, while keeping active content filters local-only.
+
+[2026-06-05 13:47 EDT] Feature: Statistics format distribution cached inventory parity
+Status: Complete
+Notes: Format Distribution now merges locally cached Ebook Library and Audio Library formats with filesystem formats instead of returning empty charts for virtual-library-only scopes.
+
+[2026-06-05 13:57 EDT] Feature: Statistics language distribution cached inventory parity
+Status: Complete
+Notes: Language Distribution now merges locally cached Ebook Library and Audio Library language counts and unknown-language totals with filesystem statistics.
+
+[2026-06-05 14:12 EDT] Feature: Statistics books-added cached inventory parity
+Status: Complete
+Notes: Books Added Over Time now merges cached Ebook Library and Audio Library added-date buckets with filesystem buckets using source-backed cache timestamps.
+
+[2026-06-05 14:20 EDT] Feature: Statistics publication-year cached inventory parity
+Status: Complete
+Notes: Publication Decade and Publication Year Timeline now merge cached Ebook Library and Audio Library publication-year buckets with filesystem statistics.
+
+[2026-06-05 14:27 EDT] Feature: Statistics largest-books cached inventory parity
+Status: Complete
+Notes: Largest Books now merges cached Ebook Library and Audio Library file-size rows with filesystem rows using the existing cached source file-size metadata.
+
+[2026-06-05 14:39 EDT] Feature: Statistics metadata-score cached inventory parity
+Status: Complete
+Notes: Metadata Score Distribution now merges cached Ebook Library and Audio Library metadata-score buckets with filesystem buckets and preserves unknown totals.
+
+[2026-06-05 14:49 EDT] Feature: Statistics storage-by-format cached inventory parity
+Status: Complete
+Notes: Storage By Format now merges cached Ebook Library and Audio Library file-size totals with filesystem storage buckets using cached source file-size metadata.
+
+[2026-06-05 15:01 EDT] Feature: Statistics format-share timeline cached inventory parity
+Status: Complete
+Notes: Format Share Over Time now merges cached Ebook Library and Audio Library format timeline rows with filesystem rows and preserves native top-format OTHER grouping.
+
+[2026-06-05 15:06 EDT] Feature: Statistics library metadata completeness cached inventory parity
+Status: Complete
+Notes: Library Metadata Completeness now shows cached Ebook Library and Audio Library completeness rows beside filesystem library rows using existing cached catalog metadata.
+
+[2026-06-05 15:13 EDT] Feature: Statistics page-count distribution cached inventory parity
+Status: Complete
+Notes: Page Count Distribution now merges cached Ebook Library and Audio Library quantiles and unknown totals with filesystem rows using cached page metadata.
+
+[2026-06-05 15:19 EDT] Feature: Statistics metadata completeness cached inventory parity
+Status: Complete
+Notes: Metadata Completeness now merges cached Ebook Library and Audio Library metadata presence counts with filesystem totals using existing cached completeness aggregates.
+
+[2026-06-05 15:33 EDT] Feature: Statistics metadata freshness cached inventory parity
+Status: Complete
+Notes: Metadata Freshness Gauge now merges cached Ebook Library and Audio Library freshness buckets with filesystem totals using cached source timestamps and identifier presence.
+
+[2026-06-05 15:29 EDT] Feature: Statistics metadata freshness cached inventory parity
+Status: Complete
+Notes: Metadata Freshness Gauge now merges cached Ebook Library and Audio Library sync-age buckets with filesystem metadata-fetch freshness buckets.
+
+[2026-06-05 15:42 EDT] Feature: Statistics library integrity cached inventory parity
+Status: Complete
+Notes: Library Integrity Gauge now merges cached Ebook Library and Audio Library availability counts with filesystem integrity totals using existing catalog/detail cache rows.
+
+[2026-06-05 15:50 EDT] Feature: Statistics acquisition lag cached inventory parity
+Status: Complete
+Notes: Acquisition Lag Scatter now merges cached Ebook Library and Audio Library source-added/published-year lag buckets with filesystem lag buckets using existing catalog cache rows.
+
+[2026-06-05 15:49 EDT] Feature: Statistics acquisition lag cached inventory parity
+Status: Complete
+Notes: Acquisition Lag Scatter now merges cached Ebook Library and Audio Library added-year versus published-year buckets with filesystem scatter rows using existing catalog timestamps.
+
+[2026-06-05 15:57 EDT] Feature: Statistics genre cooccurrence cached inventory parity
+Status: Complete
+Notes: Genre Cooccurrence now merges cached Ebook Library and Audio Library chord nodes and unordered pair links with filesystem co-occurrence data.
+
+[2026-06-05 16:07 EDT] Feature: Source-backed library compatibility redirect context
+Status: Complete
+Notes: Production SPA fallback canonicalization now preserves query/hash context when normalizing compatibility Ebook/Audio Library URLs to friendly route aliases.
+
+[2026-06-05 16:21 EDT] Feature: My Reading source-backed summary and funnel parity
+Status: Complete
+Notes: My Reading Summary and Progress Funnel now merge filesystem reading stats with Ebook/Audio Library user state from cached source-backed rows without adding migrations.
+
+[2026-06-05 16:07 EDT] Feature: Source-backed library URL canonicalization parity
+Status: Complete
+Notes: Production SPA fallback now preserves query strings and hash fragments when redirecting legacy negative source-backed library URLs to friendly Ebook Library and Audio Library aliases.
+
+[2026-06-05 16:21 EDT] Feature: Collection source-backed selection parity
+Status: Complete
+Notes: Mixed Collection grid/list/table rows now select Ebook Library and Audio Library members as collection item refs for Add/Remove Collection actions without treating remote ids as local book ids.
+
+[2026-06-05 16:32 EDT] Feature: Smart Scope source-backed selection parity
+Status: Complete
+Notes: Mixed Smart Scope grid/list/table rows now select Ebook Library and Audio Library members as collection item refs for Add to Collection without treating remote ids as local book ids.
+
+[2026-06-05 16:41 EDT] Feature: Author detail source-backed published-year sort parity
+Status: Complete
+Notes: Author detail mixed local/source-backed book lists now sort Ebook Library and Audio Library rows by cached published year alongside filesystem books.
+
+[2026-06-05 16:43 EDT] Feature: Dashboard source-backed membership shelf parity
+Status: Complete
+Notes: Library Additions and Explore Libraries now load Ebook/Audio Library items from the user's source-backed library membership instead of the raw warehouse cache.
+
+[2026-06-05 16:53 EDT] Feature: OPDS Ebook Library content-filter parity
+Status: Complete
+Notes: OPDS Ebook Library feeds now apply catalog tag/genre content filters to cached source-backed rows instead of returning an empty library when filters are active.
+
+[2026-06-05 17:04 EDT] Feature: OPDS legacy Ebook Library feed filter parity
+Status: Complete
+Notes: The legacy catalog-ebooks OPDS compatibility feed now forwards user content filters into the cached Ebook Library query path.
+
+[2026-06-05 16:50 EDT] Feature: Source-backed media access cached inventory parity
+Status: Complete
+Notes: Ebook Library downloads and Audio Library stream/download routes now serve visible cached catalog rows without requiring legacy per-user membership rows.
+
+[2026-06-05 16:56 EDT] Feature: ABS Audio Library cached inventory parity
+Status: Complete
+Notes: ABS-compatible Audio Library item lookup now maps cached audiobook rows without requiring legacy per-user membership rows, while still overlaying reading progress.
+
+[2026-06-05 17:07 EDT] Feature: Kobo Ebook Library cached inventory parity
+Status: Complete
+Notes: Kobo source-backed ebook sync, metadata, cover/download, and reading-state lookups now resolve cached Ebook Library rows without requiring legacy per-user membership rows.
+
+[2026-06-05 17:15 EDT] Feature: OPDS mixed feed content-filter parity
+Status: Complete
+Notes: OPDS All Books/search, Recent, Surprise, Authors, and Series now apply content filters to cached Ebook Library rows instead of dropping source-backed rows when filters are active.
+
+[2026-06-05 17:18 EDT] Feature: Mixed collection and smart-scope bulk action parity
+Status: Complete
+Notes: Collection and Smart Scope selection bars now allow source-backed Ebook/Audio Library rows to use normal bulk status and rating actions through cached catalog user-state updates.
+
+[2026-06-05 17:22 EDT] Feature: OPDS Smart Scope content-filter parity
+Status: Complete
+Notes: OPDS Smart Scope feeds now pass user content filters into source-backed Ebook Library smart-scope catalog queries instead of returning local-only results.
+
+[2026-06-05 17:29 EDT] Feature: Source-backed collection filter rule parity
+Status: Complete
+Notes: Smart Scope/filter-builder collection rules now compile against source-backed collection membership so Ebook/Audio Library rows participate in collection include/exclude/empty filters.
+
+[2026-06-05 17:39 EDT] Feature: Source-backed collection sort parity
+Status: Complete
+Notes: Mixed Collection source-backed pages now send the active table sort to the catalog-item endpoint and order cached Ebook/Audio Library rows by supported native sort fields.
+
+[2026-06-05 17:44 EDT] Feature: OPDS shared Smart Scope navigation parity
+Status: Complete
+Notes: OPDS Smart Scope navigation now includes public/shared scopes with the same owner-or-public visibility and display ordering as the native Smart Scope list.
+
+[2026-06-05 17:55 EDT] Feature: My Reading source-backed monthly completions parity
+Status: Complete
+Notes: Completion Timeline and Goal Trajectory now merge Ebook/Audio Library monthly finished counts from cached user state with filesystem completions.
+
+[2026-06-05 18:03 EDT] Feature: My Reading source-backed completion latency parity
+Status: Complete
+Notes: Completion Latency now merges Ebook/Audio Library added-to-finished latency values from cached source-backed user state with filesystem latency values.
+
+[2026-06-05 18:10 EDT] Feature: KOReader Ebook Library cached inventory progress parity
+Status: Complete
+Notes: KOReader document-hash mapping and progress reads now use cached Ebook Library rows plus user state directly, without requiring legacy warehouse_user_items membership rows.
+
+[2026-06-05 18:20 EDT] Feature: My Reading source-backed reading survival parity
+Status: Complete
+Notes: Reading Survival now merges Ebook/Audio Library current progress from cached user state with filesystem session max-progress values without inventing source-backed session history.
+
+[2026-06-05 18:27 EDT] Feature: My Reading session chart virtual-library guard parity
+Status: Complete
+Notes: Session-history-only My Reading charts now strip Ebook/Audio Library ids before local reading-session queries and return native empty data for source-backed-only scopes.
+
+[2026-06-05 18:32 EDT] Feature: My Reading session timeline virtual-library guard parity
+Status: Complete
+Notes: Reading Session Timeline and drag/edit lookups now strip Ebook/Audio Library ids before local reading-session queries and use native empty/not-found behavior for source-backed-only scopes.
+
+[2026-06-05 18:42 EDT] Feature: OPDS Ebook Library friendly route parity
+Status: Complete
+Notes: OPDS Libraries navigation now emits libraryId=ebooks for the source-backed Ebook Library while legacy libraryId=-1 direct links remain accepted and canonicalize in feed self links.
+
+[2026-06-05 18:50 EDT] Feature: Statistics source-backed library query alias parity
+Status: Complete
+Notes: Statistics and My Reading requests now emit friendly ebooks/audiobooks libraryIds and server DTOs parse those aliases back to virtual library ids while preserving numeric compatibility.
+
+[2026-06-05 18:59 EDT] Feature: Bulk query-selection source-backed alias parity
+Status: Complete
+Notes: All-matching bulk actions and metadata export now send Ebook/Audio Library query selections as friendly aliases while server bulk DTOs keep legacy virtual id compatibility.
+
+[2026-06-05 19:06 EDT] Feature: Book Warehouse settings tab alias parity
+Status: Complete
+Notes: Settings > Integrations now generates tab=book-warehouse for Book Warehouse while accepting legacy tab=catalog-source links and canonicalizing them forward.
+
+[2026-06-05 19:11 EDT] Feature: Audio Library legacy naming parity
+Status: Complete
+Notes: Legacy source-backed audiobook browse and redirect metadata now use the native Audio Library name, with no remaining Audiobook Library source strings.
+
+[2026-06-05 19:19 EDT] Feature: Request stream native URL parity
+Status: Complete
+Notes: Completed ebook request downloads now emit native /api/v1/requests/:id/stream links while the legacy catalog request stream route remains compatible.
+
+[2026-06-05 19:25 EDT] Feature: Library item media native URL parity
+Status: Complete
+Notes: Source-backed item detail downloads now emit native /api/v1/libraries/.../items media links while legacy catalog media routes remain compatible.
+
+[2026-06-05 19:31 EDT] Feature: Library item cover native URL parity
+Status: Complete
+Notes: Source-backed cover/poster helpers now emit native /api/v1/libraries/.../items cover links while legacy catalog cover routes remain compatible.
+
+[2026-06-05 19:44 EDT] Feature: Source-backed login redirect URL parity
+Status: Complete
+Notes: Public auth routes now canonicalize legacy /library/-1 and /library/-2 redirect targets to friendly Ebook/Audio Library aliases before rendering login.
+
+[2026-06-05 19:51 EDT] Feature: Source-backed library load error copy parity
+Status: Complete
+Notes: Ebook Library and Audio Library browse failures now show native library load errors instead of catalog wording.
+
+[2026-06-05 20:01 EDT] Feature: Audio Library stream native URL parity
+Status: Complete
+Notes: Source-backed audiobook playback now uses the native /api/v1/libraries/audiobooks/items/:remoteId/stream URL while the legacy catalog stream route remains compatible.
+
+[2026-06-05 20:08 EDT] Feature: Source-backed detail load error copy parity
+Status: Complete
+Notes: Ebook Library and Audio Library item detail fetch failures now use native library item copy instead of catalog ebook/audiobook wording.
+
+[2026-06-05 20:13 EDT] Feature: Source-backed comic reader format parity guards
+Status: Complete
+Notes: Source-backed CBR and CB7 reader tests now prove cached Ebook Library archives use the same authorized comic page delivery path as source-backed CBZ.
+
+[2026-06-05 20:35 EDT] Feature: Collection source-backed availability parity
+Status: Complete
+Notes: Collection source-backed add/read paths now honor the same available Ebook Library and Audio Library media gates as native library and Smart Scope queries, filtering unavailable cached rows out of collection results.
+
+[2026-06-05 20:41 EDT] Feature: Mixed Collection loaded-sort parity
+Status: Complete
+Notes: Collection grid/list/table surfaces now sort the combined loaded filesystem and source-backed rows with the shared native library-item sorter, preventing Ebook Library or Audio Library rows from always rendering after local books.
+
+[2026-06-05 20:52 EDT] Feature: Collection source-backed metadata sort parity
+Status: Complete
+Notes: Collection source-backed rows now carry user-state and derived metadata fields and sort by the same native fields used by source-backed library rows.
+
+[2026-06-10 22:45 EDT] Feature: Comic Library normal-user Book Warehouse parity
+Status: Complete
+Notes: Book Warehouse comics now sync into a native Comic Library with read/download/page-image/request routes while keeping admin import endpoints and upstream storage paths out of user surfaces.
+
+[2026-06-10 23:04 EDT] Feature: Comic Library manual sync action
+Status: Complete
+Notes: Admin Book Warehouse settings and Settings > Libraries now trigger the comic catalog sync path for Comic Library instead of falling back to ebook sync or filesystem scans.
+
+[2026-06-10 23:14 EDT] Feature: Comic request status sync parity
+Status: Complete
+Notes: Request status sync now polls Book Warehouse comic requests, updates existing local comic mirrors, refreshes missing completed Comic Library rows once per run, and blocks storage-path metadata from user notifications.
+
+[2026-06-10 23:23 EDT] Feature: Comic requests view native library reachability
+Status: Complete
+Notes: The Requests view now loads and submits comic request mirrors through native comic request routes, and labels completed quick details as Comic Library instead of falling back to Ebook Library.
+
+[2026-06-10 23:45 EDT] Feature: Comic series normal-user client endpoints
+Status: Complete
+Notes: The Book Warehouse client now supports comic series browse/search/items endpoints with encoded ids, bounded pagination, X-API-Key auth, and sanitized DTOs.
+
+[2026-06-11 00:00 EDT] Feature: Native comic series catalog routes
+Status: Complete
+Notes: BookOrbit now proxies Book Warehouse comic series browse/search/items through normal-user catalog routes with safe disabled-source empty pages and sanitized upstream failure copy.
+
+[2026-06-11 00:08 EDT] Feature: Dashboard Comic Library reader launch parity
+Status: Complete
+Notes: Currently Reading and The Long Wait now treat source-backed comics as Comic Library items for reader routes, cover imagery, and quick-view labels instead of falling back to Ebook Library.
+
+[2026-06-11 00:20 EDT] Feature: Comic Library normal-user state parity
+Status: Complete
+Notes: Comic Library items now persist progress/read state through the same source-backed user-state service used by Ebook Library and Audio Library, while comics remain limited to normal read/download/page/request capabilities.
+
+[2026-06-11 00:29 EDT] Feature: Book Dock client route permission parity
+Status: Complete
+Notes: The direct Book Dock import route now requires book_dock_access in the client guard, matching the server permission so normal users cannot browse import/admin surfaces.
+
+[2026-06-11 00:38 EDT] Feature: Comic Library collection membership parity
+Status: Complete
+Notes: Collection membership DTOs and filters now accept Comic Library catalog refs, verify them as source-backed items, and render collection cards with Comic Library labels.
+
+[2026-06-11 00:48 EDT] Feature: Request Comic UI
+Status: Complete
+Notes: Requests now includes a normal-user Request Comic dialog wired to the existing comic request API, trims supported fields, and refreshes the Comics tab after submit.
+
+[2026-06-11 00:58 EDT] Feature: Comic request status refresh parity
+Status: Complete
+Notes: Comic requests now support normal-user on-demand status refresh, syncing current-user mirrored upstream rows, notifying safe transitions, and refreshing missing completed Comic Library items.
+
+[2026-06-11 01:06 EDT] Feature: Comic Library SPA route canonicalization
+Status: Complete
+Notes: Server SPA redirects now normalize legacy Comic Library ids and aliases to /library/comics and libraryId=comics, matching client-side route handling.
+
+[2026-06-11 01:15 EDT] Feature: Comic Library dashboard widget media parity
+Status: Complete
+Notes: Neglected Gems and Long Wait now preserve Book Warehouse comic rows as Comic Library items for covers, quick details, native routing, and queue state instead of falling back to Ebook Library.
+
+[2026-06-11 01:20 EDT] Feature: Comic Library dashboard/search card helper parity
+Status: Complete
+Notes: Generic dashboard shelves and global search now use Comic Library page imagery, native comic routes, and Comic fallback labels instead of ebook cover/label helpers.
+
+[2026-06-11 01:25 EDT] Feature: Comic Library native item JSON aliases
+Status: Complete
+Notes: Normal users can now list and read Comic Library cached item JSON through /api/v1/libraries/comics/items routes alongside existing comic page and download routes.
+
+[2026-06-11 01:34 EDT] Feature: Generic comic request listing parity
+Status: Complete
+Notes: The shared request list now preserves mediaType=comic, syncs current-user comic mirrors, and returns Comic Library request rows instead of silently using ebook request filters.
+
+[2026-06-11 01:46 EDT] Feature: Comic Library friendly query alias parity
+Status: Complete
+Notes: Statistics, My Reading, and all-matching bulk selections now accept and emit the friendly comics alias so Comic Library behaves like a normal library without leaking -3 in query payloads.
+
+[2026-06-11 01:51 EDT] Feature: Comic Library normal-user API compatibility
+Status: Complete
+Notes: Normal users can now use Book Warehouse-compatible /comics/items, page, download, series, and request aliases that delegate to cached Comic Library services without exposing admin import routes.
+
+[2026-06-11 01:57 EDT] Feature: Comic Library item metadata detail parity
+Status: Complete
+Notes: Comic Library item detail JSON now includes safe seriesId, issueNumber, and numeric year metadata from cached Book Warehouse identifiers while continuing to hide raw storage paths.
+
+[2026-06-11 02:05 EDT] Feature: Comic Library global query/search parity
+Status: Complete
+Notes: Shared all-library book queries and global search now include accessible Comic Library rows and label comic search hits as Comic Library instead of falling through to Ebook Library.
+
+[2026-06-11 02:11 EDT] Feature: Comic Library dashboard label parity
+Status: Complete
+Notes: Dashboard source-backed item mapping now labels comic additions and scroller rows as Comic Library while keeping unsafe raw storage metadata out of dashboard DTOs.
+
+[2026-06-11 02:20 EDT] Feature: Comic Library normal navigation shell parity
+Status: Complete
+Notes: Comic Library now participates in the same lazy-scroll library shell, sidebar navigation/order, friendly redirects, and detail/reader active state as filesystem libraries.
+
+[2026-06-11 02:26 EDT] Feature: Book Warehouse comic API normal-user contract coverage
+Status: Complete
+Notes: Comic API aliases now have explicit safe JSON, request, series, Range streaming, and authorization-inventory coverage for normal users without exposing admin import routes.
+
+[2026-06-11 02:36 EDT] Feature: Comic Library grid badge icon parity
+Status: Complete
+Notes: Comic Library cards in the normal library grid now render the comic media badge icon and have a regression guard against falling back to the ebook badge.
+
+[2026-06-11 02:43 EDT] Feature: Comic Library author detail visual parity
+Status: Complete
+Notes: Author detail source-backed rows now use comic page-image covers, Comic labels, CBZ badges, and comic fallback icons instead of ebook visual fallbacks.
+
+[2026-06-11 02:50 EDT] Feature: Comic Library series detail visual parity
+Status: Complete
+Notes: Series detail source-backed rows now use comic page-image covers, Comic labels, CBZ grid badges, and comic fallback icons instead of ebook visual fallbacks.
+
+[2026-06-11 02:55 EDT] Feature: Comic Library recommendation row visual parity
+Status: Complete
+Notes: Catalog recommendation rows now use comic page-image covers, Comic labels, and comic fallback icons instead of ebook visual fallbacks.
+
+[2026-06-11 03:00 EDT] Feature: Comic Library smart scope preview visual parity
+Status: Complete
+Notes: Smart Scope catalog preview cards now use comic page-image covers, Comic labels, and comic fallback icons instead of ebook visual fallbacks.
+
+[2026-06-11 03:08 EDT] Feature: Comic Library collection fallback icon parity
+Status: Complete
+Notes: Collection mixed grid, list, and table rows now use comic fallback icons for no-cover Comic Library items instead of ebook icons.
+
+[2026-06-11 03:18 EDT] Feature: Completed comic request download parity
+Status: Complete
+Notes: Completed Comic Library request rows now expose native archive downloads through the source-backed Comic Library item download route when a completed remote id is available.
+
+[2026-06-11 03:23 EDT] Feature: Comic Library smart scope fallback icon parity
+Status: Complete
+Notes: Smart Scope mixed grid and list rows now use comic fallback icons for no-cover Comic Library items instead of ebook icons.
+
+[2026-06-11 03:29 EDT] Feature: Comic Library access guard parity
+Status: Complete
+Notes: LibraryAccessGuard now treats Comic Library as a read-only source-backed library, allowing guarded viewer routes while still rejecting editor/owner mutations.
+
+[2026-06-11 03:33 EDT] Feature: Comic Library route canonicalization coverage
+Status: Complete
+Notes: Router regression coverage now proves Comic Library aliases, legacy -3 URLs, and libraryId query filters canonicalize to the friendly comics route.
+
+[2026-06-11 03:38 EDT] Feature: Comic Library highlight cover parity
+Status: Complete
+Notes: Highlight of the Day now renders source-backed Comic Library highlights through the comic page-image route instead of the ebook cover proxy.
+
+[2026-06-11 03:45 EDT] Feature: Comic Library catalog route helper coverage
+Status: Complete
+Notes: Shared catalog item route coverage now proves comic items open native Comic Library details and reader routes through the friendly comics route.
+
+[2026-06-11 03:47 EDT] Feature: Comic Library global/dashboard fallback icon parity
+Status: Complete
+Notes: Global search and dashboard source-backed shelves now render no-cover Comic Library rows with comic fallback icons while preserving native Comic Library routes.
+
+[2026-06-11 03:52 EDT] Feature: Comic Library shared browse parity
+Status: Complete
+Notes: The generic source-backed browse view now treats mediaType=comic as Comic Library, using comic library ids, page-image covers, comic icons, and comic count copy instead of ebook fallbacks.
+
+[2026-06-11 09:57 EDT] Feature: Comic Library migration journal parity
+Status: Complete
+Notes: The comic enum migration is now in Drizzle's journal; local compose smoke synced 4,824 comics, rendered the Comic Library, verified reader/page/download routes, and confirmed normal-user admin sync is forbidden.
+
+[2026-06-11 10:05 EDT] Feature: Book Warehouse parity completion audit
+Status: Complete
+Notes: Added an evidence matrix for the current parity branch; no new implementation gap was found, but final completion should still rely on full gates and runtime smoke before closing the long-running goal.
+
+[2026-06-11 10:14 EDT] Feature: Compatible Comic API source-field sanitization
+Status: Complete
+Notes: The Book Warehouse-compatible comic list/detail aliases now strip internal catalog-source fields and return remote comic ids as public ids so the documented item/pages/download flow works for normal users.
+
+[2026-06-11 10:30 EDT] Feature: Book Warehouse parity completion audit refresh
+Status: Complete
+Notes: Refreshed the parity evidence after the compatible comic API id fix; full gates and normal-user runtime smoke now prove the documented read/download/request scope.

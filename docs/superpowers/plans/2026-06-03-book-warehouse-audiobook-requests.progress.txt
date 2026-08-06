@@ -1,0 +1,8 @@
+# Book Warehouse Audiobook Requests Progress
+
+- 2026-06-03: Task 1 completed and committed with shared audiobook request contracts, DTO validation, and safe public mappers.
+- 2026-06-03: Task 2 completed and committed with upstream audiobook request, request-list, and queue client support using `X-API-Key`.
+- 2026-06-03: Task 3 completed and committed with native regular-user audiobook request routes, local mirror sync, and request notifications.
+- 2026-06-03: Task 4 completed and committed with client audiobook request API helpers and composable state management.
+- 2026-06-03: Task 5 final review found queue privacy/bounds issues; fixed by making queue responses user-scoped through local audiobook mirrors, removing public queue IDs, sending `limit: 100`, and capping mapped queue rows at 100.
+- 2026-06-03: Final verification passed: shared types build, focused server audiobook request tests (133), focused client composable tests (15), repo typecheck, repo lint, visible-copy guard, and queue fix re-review.

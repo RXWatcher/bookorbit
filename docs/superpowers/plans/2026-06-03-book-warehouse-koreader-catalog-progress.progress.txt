@@ -1,0 +1,10 @@
+Feature: KOReader catalog ebook progress compatibility
+Status: Complete
+Completed: 2026-06-03 17:55
+
+Summary:
+KOReader compatibility is implemented as a document-hash progress bridge because the KOReader surface only syncs progress by document hash. Full OPDS catalog ebook downloads now record the completed ebook hash for current-user-owned catalog ebooks, and KOReader save/get progress uses that mapping to update catalog-backed user state without exposing upstream source identifiers.
+
+Verification:
+- pnpm --filter server exec vitest run src/modules/koreader src/modules/opds/opds.controller.test.ts src/modules/opds/opds.module.test.ts src/db/schema/schema.test.ts
+- pnpm run lint:check && pnpm run typecheck

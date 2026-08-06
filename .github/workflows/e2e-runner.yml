@@ -1,0 +1,99 @@
+name: E2E Runner (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      suite-id:
+        description: "E2E suite id from scripts/e2e/suite-registry.mjs (e.g. scanner-scenarios)"
+        required: true
+        type: string
+      check-name:
+        description: "Name shown in the GitHub checks UI"
+        required: true
+        type: string
+      artifact-name:
+        description: "Name for the uploaded artifact"
+        required: true
+        type: string
+      job-timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+      vitest-args:
+        description: "Optional extra args forwarded to vitest (for shard/testNamePattern reruns)"
+        required: false
+        type: string
+        default: ""
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10"
+  E2E_DATABASE_URL: postgres://bookorbit:bookorbit@localhost:5432/bookorbit_e2e
+  NODE_ENV: test
+  JWT_SECRET: scanner-e2e-secret-1234
+  JWT_EXPIRES_IN: 15m
+  JWT_REFRESH_EXPIRES_IN: 7d
+  BOOKS_PATH: ../local/data
+  APP_URL: http://localhost:5173
+
+jobs:
+  run-suite:
+    name: ${{ inputs.check-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
+    permissions:
+      contents: read
+      checks: write
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: bookorbit
+          POSTGRES_PASSWORD: bookorbit
+          POSTGRES_DB: bookorbit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U bookorbit"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          prefetch: "true"
+
+      - name: Run e2e suite
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.vitest-args }}" ]; then
+            pnpm run e2e:run -- ${{ inputs.suite-id }} ${{ inputs.vitest-args }}
+          else
+            pnpm run e2e:run -- ${{ inputs.suite-id }}
+          fi
+
+      - name: Publish test report annotations
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2
+        with:
+          check_name: ${{ inputs.check-name }}
+          files: test-results/server/*-e2e-junit.xml
+          fail_on: nothing
+          comment_mode: off
+
+      - name: Upload e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: test-results/server
+          retention-days: 7

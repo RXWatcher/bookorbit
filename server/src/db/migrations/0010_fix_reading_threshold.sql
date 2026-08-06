@@ -1,0 +1,2 @@
+ALTER TABLE "libraries" DROP CONSTRAINT "libraries_reading_threshold_range_chk";--> statement-breakpoint
+ALTER TABLE "libraries" ADD CONSTRAINT "libraries_reading_threshold_range_chk" CHECK ("libraries"."reading_threshold" >= 0 and "libraries"."reading_threshold" <= 100);

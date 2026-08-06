@@ -1,0 +1,14 @@
+Feature: Admin catalog cover cache UI
+Date: 2026-06-03
+
+Ralph loop:
+- Baseline: previous full `pnpm run verify` passed before this loop.
+- RED: Added client component tests for loading cover cache status, rendering native admin copy, clearing cache, and disabling the clear action while in flight.
+- GREEN: Added admin API wrappers for cache status/clear and rendered a cover-cache status/action panel in the admin catalog source settings.
+- Review checkpoint: subagent scout verified the server endpoints are admin-gated, shared cache DTOs exist, and safe UI copy avoids regular-user/provider leakage.
+- Focused verification: `pnpm --filter client exec vitest run src/features/warehouse/components/__tests__/WarehouseAdminSettings.spec.ts` passed.
+- Client verification: `pnpm --filter client type-check` and `pnpm --filter client lint:check` passed.
+
+Privacy notes:
+- The controls are only in the existing admin integration settings surface.
+- Visible copy uses generic catalog/cache wording and does not expose provider names, source keys, remote IDs, cache paths, URLs, or secrets.

@@ -1,0 +1,28 @@
+Book Warehouse Catalog Recommendations Progress
+2026-06-03
+
+Completed:
+- Task 1: Catalog recommendation service.
+  - Added `RecommendationService.getCatalogRecommendations`.
+  - Verifies access to the local target book before using target series and author metadata.
+  - Queries only current-user-owned catalog items through the local catalog cache.
+  - Returns safe catalog item DTOs without raw payload, upstream ids, URLs, or integration wording.
+- Task 2: Native catalog recommendations endpoint.
+  - Added `GET /api/v1/books/:id/catalog-recommendations`.
+  - Added service/controller tests for route contract, access delegation, catalog query, and safe mapping.
+- Task 3: Book detail catalog recommendation row.
+  - Added `useCatalogRecommendations`.
+  - Added `CatalogRecommendationsRow` to render a separate More From Catalog row under local More Like This recommendations.
+  - Catalog recommendation clicks route to the native catalog detail page.
+
+Latest verification:
+- pnpm --filter server exec vitest run src/modules/recommendation/recommendation.service.test.ts src/modules/recommendation/recommendation.controller.test.ts => 2 files / 35 tests passed
+- pnpm --filter client exec vitest run src/features/book/composables/__tests__/useCatalogRecommendations.spec.ts src/features/book/components/detail/__tests__/CatalogRecommendationsRow.spec.ts => 2 files / 5 tests passed
+- pnpm run typecheck => passed
+- Targeted catalog recommendations visible-copy guard => passed
+- pnpm run verify => passed; server 485 files / 6071 tests, client 197 files / 2211 tests
+- pnpm run build:client => passed
+- Vite dev-server HTTP smoke at http://localhost:5173/ => 200 with root app and module entry present
+
+Next:
+- Commit this loop, then select the next highest-priority parity feature.

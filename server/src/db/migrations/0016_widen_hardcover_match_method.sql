@@ -1,0 +1,1 @@
+ALTER TABLE "hardcover_book_state" ALTER COLUMN "match_method" SET DATA TYPE varchar(20);

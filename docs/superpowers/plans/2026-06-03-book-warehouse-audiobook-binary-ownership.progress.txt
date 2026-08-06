@@ -1,0 +1,14 @@
+Feature: User-scoped catalog audiobook binaries
+Status: Complete
+Date: 2026-06-03
+
+Completed:
+- Added current-user ownership checks before live audiobook cover, stream, download, and file-download client calls.
+- Updated native catalog audiobook binary routes to pass the authenticated user into the service layer.
+- Added service/controller coverage for owned audiobook binary forwarding, missing cached items, outside-library rejection, and safe native error copy.
+
+Verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.controller.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts
+
+Notes:
+- Binary routes still use server-side credentials and fixed native attachment names; no regular-user visible integration wording is introduced.

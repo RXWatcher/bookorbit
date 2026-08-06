@@ -1,0 +1,197 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+
+import type { RequestUser } from '../../common/types/request-user';
+import { BookmarkService } from './bookmark.service';
+import { BookmarkResponseDto } from './dto/bookmark-response.dto';
+import type { CreateBookmarkDto } from './dto/create-bookmark.dto';
+import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+
+function makeUser(overrides?: Partial<RequestUser>): RequestUser {
+  return {
+    id: 1,
+    username: 'bookmarker',
+    name: 'Book Marker',
+    email: null,
+    active: true,
+    isSuperuser: false,
+    isDefaultPassword: false,
+    tokenVersion: 1,
+    settings: {},
+    avatarUrl: null,
+    provisioningMethod: 'local',
+    permissions: [],
+    ...overrides,
+
+    contentFilters: EMPTY_CONTENT_FILTER_RULES,
+  };
+}
+
+function makeBookmarkRow(overrides?: Record<string, unknown>) {
+  return {
+    id: 10,
+    userId: 1,
+    bookId: 5,
+    cfi: 'epubcfi(/6/4!/4/2/1:0)',
+    title: 'Chapter 1',
+    positionSeconds: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+function makeService() {
+  const bookmarkRepo = {
+    findByBookId: vi.fn(),
+    findLiveByLocation: vi.fn(),
+    create: vi.fn(),
+    restoreAtLocation: vi.fn().mockResolvedValue(null),
+    softDelete: vi.fn(),
+  };
+  const bookService = {
+    verifyBookAccess: vi.fn().mockResolvedValue(undefined),
+  };
+  const service = new BookmarkService(bookmarkRepo as never, bookService as never);
+  return { service, bookmarkRepo, bookService };
+}
+
+describe('BookmarkService', () => {
+  describe('getBookmarks', () => {
+    it('verifies access and returns mapped response DTOs', async () => {
+      const { service, bookmarkRepo, bookService } = makeService();
+      const user = makeUser();
+      bookmarkRepo.findByBookId.mockResolvedValue([makeBookmarkRow()]);
+
+      const result = await service.getBookmarks(5, user);
+
+      expect(bookService.verifyBookAccess).toHaveBeenCalledWith(5, user);
+      expect(bookmarkRepo.findByBookId).toHaveBeenCalledWith(5, user.id);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toBeInstanceOf(BookmarkResponseDto);
+      expect(result[0]).not.toHaveProperty('userId');
+    });
+
+    it('propagates access errors', async () => {
+      const { service, bookService, bookmarkRepo } = makeService();
+      bookService.verifyBookAccess.mockRejectedValue(new ForbiddenException());
+
+      await expect(service.getBookmarks(5, makeUser())).rejects.toThrow(ForbiddenException);
+      expect(bookmarkRepo.findByBookId).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createBookmark', () => {
+    it('returns an existing bookmark for duplicate CFI requests', async () => {
+      const { service, bookmarkRepo, bookService } = makeService();
+      const user = makeUser();
+      const existing = makeBookmarkRow();
+      bookmarkRepo.findLiveByLocation.mockResolvedValue(existing);
+
+      const dto: CreateBookmarkDto = { cfi: 'epubcfi(/6/4!/4/2/1:0)', title: 'Chapter 1' };
+      const result = await service.createBookmark(5, user, dto);
+
+      expect(bookService.verifyBookAccess).toHaveBeenCalledWith(5, user);
+      expect(bookmarkRepo.findLiveByLocation).toHaveBeenCalledWith(1, 5, {
+        cfi: 'epubcfi(/6/4!/4/2/1:0)',
+        positionSeconds: null,
+      });
+      expect(bookmarkRepo.create).not.toHaveBeenCalled();
+      expect(result.id).toBe(existing.id);
+    });
+
+    it('returns an existing bookmark for duplicate audio position requests', async () => {
+      const { service, bookmarkRepo } = makeService();
+      const existing = makeBookmarkRow({ id: 11, cfi: null, positionSeconds: 93.5, title: '00:01:33' });
+      bookmarkRepo.findLiveByLocation.mockResolvedValue(existing);
+
+      const result = await service.createBookmark(5, makeUser(), { title: '00:01:33', positionSeconds: 93.5 });
+
+      expect(bookmarkRepo.findLiveByLocation).toHaveBeenCalledWith(1, 5, { cfi: null, positionSeconds: 93.5 });
+      expect(bookmarkRepo.create).not.toHaveBeenCalled();
+      expect(result.id).toBe(11);
+      expect(result.positionSeconds).toBe(93.5);
+    });
+
+    it('creates and maps a bookmark when no duplicate exists', async () => {
+      const { service, bookmarkRepo } = makeService();
+      const createdRow = makeBookmarkRow({ id: 12, cfi: null, positionSeconds: 42, title: '00:00:42' });
+      bookmarkRepo.findLiveByLocation.mockResolvedValue(null);
+      bookmarkRepo.create.mockResolvedValue(createdRow);
+
+      const result = await service.createBookmark(5, makeUser(), { title: '00:00:42', positionSeconds: 42 });
+
+      expect(bookmarkRepo.create).toHaveBeenCalledWith(1, 5, { cfi: null, title: '00:00:42', positionSeconds: 42 });
+      expect(result).toBeInstanceOf(BookmarkResponseDto);
+      expect(result.id).toBe(12);
+      expect(result.cfi).toBeNull();
+      expect(result.positionSeconds).toBe(42);
+    });
+
+    it('re-reads and returns the existing bookmark when a concurrent duplicate insert is ignored', async () => {
+      const { service, bookmarkRepo } = makeService();
+      const existing = makeBookmarkRow({ id: 13, cfi: null, positionSeconds: 42, title: '00:00:42' });
+      bookmarkRepo.findLiveByLocation.mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+      bookmarkRepo.create.mockResolvedValue(null);
+
+      const result = await service.createBookmark(5, makeUser(), { title: '00:00:42', positionSeconds: 42 });
+
+      expect(bookmarkRepo.findLiveByLocation).toHaveBeenNthCalledWith(2, 1, 5, { cfi: null, positionSeconds: 42 });
+      expect(result.id).toBe(13);
+    });
+
+    it('restores the tombstone that still owns the location instead of failing the insert', async () => {
+      const { service, bookmarkRepo } = makeService();
+      const restored = makeBookmarkRow({ id: 14, deletedAt: null });
+      bookmarkRepo.findLiveByLocation.mockResolvedValue(null);
+      bookmarkRepo.create.mockResolvedValue(null);
+      bookmarkRepo.restoreAtLocation.mockResolvedValue(restored);
+
+      const result = await service.createBookmark(5, makeUser(), { title: 'Chapter 1', cfi: 'epubcfi(/6/4!/4/2/1:0)' });
+
+      expect(bookmarkRepo.restoreAtLocation).toHaveBeenCalledWith(
+        1,
+        5,
+        { cfi: 'epubcfi(/6/4!/4/2/1:0)', positionSeconds: null },
+        { title: 'Chapter 1', origin: 'web', devicePos: null, pageno: null },
+      );
+      expect(result.id).toBe(14);
+    });
+
+    it('propagates access errors and does not query repository', async () => {
+      const { service, bookService, bookmarkRepo } = makeService();
+      bookService.verifyBookAccess.mockRejectedValue(new NotFoundException('Book 5 not found'));
+
+      await expect(service.createBookmark(5, makeUser(), { title: 'x', cfi: 'epubcfi(/6/2)' })).rejects.toThrow(NotFoundException);
+      expect(bookmarkRepo.findLiveByLocation).not.toHaveBeenCalled();
+      expect(bookmarkRepo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteBookmark', () => {
+    it('verifies access and soft deletes the bookmark', async () => {
+      const { service, bookmarkRepo, bookService } = makeService();
+      const user = makeUser();
+      bookmarkRepo.softDelete.mockResolvedValue(true);
+
+      await expect(service.deleteBookmark(5, 10, user)).resolves.toBeUndefined();
+
+      expect(bookService.verifyBookAccess).toHaveBeenCalledWith(5, user);
+      expect(bookmarkRepo.softDelete).toHaveBeenCalledWith(5, 10, 1);
+    });
+
+    it('throws NotFoundException with stable message when bookmark is missing', async () => {
+      const { service, bookmarkRepo } = makeService();
+      bookmarkRepo.softDelete.mockResolvedValue(false);
+
+      await expect(service.deleteBookmark(5, 99, makeUser())).rejects.toThrow(NotFoundException);
+      await expect(service.deleteBookmark(5, 99, makeUser())).rejects.toThrow('Bookmark 99 not found for book 5');
+    });
+
+    it('propagates access errors and skips delete query', async () => {
+      const { service, bookService, bookmarkRepo } = makeService();
+      bookService.verifyBookAccess.mockRejectedValue(new ForbiddenException());
+
+      await expect(service.deleteBookmark(5, 10, makeUser())).rejects.toThrow(ForbiddenException);
+      expect(bookmarkRepo.softDelete).not.toHaveBeenCalled();
+    });
+  });
+});

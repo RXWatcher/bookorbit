@@ -1,0 +1,20 @@
+Feature: Catalog discovery dashboard shelf
+Started: 2026-06-03 14:27 EDT
+Completed: 2026-06-03 14:30 EDT
+Status: Complete
+
+Scope:
+- Add a native dashboard discovery shelf backed by current-user-owned synced catalog items.
+- Keep the user-facing experience BookOrbit-native and hide integration implementation wording.
+- Reuse the existing catalog-card UI and native catalog item detail route.
+
+Verification so far:
+- pnpm --filter client exec vitest run src/features/dashboard/composables/__tests__/useDashboardConfig.spec.ts src/features/dashboard/composables/__tests__/useDashboardCatalogAdditions.spec.ts src/features/dashboard/components/__tests__/DashboardCatalogScroller.spec.ts
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/modules/dashboard/dashboard.controller.test.ts
+- pnpm run typecheck
+
+Final verification:
+- Visible dashboard copy guard: no forbidden integration wording in rendered dashboard copy or shelf labels.
+- pnpm run verify
+- pnpm run build:client
+- Vite smoke: http://localhost:5173/ returned 200 with app root and client module.

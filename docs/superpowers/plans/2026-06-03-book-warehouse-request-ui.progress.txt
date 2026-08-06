@@ -1,0 +1,11 @@
+[2026-06-03 06:45 EDT] Feature: Book Warehouse request UI
+Status: Complete
+Notes: Added native request helpers, ebook/audiobook request dialogs, `/requests` page, sidebar route, server-side status filtering, lazy audiobook loading, safe action errors, and notification routing to `/requests`.
+
+[2026-06-03 06:45 EDT] Verification
+Status: Complete
+Notes: Focused request UI tests passed (8 files, 72 tests), targeted server notification test passed (1 test), repo-wide typecheck passed, repo-wide lint passed, and corrected visible-copy guard passed.
+
+[2026-06-03 06:45 EDT] Review
+Status: Complete
+Notes: Final full-phase subagent review approved with no blocking findings; residual risk is broad public-text sanitization possibly hiding legitimate titles containing implementation-like words.

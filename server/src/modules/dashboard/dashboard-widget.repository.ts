@@ -1,0 +1,1140 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, notInArray, sql } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+
+import type {
+  ContentFilterRules,
+  CurrentlyReadingBook,
+  CurrentlyReadingWidgetData,
+  HighlightOfTheDayWidgetData,
+  LibraryOverviewWidgetData,
+  LongWaitWidgetData,
+  NeglectedGemsWidgetData,
+  ReadingStreakWidgetData,
+} from '@bookorbit/types';
+
+import { DB } from '../../db';
+import * as schema from '../../db/schema';
+import {
+  audiobookProgress,
+  annotations,
+  authors,
+  bookAuthors,
+  bookFiles,
+  bookGenres,
+  bookMetadata,
+  books,
+  genres,
+  readingProgress,
+  readingAttempts,
+  readingSessions,
+  userBookRatings,
+  userBookStatus,
+  userReadingDailyStats,
+} from '../../db/schema';
+import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
+import { computeLongestStreak, computeStreakData, formatDay } from './dashboard-widget.calculations';
+
+type Db = NodePgDatabase<typeof schema>;
+
+const CURRENTLY_READING_LIMIT = 10;
+const DEFAULT_VIRTUAL_PAGE_COUNT = 300;
+
+@Injectable()
+export class DashboardWidgetRepository {
+  constructor(@Inject(DB) private readonly db: Db) {}
+
+  private getContentFilterClauses(contentFilters?: ContentFilterRules) {
+    return contentFilters ? buildContentFilterClauses(contentFilters, this.db) : [];
+  }
+
+  async getCompletedBooksThisYear(userId: number, accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<number> {
+    if (accessibleLibraryIds.length === 0) return 0;
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const yearStart = sql`date_trunc('year', current_date)`;
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(readingAttempts)
+      .innerJoin(books, eq(books.id, readingAttempts.bookId))
+      .where(
+        and(
+          eq(readingAttempts.userId, userId),
+          eq(readingAttempts.outcome, 'completed'),
+          isNull(readingAttempts.deletedAt),
+          isNotNull(readingAttempts.endedOn),
+          gte(readingAttempts.endedOn, yearStart),
+          inArray(books.libraryId, accessibleLibraryIds),
+          ...cfClauses,
+        ),
+      );
+    return row?.count ?? 0;
+  }
+
+  async getCurrentlyReadingBooks(
+    userId: number,
+    accessibleLibraryIds: number[],
+    contentFilters?: ContentFilterRules,
+  ): Promise<CurrentlyReadingWidgetData> {
+    if (accessibleLibraryIds.length === 0) return { books: [] };
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const mergedProgress = sql<number>`
+      coalesce(
+        (
+          case
+            when ${readingProgress.updatedAt} is not null
+              and (${audiobookProgress.updatedAt} is null or ${readingProgress.updatedAt} >= ${audiobookProgress.updatedAt})
+              then ${readingProgress.percentage}
+            else ${audiobookProgress.percentage}
+          end
+        ),
+        ${readingProgress.percentage},
+        ${audiobookProgress.percentage},
+        0
+      )
+    `;
+    const mergedLastActivityAt = sql<Date>`greatest(
+      coalesce(${readingProgress.updatedAt}, 'epoch'::timestamp),
+      coalesce(${audiobookProgress.updatedAt}, 'epoch'::timestamp),
+      coalesce(${userBookStatus.updatedAt}, 'epoch'::timestamp)
+    )`;
+    const rows = await this.db
+      .select({
+        bookId: books.id,
+        title: bookMetadata.title,
+        progress: mergedProgress,
+        coverSource: bookMetadata.coverSource,
+        lastActivityAt: mergedLastActivityAt,
+        fileId: bookFiles.id,
+        fileFormat: bookFiles.format,
+      })
+      .from(userBookStatus)
+      .innerJoin(books, eq(books.id, userBookStatus.bookId))
+      .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .leftJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+      .leftJoin(readingProgress, and(isNotNull(bookFiles.id), eq(readingProgress.bookFileId, bookFiles.id), eq(readingProgress.userId, userId)))
+      .leftJoin(audiobookProgress, and(eq(audiobookProgress.bookId, books.id), eq(audiobookProgress.userId, userId)))
+      .where(
+        and(
+          eq(userBookStatus.userId, userId),
+          inArray(userBookStatus.status, ['reading', 'rereading']),
+          inArray(books.libraryId, accessibleLibraryIds),
+          ...cfClauses,
+        ),
+      )
+      .orderBy(desc(mergedLastActivityAt))
+      .limit(CURRENTLY_READING_LIMIT);
+
+    if (rows.length === 0) return { books: [] };
+
+    const bookIds = rows.map((r) => r.bookId);
+    const authorRows = await this.db
+      .select({
+        bookId: bookAuthors.bookId,
+        authorName: authors.name,
+      })
+      .from(bookAuthors)
+      .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+      .where(inArray(bookAuthors.bookId, bookIds));
+
+    const authorsByBookId = new Map<number, string[]>();
+    for (const row of authorRows) {
+      const list = authorsByBookId.get(row.bookId) ?? [];
+      list.push(row.authorName);
+      authorsByBookId.set(row.bookId, list);
+    }
+
+    const result: CurrentlyReadingBook[] = rows.map((row) => ({
+      bookId: row.bookId,
+      title: row.title,
+      authors: authorsByBookId.get(row.bookId) ?? [],
+      progress: row.progress ?? 0,
+      hasCover: row.coverSource != null,
+      fileId: row.fileId ?? null,
+      fileFormat: row.fileFormat ?? null,
+      lastActivityAt: row.lastActivityAt?.toISOString?.() ?? null,
+    }));
+
+    return { books: result };
+  }
+
+  async getReadingStreak(userId: number, accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<ReadingStreakWidgetData> {
+    const readDays = new Set(await this.getReadingStreakDays(userId, accessibleLibraryIds, contentFilters));
+    return computeStreakData(readDays, new Date());
+  }
+
+  async getReadingStreakDays(userId: number, accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<string[]> {
+    if (accessibleLibraryIds.length === 0) return [];
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    if (cfClauses.length > 0) {
+      const sessionDay = sql<string>`date_trunc('day', ${readingSessions.startedAt})::date::text`;
+      const rows = await this.db
+        .select({
+          day: sessionDay,
+          totalSeconds: sql<number>`sum(${readingSessions.durationSeconds})::int`,
+        })
+        .from(readingSessions)
+        .innerJoin(bookFiles, eq(bookFiles.id, readingSessions.bookFileId))
+        .innerJoin(books, eq(books.id, bookFiles.bookId))
+        .where(
+          and(
+            eq(readingSessions.userId, userId),
+            inArray(books.libraryId, accessibleLibraryIds),
+            gt(readingSessions.durationSeconds, 0),
+            ...cfClauses,
+          ),
+        )
+        .groupBy(sessionDay)
+        .orderBy(desc(sessionDay));
+
+      return rows.filter((r) => r.totalSeconds > 0).map((r) => r.day);
+    }
+
+    const rows = await this.db
+      .select({
+        day: userReadingDailyStats.day,
+        totalSeconds: sql<number>`sum(${userReadingDailyStats.readingSeconds})::int`,
+      })
+      .from(userReadingDailyStats)
+      .where(and(eq(userReadingDailyStats.userId, userId), inArray(userReadingDailyStats.libraryId, accessibleLibraryIds)))
+      .groupBy(userReadingDailyStats.day)
+      .orderBy(desc(userReadingDailyStats.day));
+
+    return rows.filter((r) => r.totalSeconds > 0).map((r) => r.day);
+  }
+
+  async getLibraryOverview(accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<LibraryOverviewWidgetData> {
+    if (accessibleLibraryIds.length === 0) {
+      return { totalBooks: 0, totalAuthors: 0, totalSeries: 0, totalStorageBytes: 0, booksAddedThisYear: 0 };
+    }
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const libraryFilter = inArray(books.libraryId, accessibleLibraryIds);
+
+    const [[booksRow], [authorsRow], [seriesRow], [storageRow], [thisYearRow]] = await Promise.all([
+      this.db
+        .select({ count: sql<number>`count(distinct ${books.id})::int` })
+        .from(books)
+        .where(and(libraryFilter, ...cfClauses)),
+      this.db
+        .select({ count: sql<number>`count(distinct ${bookAuthors.authorId})::int` })
+        .from(bookAuthors)
+        .innerJoin(books, eq(books.id, bookAuthors.bookId))
+        .where(and(libraryFilter, ...cfClauses)),
+      this.db
+        .select({ count: sql<number>`count(distinct ${bookMetadata.seriesId})::int` })
+        .from(bookMetadata)
+        .innerJoin(books, eq(books.id, bookMetadata.bookId))
+        .where(and(isNotNull(bookMetadata.seriesId), libraryFilter, ...cfClauses)),
+      this.db
+        .select({ total: sql<number>`coalesce(sum(${bookFiles.sizeBytes}), 0)::bigint` })
+        .from(bookFiles)
+        .innerJoin(books, eq(books.id, bookFiles.bookId))
+        .where(and(libraryFilter, ...cfClauses)),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(books)
+        .where(and(gte(books.addedAt, sql`date_trunc('year', current_date)`), libraryFilter, ...cfClauses)),
+    ]);
+
+    return {
+      totalBooks: booksRow?.count ?? 0,
+      totalAuthors: authorsRow?.count ?? 0,
+      totalSeries: seriesRow?.count ?? 0,
+      totalStorageBytes: Number(storageRow?.total ?? 0),
+      booksAddedThisYear: thisYearRow?.count ?? 0,
+    };
+  }
+
+  // ── Highlight of the Day ────────────────────────────────────────
+
+  async getAnnotationCount(userId: number, accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<number> {
+    if (accessibleLibraryIds.length === 0) return 0;
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(annotations)
+      .innerJoin(books, eq(books.id, annotations.bookId))
+      .where(and(eq(annotations.userId, userId), isNull(annotations.deletedAt), inArray(books.libraryId, accessibleLibraryIds), ...cfClauses));
+
+    return row?.count ?? 0;
+  }
+
+  async getAnnotationByOffset(
+    userId: number,
+    accessibleLibraryIds: number[],
+    offset: number,
+    contentFilters?: ContentFilterRules,
+  ): Promise<HighlightOfTheDayWidgetData | null> {
+    if (accessibleLibraryIds.length === 0) return null;
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const rows = await this.db
+      .select({
+        text: annotations.text,
+        note: annotations.note,
+        bookTitle: bookMetadata.title,
+        bookId: annotations.bookId,
+        coverSource: bookMetadata.coverSource,
+        chapterTitle: annotations.chapterTitle,
+        createdAt: annotations.createdAt,
+      })
+      .from(annotations)
+      .innerJoin(books, eq(books.id, annotations.bookId))
+      .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(and(eq(annotations.userId, userId), isNull(annotations.deletedAt), inArray(books.libraryId, accessibleLibraryIds), ...cfClauses))
+      .orderBy(annotations.id)
+      .limit(1)
+      .offset(offset);
+
+    const row = rows[0];
+    if (!row) return null;
+
+    return {
+      text: row.text,
+      note: row.note,
+      bookTitle: row.bookTitle,
+      bookId: row.bookId,
+      hasCover: row.coverSource != null,
+      chapterTitle: row.chapterTitle,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  // ── Monthly Challenge (raw data) ────────────────────────────────
+
+  async getChallengePatternData(
+    userId: number,
+    accessibleLibraryIds: number[],
+    monthStart: Date,
+    sixMonthsAgo: Date,
+    contentFilters?: ContentFilterRules,
+  ): Promise<{
+    avgPageCount: number;
+    uniqueGenresLast6Months: number;
+    staleInProgressCount: number;
+    currentStreak: number;
+    topAuthorBookCount: number;
+    totalBooksRead: number;
+    pagesThisMonth: number;
+    shortBooksCompleted: number;
+    newGenresRead: number;
+    oldestInProgressFinished: boolean;
+    maxStreakThisMonth: number;
+    newAuthorsRead: number;
+    pagesReadThisMonth: number;
+    genresLast6Months: string[];
+    genresReadThisMonth: string[];
+    authorsReadThisMonth: string[];
+    readingDaysThisMonth: string[];
+  }> {
+    if (accessibleLibraryIds.length === 0) {
+      return {
+        avgPageCount: 0,
+        uniqueGenresLast6Months: 0,
+        staleInProgressCount: 0,
+        currentStreak: 0,
+        topAuthorBookCount: 0,
+        totalBooksRead: 0,
+        pagesThisMonth: 0,
+        shortBooksCompleted: 0,
+        newGenresRead: 0,
+        oldestInProgressFinished: false,
+        maxStreakThisMonth: 0,
+        newAuthorsRead: 0,
+        pagesReadThisMonth: 0,
+        genresLast6Months: [],
+        genresReadThisMonth: [],
+        authorsReadThisMonth: [],
+        readingDaysThisMonth: [],
+      };
+    }
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const libFilter = inArray(books.libraryId, accessibleLibraryIds);
+    const presentFilter = eq(books.status, 'present');
+
+    const authorCountsSubq = this.db
+      .select({ c: sql<number>`count(${userBookStatus.bookId})::int`.as('c') })
+      .from(userBookStatus)
+      .innerJoin(books, eq(books.id, userBookStatus.bookId))
+      .innerJoin(bookAuthors, eq(bookAuthors.bookId, books.id))
+      .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses))
+      .groupBy(bookAuthors.authorId)
+      .as('author_counts');
+
+    const [
+      [avgRow],
+      [genreRow],
+      [staleRow],
+      [authorRow],
+      [totalRow],
+      [pagesRow],
+      [shortRow],
+      [newGenreRow],
+      [newAuthorRow],
+      [sessionPagesKnownRow],
+      [sessionUnknownProgressRow],
+      [dailyProgressRow],
+      [finishedThisMonthRow],
+      thisMonthReadDays,
+    ] = await Promise.all([
+      this.db
+        .select({ avg: sql<number>`coalesce(avg(${bookMetadata.pageCount}), 0)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, sixMonthsAgo),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['reading', 'rereading']),
+            lt(userBookStatus.updatedAt, sixMonthsAgo),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db.select({ count: sql<number>`coalesce(max(${authorCountsSubq.c}), 0)::int` }).from(authorCountsSubq),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({ total: sql<number>`coalesce(sum(${bookMetadata.pageCount}), 0)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, monthStart),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, monthStart),
+            lt(bookMetadata.pageCount, 200),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, monthStart),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookAuthors.authorId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${authors.name}), ''))) filter (where nullif(trim(${authors.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookAuthors, eq(bookAuthors.bookId, books.id))
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, monthStart),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          total: sql<number>`floor(coalesce(sum(coalesce(${bookMetadata.pageCount}, 0) * least(greatest(coalesce(${readingSessions.progressDelta}, 0), 0), 100) / 100.0), 0))::int`,
+        })
+        .from(readingSessions)
+        .innerJoin(books, eq(books.id, readingSessions.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(readingSessions.userId, userId),
+            gte(readingSessions.startedAt, monthStart),
+            gt(readingSessions.progressDelta, 0),
+            isNotNull(bookMetadata.pageCount),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          totalProgress: sql<number>`coalesce(sum(least(greatest(coalesce(${readingSessions.progressDelta}, 0), 0), 100)), 0)::float`,
+        })
+        .from(readingSessions)
+        .innerJoin(books, eq(books.id, readingSessions.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(readingSessions.userId, userId),
+            gte(readingSessions.startedAt, monthStart),
+            gt(readingSessions.progressDelta, 0),
+            isNull(bookMetadata.pageCount),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          totalProgress: sql<number>`coalesce(sum(${userReadingDailyStats.progressDelta}), 0)::float`,
+        })
+        .from(userReadingDailyStats)
+        .where(
+          and(
+            eq(userReadingDailyStats.userId, userId),
+            inArray(userReadingDailyStats.libraryId, accessibleLibraryIds),
+            gte(userReadingDailyStats.day, formatDay(monthStart)),
+          ),
+        ),
+      // Any book finished this month — approximates whether the oldest in-progress book was cleared
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, monthStart),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      // Reading days within this month for max-streak computation
+      this.db
+        .select({ day: userReadingDailyStats.day })
+        .from(userReadingDailyStats)
+        .where(
+          and(
+            eq(userReadingDailyStats.userId, userId),
+            inArray(userReadingDailyStats.libraryId, accessibleLibraryIds),
+            gte(userReadingDailyStats.day, formatDay(monthStart)),
+            gt(userReadingDailyStats.readingSeconds, 0),
+          ),
+        )
+        .groupBy(userReadingDailyStats.day),
+    ]);
+
+    const streakData = await this.getReadingStreak(userId, accessibleLibraryIds, contentFilters);
+    const avgPageCount = avgRow?.avg ?? 0;
+    const inferredPageCount = avgPageCount > 0 ? avgPageCount : DEFAULT_VIRTUAL_PAGE_COUNT;
+    const pagesFromUnknownPageCountSessions = Math.floor(((sessionUnknownProgressRow?.totalProgress ?? 0) * inferredPageCount) / 100);
+    const pagesFromSessions = (sessionPagesKnownRow?.total ?? 0) + pagesFromUnknownPageCountSessions;
+    const pagesFromFinishedBooks = pagesRow?.total ?? 0;
+    const pagesFromDailyProgress = Math.floor(((dailyProgressRow?.totalProgress ?? 0) * avgPageCount) / 100);
+    const pagesReadThisMonth = Math.max(pagesFromSessions, pagesFromFinishedBooks, pagesFromDailyProgress, 0);
+    const maxStreakThisMonth = computeLongestStreak(new Set(thisMonthReadDays.map((r) => r.day)));
+
+    return {
+      avgPageCount,
+      uniqueGenresLast6Months: genreRow?.count ?? 0,
+      staleInProgressCount: staleRow?.count ?? 0,
+      currentStreak: streakData.currentStreak,
+      maxStreakThisMonth,
+      topAuthorBookCount: authorRow?.count ?? 0,
+      totalBooksRead: totalRow?.count ?? 0,
+      pagesThisMonth: pagesReadThisMonth,
+      shortBooksCompleted: shortRow?.count ?? 0,
+      newGenresRead: newGenreRow?.count ?? 0,
+      oldestInProgressFinished: (finishedThisMonthRow?.count ?? 0) > 0,
+      newAuthorsRead: newAuthorRow?.count ?? 0,
+      pagesReadThisMonth,
+      genresLast6Months: genreRow?.values ?? [],
+      genresReadThisMonth: newGenreRow?.values ?? [],
+      authorsReadThisMonth: newAuthorRow?.values ?? [],
+      readingDaysThisMonth: thisMonthReadDays.map((r) => r.day),
+    };
+  }
+
+  // ── Year Projection (raw data) ─────────────────────────────────
+
+  async getYearProjectionData(
+    userId: number,
+    accessibleLibraryIds: number[],
+    yearStart: Date,
+    thirtyDaysAgo: Date,
+    contentFilters?: ContentFilterRules,
+  ): Promise<{
+    booksCompletedYtd: number;
+    pagesReadLast30Days: number;
+    hoursReadLast30Days: number;
+    booksCompletedLast30Days: number;
+  }> {
+    if (accessibleLibraryIds.length === 0) {
+      return { booksCompletedYtd: 0, pagesReadLast30Days: 0, hoursReadLast30Days: 0, booksCompletedLast30Days: 0 };
+    }
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const libFilter = inArray(books.libraryId, accessibleLibraryIds);
+    const presentFilter = eq(books.status, 'present');
+
+    const [[ytdRow], [last30BooksRow], [last30ReadingRow]] = await Promise.all([
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, yearStart),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          count: sql<number>`count(*)::int`,
+          pages: sql<number>`coalesce(sum(${bookMetadata.pageCount}), 0)::int`,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(userBookStatus.userId, userId),
+            inArray(userBookStatus.status, ['read', 'skimmed']),
+            gte(userBookStatus.finishedAt, thirtyDaysAgo),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+          ),
+        ),
+      this.db
+        .select({
+          hours: sql<number>`coalesce(sum(${userReadingDailyStats.readingSeconds}), 0)::real / 3600`,
+        })
+        .from(userReadingDailyStats)
+        .where(
+          and(
+            eq(userReadingDailyStats.userId, userId),
+            inArray(userReadingDailyStats.libraryId, accessibleLibraryIds),
+            gte(userReadingDailyStats.day, thirtyDaysAgo.toISOString().slice(0, 10)),
+          ),
+        ),
+    ]);
+
+    return {
+      booksCompletedYtd: ytdRow?.count ?? 0,
+      pagesReadLast30Days: last30BooksRow?.pages ?? 0,
+      hoursReadLast30Days: last30ReadingRow?.hours ?? 0,
+      booksCompletedLast30Days: last30BooksRow?.count ?? 0,
+    };
+  }
+
+  // ── Neglected Gems ──────────────────────────────────────────────
+
+  async getNeglectedGems(
+    userId: number,
+    accessibleLibraryIds: number[],
+    today: Date,
+    contentFilters?: ContentFilterRules,
+  ): Promise<NeglectedGemsWidgetData> {
+    if (accessibleLibraryIds.length === 0) return { gems: [] };
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const booksAlreadyRead = this.db
+      .select({ bookId: userBookStatus.bookId })
+      .from(userBookStatus)
+      .where(and(eq(userBookStatus.userId, userId), inArray(userBookStatus.status, ['read', 'skimmed'])))
+      .as('already_read');
+
+    const rows = await this.db
+      .select({
+        bookId: books.id,
+        title: bookMetadata.title,
+        coverSource: bookMetadata.coverSource,
+        rating: userBookRatings.rating,
+        addedAt: books.addedAt,
+        genre: sql<
+          string | null
+        >`(select ${genres.name} from ${bookGenres} inner join ${genres} on ${genres.id} = ${bookGenres.genreId} where ${bookGenres.bookId} = ${books.id} limit 1)`,
+      })
+      .from(books)
+      .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .innerJoin(userBookRatings, and(eq(userBookRatings.bookId, books.id), eq(userBookRatings.userId, userId)))
+      .leftJoin(booksAlreadyRead, eq(booksAlreadyRead.bookId, books.id))
+      .where(
+        and(
+          inArray(books.libraryId, accessibleLibraryIds),
+          eq(books.status, 'present'),
+          gte(userBookRatings.rating, 4),
+          isNull(booksAlreadyRead.bookId),
+          ...cfClauses,
+        ),
+      )
+      .orderBy(books.addedAt)
+      .limit(5);
+
+    return {
+      gems: rows.map((r) => ({
+        bookId: r.bookId,
+        title: r.title,
+        hasCover: r.coverSource != null,
+        rating: r.rating!,
+        waitingDays: Math.floor((today.getTime() - new Date(r.addedAt).getTime()) / (1000 * 60 * 60 * 24)),
+        genre: r.genre,
+      })),
+    };
+  }
+
+  // ── Reading DNA (raw data) ──────────────────────────────────────
+
+  async getReadingDnaData(
+    userId: number,
+    accessibleLibraryIds: number[],
+    since: Date,
+    contentFilters?: ContentFilterRules,
+  ): Promise<{
+    avgPageCount: number;
+    uniqueGenres: number;
+    totalBooks: number;
+    readingDaysRatio: number;
+    peakHour: number;
+    avgPagesPerHour: number | null;
+    genresRead: string[];
+    readingDays: string[];
+    lookbackDays: number;
+    hourBuckets: { hour: number; totalSeconds: number }[];
+    pagesReadForSpeed: number;
+    secondsReadForSpeed: number;
+  }> {
+    if (accessibleLibraryIds.length === 0) {
+      return {
+        avgPageCount: 0,
+        uniqueGenres: 0,
+        totalBooks: 0,
+        readingDaysRatio: 0,
+        peakHour: 12,
+        avgPagesPerHour: null,
+        genresRead: [],
+        readingDays: [],
+        lookbackDays: 0,
+        hourBuckets: [],
+        pagesReadForSpeed: 0,
+        secondsReadForSpeed: 0,
+      };
+    }
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const libFilter = inArray(books.libraryId, accessibleLibraryIds);
+    const presentFilter = eq(books.status, 'present');
+
+    const [[statsRow], [genreRow], dailyRows, hourRows, [knownSpeedRow], [unknownSpeedRow]] = await Promise.all([
+      this.db
+        .select({
+          avg: sql<number>`coalesce(avg(${bookMetadata.pageCount}), 0)::int`,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+        .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({
+          day: userReadingDailyStats.day,
+          seconds: sql<number>`sum(${userReadingDailyStats.readingSeconds})::int`,
+        })
+        .from(userReadingDailyStats)
+        .where(
+          and(
+            eq(userReadingDailyStats.userId, userId),
+            inArray(userReadingDailyStats.libraryId, accessibleLibraryIds),
+            gte(userReadingDailyStats.day, since.toISOString().slice(0, 10)),
+          ),
+        )
+        .groupBy(userReadingDailyStats.day),
+      this.db
+        .select({
+          hour: sql<number>`extract(hour from ${readingSessions.startedAt})::int`,
+          total: sql<number>`sum(${readingSessions.durationSeconds})::int`,
+        })
+        .from(readingSessions)
+        .innerJoin(books, eq(books.id, readingSessions.bookId))
+        .where(and(eq(readingSessions.userId, userId), libFilter, presentFilter, ...cfClauses))
+        .groupBy(sql`extract(hour from ${readingSessions.startedAt})`)
+        .orderBy(desc(sql`sum(${readingSessions.durationSeconds})`)),
+      this.db
+        .select({
+          totalPages: sql<number>`coalesce(sum(${bookMetadata.pageCount} * ${readingSessions.progressDelta} / 100.0), 0)::float`,
+          totalSeconds: sql<number>`coalesce(sum(${readingSessions.durationSeconds}), 0)::float`,
+        })
+        .from(readingSessions)
+        .innerJoin(books, eq(books.id, readingSessions.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(readingSessions.userId, userId),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+            gte(readingSessions.startedAt, since),
+            isNotNull(readingSessions.progressDelta),
+            gt(readingSessions.progressDelta, 0),
+            sql`${readingSessions.progressDelta} <= 100`,
+            gt(readingSessions.durationSeconds, 0),
+            isNotNull(bookMetadata.pageCount),
+            gt(bookMetadata.pageCount, 0),
+          ),
+        ),
+      this.db
+        .select({
+          totalProgress: sql<number>`coalesce(sum(${readingSessions.progressDelta}), 0)::float`,
+          totalSeconds: sql<number>`coalesce(sum(${readingSessions.durationSeconds}), 0)::float`,
+        })
+        .from(readingSessions)
+        .innerJoin(books, eq(books.id, readingSessions.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(
+          and(
+            eq(readingSessions.userId, userId),
+            libFilter,
+            presentFilter,
+            ...cfClauses,
+            gte(readingSessions.startedAt, since),
+            isNotNull(readingSessions.progressDelta),
+            gt(readingSessions.progressDelta, 0),
+            sql`${readingSessions.progressDelta} <= 100`,
+            gt(readingSessions.durationSeconds, 0),
+            isNull(bookMetadata.pageCount),
+          ),
+        ),
+    ]);
+
+    const daysSinceLookback = Math.max(1, Math.ceil((Date.now() - since.getTime()) / (1000 * 60 * 60 * 24)));
+    const activeDays = dailyRows.filter((r) => r.seconds > 0).length;
+    const inferredPageCount = (statsRow?.avg ?? 0) > 0 ? (statsRow?.avg ?? 0) : DEFAULT_VIRTUAL_PAGE_COUNT;
+    const pagesFromKnownSpeed = knownSpeedRow?.totalPages ?? 0;
+    const pagesFromUnknownSpeed = ((unknownSpeedRow?.totalProgress ?? 0) * inferredPageCount) / 100;
+    const speedSeconds = (knownSpeedRow?.totalSeconds ?? 0) + (unknownSpeedRow?.totalSeconds ?? 0);
+    const speedPages = pagesFromKnownSpeed + pagesFromUnknownSpeed;
+    const avgPagesPerHour = speedSeconds > 0 ? (pagesFromKnownSpeed + pagesFromUnknownSpeed) / (speedSeconds / 3600) : null;
+    const hourBuckets = hourRows.map((row) => ({ hour: row.hour, totalSeconds: row.total }));
+
+    return {
+      avgPageCount: statsRow?.avg ?? 0,
+      uniqueGenres: genreRow?.count ?? 0,
+      totalBooks: statsRow?.total ?? 0,
+      readingDaysRatio: activeDays / daysSinceLookback,
+      peakHour: hourBuckets[0]?.hour ?? 12,
+      avgPagesPerHour,
+      genresRead: genreRow?.values ?? [],
+      readingDays: dailyRows.filter((r) => r.seconds > 0).map((r) => r.day),
+      lookbackDays: daysSinceLookback,
+      hourBuckets,
+      pagesReadForSpeed: speedPages,
+      secondsReadForSpeed: speedSeconds,
+    };
+  }
+
+  // ── The Long Wait ───────────────────────────────────────────────
+
+  async getLongWait(
+    userId: number,
+    accessibleLibraryIds: number[],
+    today: Date,
+    contentFilters?: ContentFilterRules,
+  ): Promise<LongWaitWidgetData | null> {
+    if (accessibleLibraryIds.length === 0) return null;
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const booksWithProgress = this.db
+      .select({ bookId: bookFiles.bookId })
+      .from(readingProgress)
+      .innerJoin(bookFiles, eq(bookFiles.id, readingProgress.bookFileId))
+      .where(eq(readingProgress.userId, userId))
+      .as('with_progress');
+
+    const booksWithStatus = this.db
+      .select({ bookId: userBookStatus.bookId })
+      .from(userBookStatus)
+      .where(and(eq(userBookStatus.userId, userId), notInArray(userBookStatus.status, ['unread'])))
+      .as('with_status');
+
+    const rows = await this.db
+      .select({
+        bookId: books.id,
+        title: bookMetadata.title,
+        coverSource: bookMetadata.coverSource,
+        addedAt: books.addedAt,
+        pageCount: bookMetadata.pageCount,
+        genre: sql<
+          string | null
+        >`(select ${genres.name} from ${bookGenres} inner join ${genres} on ${genres.id} = ${bookGenres.genreId} where ${bookGenres.bookId} = ${books.id} limit 1)`,
+        fileId: bookFiles.id,
+        fileFormat: bookFiles.format,
+      })
+      .from(books)
+      .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .leftJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+      .leftJoin(booksWithProgress, eq(booksWithProgress.bookId, books.id))
+      .leftJoin(booksWithStatus, eq(booksWithStatus.bookId, books.id))
+      .where(
+        and(
+          inArray(books.libraryId, accessibleLibraryIds),
+          eq(books.status, 'present'),
+          isNull(booksWithProgress.bookId),
+          isNull(booksWithStatus.bookId),
+          ...cfClauses,
+        ),
+      )
+      .orderBy(books.addedAt)
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) return null;
+
+    return {
+      bookId: row.bookId,
+      title: row.title,
+      hasCover: row.coverSource != null,
+      addedAt: row.addedAt.toISOString(),
+      waitingDays: Math.floor((today.getTime() - new Date(row.addedAt).getTime()) / (1000 * 60 * 60 * 24)),
+      pageCount: row.pageCount,
+      genre: row.genre,
+      fileId: row.fileId ?? null,
+      fileFormat: row.fileFormat ?? null,
+    };
+  }
+
+  // ── Shelf Diversity Score (raw data) ────────────────────────────
+
+  async getDiversityData(
+    userId: number,
+    accessibleLibraryIds: number[],
+    contentFilters?: ContentFilterRules,
+  ): Promise<{
+    uniqueGenresRead: number;
+    totalGenresInLibrary: number;
+    uniqueAuthorsRead: number;
+    totalBooksRead: number;
+    publicationYears: number[];
+    uniqueLanguages: number;
+    genresRead: string[];
+    genresInLibrary: string[];
+    authorsRead: string[];
+    languagesRead: string[];
+  }> {
+    if (accessibleLibraryIds.length === 0) {
+      return {
+        uniqueGenresRead: 0,
+        totalGenresInLibrary: 0,
+        uniqueAuthorsRead: 0,
+        totalBooksRead: 0,
+        publicationYears: [],
+        uniqueLanguages: 0,
+        genresRead: [],
+        genresInLibrary: [],
+        authorsRead: [],
+        languagesRead: [],
+      };
+    }
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    const libFilter = inArray(books.libraryId, accessibleLibraryIds);
+    const presentFilter = eq(books.status, 'present');
+    const readFilter = and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'));
+
+    const [[genresReadRow], [totalGenresRow], [authorsRow], [booksRow], yearRows, [langRow]] = await Promise.all([
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+        .where(and(readFilter, libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
+        .from(bookGenres)
+        .innerJoin(books, eq(books.id, bookGenres.bookId))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+        .where(and(libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({
+          count: sql<number>`count(distinct ${bookAuthors.authorId})::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${authors.name}), ''))) filter (where nullif(trim(${authors.name}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookAuthors, eq(bookAuthors.bookId, books.id))
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(and(readFilter, libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .where(and(readFilter, libFilter, presentFilter, ...cfClauses)),
+      this.db
+        .select({ year: bookMetadata.publishedYear })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(and(readFilter, libFilter, presentFilter, isNotNull(bookMetadata.publishedYear), ...cfClauses)),
+      this.db
+        .select({
+          count: sql<number>`count(distinct lower(nullif(trim(${bookMetadata.language}), '')))::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${bookMetadata.language}), ''))) filter (where nullif(trim(${bookMetadata.language}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
+        .from(userBookStatus)
+        .innerJoin(books, eq(books.id, userBookStatus.bookId))
+        .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(and(readFilter, libFilter, presentFilter, isNotNull(bookMetadata.language), ...cfClauses)),
+    ]);
+
+    return {
+      uniqueGenresRead: genresReadRow?.count ?? 0,
+      totalGenresInLibrary: totalGenresRow?.count ?? 0,
+      uniqueAuthorsRead: authorsRow?.count ?? 0,
+      totalBooksRead: booksRow?.count ?? 0,
+      publicationYears: yearRows.map((r) => r.year!),
+      uniqueLanguages: langRow?.count ?? 0,
+      genresRead: stringArrayValue(genresReadRow?.values),
+      genresInLibrary: stringArrayValue(totalGenresRow?.values),
+      authorsRead: stringArrayValue(authorsRow?.values),
+      languagesRead: stringArrayValue(langRow?.values),
+    };
+  }
+
+  // ── Reading Rhythm (raw daily data) ─────────────────────────────
+
+  async getReadingRhythmData(
+    userId: number,
+    accessibleLibraryIds: number[],
+    since: string,
+    contentFilters?: ContentFilterRules,
+  ): Promise<{ day: string; readingSeconds: number }[]> {
+    void contentFilters;
+    if (accessibleLibraryIds.length === 0) return [];
+
+    const rows = await this.db
+      .select({
+        day: userReadingDailyStats.day,
+        readingSeconds: sql<number>`sum(${userReadingDailyStats.readingSeconds})::int`,
+      })
+      .from(userReadingDailyStats)
+      .where(
+        and(
+          eq(userReadingDailyStats.userId, userId),
+          inArray(userReadingDailyStats.libraryId, accessibleLibraryIds),
+          gte(userReadingDailyStats.day, since),
+        ),
+      )
+      .groupBy(userReadingDailyStats.day)
+      .orderBy(userReadingDailyStats.day);
+
+    return rows;
+  }
+}
+
+function stringArrayValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter((item) => item.length > 0);
+}

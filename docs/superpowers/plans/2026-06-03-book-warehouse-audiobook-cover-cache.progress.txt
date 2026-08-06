@@ -1,0 +1,21 @@
+Feature: Persistent catalog audiobook cover cache
+Status: Complete
+Started: 2026-06-03
+Completed: 2026-06-03
+
+Ralph loop:
+- Baseline before edits: previous loop completed with clean worktree and `pnpm run verify` passing.
+- RED: Added service-level test proving cached audiobook covers are returned only after current-user catalog state verification and without live client calls.
+- GREEN: Extended `WarehouseCatalogCoverCacheService` with audiobook cover read/write methods and wrapped `getAudiobookCover` with user-authorized read-through/write-through cache behavior.
+- Hardening: Reused credential-scoped hashed cache keys, raster-only persistence, checksum validation, stream-safe write-through behavior, and filename stripping from the ebook cache implementation.
+- Regression coverage: Added direct cache-service test proving audiobook cover bytes persist under an audiobook media namespace and do not collide with ebook cache entries.
+- Review checkpoint: Privacy/spec reviewer approved authorization order, source-key stripping, hashed cache paths, filename stripping, and live-only streams/downloads.
+- Review checkpoint: Code-quality reviewer approved generic cache methods, fetcher typing, live fallback behavior, and range/file-id request shapes.
+- Focused verification: `pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse-catalog-cover-cache.service.test.ts` passed.
+- Type verification: `pnpm run typecheck` passed.
+- Lint verification: `pnpm --filter server lint:check` passed.
+
+Notes:
+- Cached audiobook covers use the same filesystem cache root as ebook covers but a separate `audiobook` media namespace.
+- Cached audiobook cover reads happen only after `audiobookBinaryRequest` verifies settings, cached catalog item existence, and current-user `inLibrary` state.
+- Audiobook stream, download, and file-download routes remain live binary proxy paths and do not use the cover cache.

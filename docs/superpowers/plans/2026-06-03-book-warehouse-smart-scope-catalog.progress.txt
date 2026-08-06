@@ -1,0 +1,30 @@
+Book Warehouse Smart Scope Catalog Progress
+2026-06-03
+
+Completed:
+- Task 1: Owned catalog Smart Scope query.
+  - Added `WarehouseRepository.queryUserCatalogItems` for current-user-owned catalog items.
+  - Supports a conservative subset of Smart Scope rules for catalog metadata: title, author, publisher, series, language, format, and cover presence.
+  - Unsupported local-book-only rules return an empty catalog page rather than leaking broad matches.
+  - Focused repository tests passed.
+- Task 2: Smart Scope catalog preview API.
+  - Added `SmartScopeCatalogItemsPage` shared type.
+  - Added `SmartScopeService.queryCatalogItems` with existing Smart Scope read-access checks and combined saved/request filters.
+  - Added `POST /api/v1/smart-scopes/:id/catalog-items/query`.
+  - Focused service and controller tests passed.
+- Task 3: Native Smart Scope preview UI.
+  - Added `useSmartScopeCatalogItems` and `SmartScopeCatalogPreview`.
+  - Smart Scope pages now show a read-only Catalog Matches strip above the local book results when saved rules match owned catalog items.
+  - Catalog match clicks route to the native catalog detail page and do not participate in local book bulk actions.
+
+Latest verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse.repository.test.ts src/modules/smart-scope/smart-scope.service.test.ts src/modules/smart-scope/smart-scope.controller.test.ts => 3 files / 70 tests passed
+- pnpm --filter client exec vitest run src/features/smart-scope/composables/__tests__/useSmartScopeCatalogItems.spec.ts src/features/smart-scope/components/__tests__/SmartScopeCatalogPreview.spec.ts => 2 files / 5 tests passed
+- pnpm run typecheck => passed
+- Targeted Smart Scope visible-copy guard => passed
+- pnpm run verify => passed; server 485 files / 6068 tests, client 195 files / 2206 tests
+- pnpm run build:client => passed
+- Vite dev-server HTTP smoke at http://localhost:5173/ => 200 with root app and module entry present
+
+Next:
+- Commit this loop, then select the next highest-priority parity feature.

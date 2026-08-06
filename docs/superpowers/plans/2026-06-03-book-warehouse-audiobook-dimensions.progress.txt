@@ -1,0 +1,14 @@
+Feature: Catalog audiobook browse dimensions
+Date: 2026-06-03
+
+Ralph loop:
+- Baseline: clean tree and previous full `pnpm run verify` passed before this loop.
+- RED: Added controller, service, and repository tests for audiobook author, series, and narrator dimensions derived from local catalog rows.
+- GREEN: Added shared dimension DTOs, local-cache repository aggregation, service mapping to opaque name-based IDs, and literal catalog routes before remote-id routes.
+- Review checkpoint: subagent review identified route-order risk, local-only/privacy constraints, and JSONB aggregation performance bounds; implementation keeps the slice bounded to 100 local dimension rows and avoids genre endpoints until genre sync is populated.
+- Focused verification: `pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.controller.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse.repository.test.ts` passed.
+- Type/lint verification: `pnpm run typecheck` and `pnpm --filter server lint:check` passed.
+
+Privacy notes:
+- Dimension responses expose only local display names, opaque URL-encoded IDs, and item counts.
+- No raw payloads, upstream/source identifiers, provider URLs, request IDs, or credentials are returned.

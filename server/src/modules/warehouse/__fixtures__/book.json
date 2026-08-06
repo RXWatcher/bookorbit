@@ -1,0 +1,9 @@
+{
+  "id": "book-1",
+  "title": "The Test Book",
+  "author": "Ada Writer",
+  "format": "EPUB",
+  "language": "en",
+  "series": "Foundation Tests",
+  "has_cover": true
+}

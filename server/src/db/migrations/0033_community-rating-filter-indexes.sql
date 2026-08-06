@@ -1,0 +1,2 @@
+CREATE INDEX "book_community_ratings_rating_book_idx" ON "book_community_ratings" USING btree ("rating","book_id");--> statement-breakpoint
+CREATE INDEX "book_community_ratings_provider_rating_book_idx" ON "book_community_ratings" USING btree ("provider","rating","book_id");

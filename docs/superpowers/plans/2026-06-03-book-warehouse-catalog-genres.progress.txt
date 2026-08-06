@@ -1,0 +1,14 @@
+Feature: Catalog genre dimensions
+Date: 2026-06-03
+
+Ralph loop:
+- Baseline: previous full `pnpm run verify` passed and the worktree was clean after the audiobook dimensions commit.
+- RED: Added mapper, controller, service, and repository tests for genre extraction, genre dimensions, and genre-filtered ebook/audiobook listings.
+- GREEN: Preserved safe genre/tag arrays during catalog mapping, added local genre dimension aggregation, and exposed native ebook/audiobook genre routes before remote-id routes.
+- Review checkpoint: follows the previous dimensions review guidance by using literal routes, local-cache-only SQL, bounded dimension results, and provider-free DTOs.
+- Focused verification: `pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.mapper.test.ts src/modules/warehouse/warehouse-catalog.controller.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse.repository.test.ts` passed.
+- Type/lint verification: `pnpm run typecheck` and `pnpm --filter server lint:check` passed.
+
+Privacy notes:
+- Genre responses contain only display names, URL-encoded local IDs, and counts.
+- Catalog mapping still preserves raw payloads internally, but public genre endpoints do not return raw payloads, source IDs, provider URLs, request IDs, or credentials.
