@@ -895,18 +895,14 @@ export class OpdsBookService {
     contentFilters?: ContentFilterRules,
     q?: string,
   ): Promise<{ entries: OpdsBookEntry[]; total: number }> {
-    const [smartScope] = await this.db.select().from(smartScopes).where(eq(smartScopes.id, smartScopeId)).limit(1);
+    // One read of the scope row, then the shared predicate. OPDS browsing adds
+    // explicit library scoping and merges in warehouse catalog items; the
+    // catalog/manifest endpoints use the same predicate via buildSmartScopeWhere.
+    const smartScope = await this.loadReadableSmartScope(userId, smartScopeId);
     if (!smartScope) return { entries: [], total: 0 };
-    if (!smartScope.isPublic && smartScope.userId !== userId) return { entries: [], total: 0 };
+    const localWhere = this.smartScopeWhere(smartScope, userId, accessibleIds, contentFilters, q);
 
-    const where = this.queryBuilder.buildWhere(smartScope.filter as GroupRule | null, {
-      accessibleLibraryIds: accessibleIds,
-      userId,
-      contentFilters,
-    });
-    const statusClause = eq(books.status, 'present');
-    const searchClause = q ? this.buildCatalogSearchClause(q) : undefined;
-    const localClauses = [where, accessibleIds.length > 0 ? inArray(books.libraryId, accessibleIds) : undefined, statusClause, searchClause].filter(
+    const localClauses = [localWhere, accessibleIds.length > 0 ? inArray(books.libraryId, accessibleIds) : undefined].filter(
       (clause): clause is SQL => clause !== undefined,
     );
     const canIncludeCatalog = this.warehouseCatalog && this.warehouseRepository && (await this.warehouseCatalog.isCatalogEnabled());
@@ -1341,17 +1337,26 @@ export class OpdsBookService {
       .sort((a, b) => (idOrder.get(a.id) ?? 0) - (idOrder.get(b.id) ?? 0));
   }
 
-  private async buildSmartScopeWhere(
-    userId: number,
-    smartScopeId: number,
-    accessibleIds: number[],
-    contentFilters?: ContentFilterRules,
-    q?: string,
-  ): Promise<SQL | null> {
+  /** Loads a smart scope if the user may read it, else null. */
+  private async loadReadableSmartScope(userId: number, smartScopeId: number) {
     const [smartScope] = await this.db.select().from(smartScopes).where(eq(smartScopes.id, smartScopeId)).limit(1);
     if (!smartScope) return null;
     if (!smartScope.isPublic && smartScope.userId !== userId) return null;
+    return smartScope;
+  }
 
+  /**
+   * The local-books predicate for a smart scope. This is the single definition
+   * of what a scope selects; callers that also need the scope row should use
+   * loadReadableSmartScope and pass it in, so the row is read only once.
+   */
+  private smartScopeWhere(
+    smartScope: { filter: unknown },
+    userId: number,
+    accessibleIds: number[],
+    contentFilters?: ContentFilterRules,
+    q?: string,
+  ): SQL {
     const where = this.queryBuilder.buildWhere(smartScope.filter as GroupRule | null, {
       accessibleLibraryIds: accessibleIds,
       userId,
@@ -1360,6 +1365,18 @@ export class OpdsBookService {
     const statusClause = eq(books.status, 'present');
     const searchClause = q?.trim() ? this.buildCatalogSearchClause(q) : undefined;
     return and(...([where, statusClause, searchClause].filter(Boolean) as SQL[]))!;
+  }
+
+  private async buildSmartScopeWhere(
+    userId: number,
+    smartScopeId: number,
+    accessibleIds: number[],
+    contentFilters?: ContentFilterRules,
+    q?: string,
+  ): Promise<SQL | null> {
+    const smartScope = await this.loadReadableSmartScope(userId, smartScopeId);
+    if (!smartScope) return null;
+    return this.smartScopeWhere(smartScope, userId, accessibleIds, contentFilters, q);
   }
 
   private async buildCatalogScope(
