@@ -6126,6 +6126,9 @@
       "widePages": "Wide pages",
       "firstPage": "First page",
       "lastPage": "Last page",
+      "zoomControls": "Zoom controls",
+      "zoomOut": "Zoom out",
+      "zoomIn": "Zoom in",
       "fit": {
         "page": "Page Fit",
         "width": "Page Width",
