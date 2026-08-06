@@ -4735,6 +4735,10 @@
       "cover": "Cover",
       "bookCover": "Book cover"
     },
+    "libraryLoad": {
+      "errorTitle": "Unable to load your libraries",
+      "errorDescription": "BookOrbit could not retrieve your libraries. Your library data has not been removed."
+    },
     "scroller": {
       "failedToLoad": "Failed to load.",
       "empty": {
