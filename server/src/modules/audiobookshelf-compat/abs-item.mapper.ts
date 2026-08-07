@@ -100,6 +100,13 @@ export function mapAbsLibraryItemsPage(libraryId: number, page: AbsLibraryItemsP
           subtitle: item.subtitle ?? null,
           authors: item.authors,
           narrators: item.narrators,
+          // Null because BookCard genuinely has no duration — it lives on
+          // AudioMetadata, which the browse projection does not carry. The
+          // effect is real though: source-backed audiobooks reach
+          // Audiobookshelf clients with no length, so they can show neither a
+          // duration nor a progress position. Fixing it means threading
+          // durationSeconds from warehouse_catalog_items (where all 184,500
+          // rows have it) into this projection, not a change here.
           durationSeconds: null,
           hasCover: item.hasCover,
         });
