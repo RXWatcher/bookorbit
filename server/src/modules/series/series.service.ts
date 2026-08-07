@@ -351,7 +351,11 @@ export class SeriesService {
     const warehouseIndices = warehousePage.items
       .map((item) => item.seriesIndex)
       .filter((index): index is number => typeof index === 'number' && Number.isFinite(index));
-    const possibleGaps = this.computeGaps([...(detail?.indices ?? []), ...warehouseIndices], detail?.bookCount ?? 0, detail?.expectedBookCount ?? null);
+    const possibleGaps = this.computeGaps(
+      [...(detail?.indices ?? []), ...warehouseIndices],
+      detail?.bookCount ?? 0,
+      detail?.expectedBookCount ?? null,
+    );
 
     let items: BooksPage['items'] = [];
     if (bookPage.bookIds.length > 0) {

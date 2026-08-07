@@ -400,12 +400,12 @@ function clearFilters(): void {
             <button
               v-if="catalogSeriesLink(item)"
               type="button"
-              class="mt-0.5 max-w-full truncate text-xs text-muted-foreground/80 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              class="mt-0.5 max-w-full truncate text-xs text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               @click.stop="openSeries(catalogSeriesLink(item)!)"
             >
               {{ catalogSeriesName(item) }}
             </button>
-            <p v-else-if="detailLabel(item)" class="mt-0.5 line-clamp-1 text-xs text-muted-foreground/80">{{ detailLabel(item) }}</p>
+            <p v-else-if="detailLabel(item)" class="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{{ detailLabel(item) }}</p>
           </div>
         </div>
       </section>
@@ -461,12 +461,12 @@ function clearFilters(): void {
             <button
               v-if="catalogSeriesLink(item)"
               type="button"
-              class="max-w-full truncate text-left text-xs text-muted-foreground/80 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              class="max-w-full truncate text-left text-xs text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               @click.stop="openSeries(catalogSeriesLink(item)!)"
             >
               {{ catalogSeriesName(item) }}
             </button>
-            <p v-else-if="detailLabel(item)" class="truncate text-xs text-muted-foreground/80">{{ detailLabel(item) }}</p>
+            <p v-else-if="detailLabel(item)" class="truncate text-xs text-muted-foreground">{{ detailLabel(item) }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-1.5">
               <span
                 v-if="formatLabel(item)"

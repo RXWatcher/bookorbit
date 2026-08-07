@@ -2,7 +2,6 @@ import { onMounted, ref } from 'vue'
 
 import {
   DASHBOARD_SCROLLER_BATCH_MAX,
-  type BookCard,
   type DashboardScrollerBatchRequest,
   type DashboardScrollerBatchResponse,
   type DashboardScrollerBatchResult,

@@ -4607,7 +4607,7 @@
       },
       "tagline": "Personal reading library",
       "supportShort": "Support",
-      "libraryScanning": "{name} — scanning {pct}%"
+      "libraryScanning": "{name} - scanning {pct}%"
     },
     "selectionActionBar": {
       "setReadingStatus": "Set reading status",

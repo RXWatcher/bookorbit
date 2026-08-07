@@ -228,7 +228,7 @@ onUnmounted(() => stopLibraryUploadListener())
           <span class="text-lg font-serif font-semibold text-sidebar-foreground leading-tight tracking-tight">
             Book<span class="text-primary"> Orbit</span>
           </span>
-          <span class="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-sidebar-foreground/65">{{ t('components.sidebar.tagline') }}</span>
+          <span class="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-sidebar-foreground">{{ t('components.sidebar.tagline') }}</span>
         </div>
       </div>
     </SidebarHeader>
@@ -340,13 +340,13 @@ onUnmounted(() => stopLibraryUploadListener())
                     </span>
                     <span
                       v-else-if="lib.bookCount !== undefined"
-                      class="ml-auto shrink-0 rounded-md bg-sidebar-foreground/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sidebar-foreground/80 transition-colors group-data-[active=true]/item:bg-primary/20 group-data-[active=true]/item:text-primary group-data-[collapsible=icon]:hidden"
+                      class="ml-auto shrink-0 rounded-md bg-sidebar-foreground/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sidebar-foreground transition-colors group-data-[active=true]/item:bg-primary/20 group-data-[active=true]/item:text-primary group-data-[collapsible=icon]:hidden"
                     >
                       {{ formatNumber(lib.bookCount) }}
                     </span>
                     <Icons.GripVertical
                       v-if="isReorderingLibraries"
-                      class="drag-handle ml-1 h-3.5 w-3.5 shrink-0 cursor-grab text-primary/60 group-data-[collapsible=icon]:hidden"
+                      class="drag-handle ml-1 h-3.5 w-3.5 shrink-0 cursor-grab text-primary group-data-[collapsible=icon]:hidden"
                       @click.stop
                     />
                   </template>
@@ -362,7 +362,7 @@ onUnmounted(() => stopLibraryUploadListener())
                             }"
                           />
                         </div>
-                        <p class="mt-0.5 text-[10px] text-sidebar-foreground/45">
+                        <p class="mt-0.5 text-[10px] text-sidebar-foreground">
                           {{
                             t('components.sidebar.scanProgress', {
                               processed: formatNumber(getProgress(lib.id)!.processed),
@@ -424,20 +424,20 @@ onUnmounted(() => stopLibraryUploadListener())
                   <template #badge>
                     <span
                       v-if="smartScope.bookCount != null && smartScope.bookCount > 0"
-                      class="ml-auto shrink-0 rounded-md bg-sidebar-foreground/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sidebar-foreground/80 transition-colors group-data-[active=true]/item:bg-primary/20 group-data-[active=true]/item:text-primary group-data-[collapsible=icon]:hidden"
+                      class="ml-auto shrink-0 rounded-md bg-sidebar-foreground/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sidebar-foreground transition-colors group-data-[active=true]/item:bg-primary/20 group-data-[active=true]/item:text-primary group-data-[collapsible=icon]:hidden"
                     >
                       {{ formatNumber(smartScope.bookCount) }}
                     </span>
                     <Icons.GripVertical
                       v-if="isReorderingSmartScopes"
-                      class="drag-handle ml-1 h-3.5 w-3.5 shrink-0 cursor-grab text-primary/60 group-data-[collapsible=icon]:hidden"
+                      class="drag-handle ml-1 h-3.5 w-3.5 shrink-0 cursor-grab text-primary group-data-[collapsible=icon]:hidden"
                       @click.stop
                     />
                   </template>
                 </SidebarNavItem>
               </VueDraggable>
               <div v-if="localSmartScopes.length === 0">
-                <span class="px-2 py-1 text-[11px] text-sidebar-foreground/40 group-data-[collapsible=icon]:hidden">{{
+                <span class="px-2 py-1 text-[11px] text-sidebar-foreground group-data-[collapsible=icon]:hidden">{{
                   t('components.sidebar.noSmartScopes')
                 }}</span>
               </div>
@@ -490,20 +490,20 @@ onUnmounted(() => stopLibraryUploadListener())
                   <template #badge>
                     <span
                       v-if="collection.bookCount > 0"
-                      class="ml-auto shrink-0 rounded-md bg-sidebar-foreground/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sidebar-foreground/80 transition-colors group-data-[active=true]/item:bg-primary/20 group-data-[active=true]/item:text-primary group-data-[collapsible=icon]:hidden"
+                      class="ml-auto shrink-0 rounded-md bg-sidebar-foreground/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sidebar-foreground transition-colors group-data-[active=true]/item:bg-primary/20 group-data-[active=true]/item:text-primary group-data-[collapsible=icon]:hidden"
                     >
                       {{ formatNumber(collection.bookCount) }}
                     </span>
                     <Icons.GripVertical
                       v-if="isReorderingCollections"
-                      class="drag-handle ml-1 h-3.5 w-3.5 shrink-0 cursor-grab text-primary/60 group-data-[collapsible=icon]:hidden"
+                      class="drag-handle ml-1 h-3.5 w-3.5 shrink-0 cursor-grab text-primary group-data-[collapsible=icon]:hidden"
                       @click.stop
                     />
                   </template>
                 </SidebarNavItem>
               </VueDraggable>
               <div v-if="localCollections.length === 0">
-                <span class="px-2 py-1 text-[11px] text-sidebar-foreground/40 group-data-[collapsible=icon]:hidden">{{
+                <span class="px-2 py-1 text-[11px] text-sidebar-foreground group-data-[collapsible=icon]:hidden">{{
                   t('components.sidebar.noCollections')
                 }}</span>
               </div>
@@ -522,7 +522,7 @@ onUnmounted(() => stopLibraryUploadListener())
               target="_blank"
               rel="noopener noreferrer"
               :aria-label="t('components.sidebar.supportAria')"
-              class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sidebar-border/60 text-primary transition-colors hover:bg-primary/8 hover:text-primary/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sidebar-border/60 text-primary transition-colors hover:bg-primary/8 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             >
               <Icons.Heart class="h-4 w-4 fill-primary/20" aria-hidden="true" />
             </a>
@@ -533,7 +533,7 @@ onUnmounted(() => stopLibraryUploadListener())
 
       <div class="px-2 py-2 group-data-[collapsible=icon]:hidden">
         <div
-          class="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-[12px] font-medium leading-none text-sidebar-foreground/80"
+          class="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-[12px] font-medium leading-none text-sidebar-foreground"
         >
           <RouterLink
             v-if="versionUi.currentLabel"
@@ -548,14 +548,14 @@ onUnmounted(() => stopLibraryUploadListener())
             />
           </RouterLink>
 
-          <span v-if="versionUi.currentLabel" class="text-sidebar-foreground/45">•</span>
+          <span v-if="versionUi.currentLabel" class="text-sidebar-foreground">•</span>
 
           <a
             :href="supportUrl"
             target="_blank"
             rel="noopener noreferrer"
             :aria-label="t('components.sidebar.supportAria')"
-            class="inline-flex shrink-0 items-center gap-1.5 text-sidebar-foreground/85 transition-colors hover:text-primary"
+            class="inline-flex shrink-0 items-center gap-1.5 text-sidebar-foreground transition-colors hover:text-primary"
           >
             <Icons.Heart class="h-3.5 w-3.5 fill-primary/20 text-primary" aria-hidden="true" />
             <span>{{ t('components.sidebar.supportShort') }}</span>
@@ -565,14 +565,14 @@ onUnmounted(() => stopLibraryUploadListener())
                latestLabel: SidebarVersionUi was refactored to a single update
                pill and the template kept the old names, so `v-if` read
                undefined and the update indicator never rendered at all. -->
-          <span v-if="versionUi.showUpdate" class="text-sidebar-foreground/45">•</span>
+          <span v-if="versionUi.showUpdate" class="text-sidebar-foreground">•</span>
 
           <a
             v-if="versionUi.showUpdate"
             :href="versionUi.updateHref"
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex min-w-0 max-w-full font-semibold text-primary transition-colors hover:text-primary/85"
+            class="inline-flex min-w-0 max-w-full font-semibold text-primary transition-colors hover:text-primary"
           >
             <span class="truncate">Latest {{ versionUi.updateVersionLabel }}</span>
           </a>

@@ -317,7 +317,7 @@ function removeNode(index: number) {
 function onFieldChange(index: number) {
   const node = nodes.value[index]
   if (node?.kind !== 'rule') return
-  const validOps = operatorsForField(node.rule.field)
+  const validOps = operatorOptions(node.rule.field)
   if (!validOps.includes(node.rule.operator)) {
     node.rule.operator = validOps[0]!
   }
@@ -480,7 +480,7 @@ function showValueToInput(operator: RuleOperator): boolean {
           @change="onOperatorChange(index)"
           class="h-9 rounded-md border border-input bg-background text-foreground text-sm px-2 focus:outline-none focus:ring-2 focus:ring-primary shrink-0"
         >
-          <option v-for="op in operatorsForField(node.rule.field)" :key="op" :value="op">{{ operatorLabel(op) }}</option>
+          <option v-for="op in operatorOptions(node.rule.field)" :key="op" :value="op">{{ operatorLabel(op) }}</option>
         </select>
 
         <div

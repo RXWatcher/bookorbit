@@ -108,7 +108,7 @@ function detailLabel(item: DashboardCatalogItem): string {
         </div>
         <p class="mt-2 line-clamp-2 text-[12px] font-semibold leading-snug text-foreground">{{ item.title }}</p>
         <p v-if="creatorsLabel(item)" class="mt-0.5 truncate text-[11px] text-muted-foreground">{{ creatorsLabel(item) }}</p>
-        <p class="mt-0.5 truncate text-[11px] text-muted-foreground/80">{{ detailLabel(item) }}</p>
+        <p class="mt-0.5 truncate text-[11px] text-muted-foreground">{{ detailLabel(item) }}</p>
       </div>
     </div>
     <CatalogItemQuickView :item="quickViewItem" :open="quickViewOpen" @update:open="quickViewOpen = $event" />

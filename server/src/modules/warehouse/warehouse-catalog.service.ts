@@ -58,11 +58,7 @@ import { jumpBucketKindForSort } from '@bookorbit/types';
 
 import type { RequestUser } from '../../common/types/request-user';
 import type { WarehouseCatalogItemRow } from '../../db/schema';
-import {
-  mapWarehouseAudiobookCatalogItemRow,
-  mapWarehouseAudiobookDetail,
-  mapWarehouseEbookCatalogItemRow,
-} from './warehouse-catalog.mapper';
+import { mapWarehouseAudiobookCatalogItemRow, mapWarehouseAudiobookDetail, mapWarehouseEbookCatalogItemRow } from './warehouse-catalog.mapper';
 import { WarehouseClientService, type WarehouseBinaryResponse } from './warehouse-client.service';
 import { WarehouseCatalogCoverCacheService } from './warehouse-catalog-cover-cache.service';
 import { catalogAuthorRefs, catalogSeriesRef } from './catalog-link-refs';

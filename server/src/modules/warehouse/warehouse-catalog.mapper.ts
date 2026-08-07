@@ -175,21 +175,21 @@ function catalogFileSizeBytes(raw: Record<string, unknown>): number | null {
     raw.file_size,
     raw.bytes,
     raw.size,
-  )
+  );
   if (direct !== null) {
-    return direct
+    return direct;
   }
 
-  const files = raw.files
+  const files = raw.files;
   if (!Array.isArray(files)) {
-    return null
+    return null;
   }
 
-  let total = 0
-  let sawAny = false
+  let total = 0;
+  let sawAny = false;
   for (const entry of files) {
-    if (entry === null || typeof entry !== 'object') continue
-    const record = entry as Record<string, unknown>
+    if (entry === null || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
     const size = firstNonNegativeNumber(
       record.fileSizeBytes,
       record.file_size_bytes,
@@ -199,15 +199,15 @@ function catalogFileSizeBytes(raw: Record<string, unknown>): number | null {
       record.file_size,
       record.bytes,
       record.size,
-    )
-    if (size === null) continue
-    total += size
-    sawAny = true
+    );
+    if (size === null) continue;
+    total += size;
+    sawAny = true;
   }
 
   // null, not 0: "no size reported" and "an empty file" are different facts,
   // and a sum of nothing must not read as the latter.
-  return sawAny ? total : null
+  return sawAny ? total : null;
 }
 
 /**
@@ -218,14 +218,12 @@ function catalogFileSizeBytes(raw: Record<string, unknown>): number | null {
  * every request. Mirrors the SQL in migration 0050.
  */
 function catalogPublishedYear(raw: Record<string, unknown>): number | null {
-  const explicit = textValue(raw.publishedYear) ?? textValue(raw.published_year)
-    ?? textValue(raw.publicationYear) ?? textValue(raw.publication_year);
+  const explicit = textValue(raw.publishedYear) ?? textValue(raw.published_year) ?? textValue(raw.publicationYear) ?? textValue(raw.publication_year);
   if (explicit && /^[0-9]{4}$/.test(explicit.trim())) {
     return Number.parseInt(explicit.trim(), 10);
   }
 
-  const date = textValue(raw.publishedDate) ?? textValue(raw.published_date)
-    ?? textValue(raw.releaseDate) ?? textValue(raw.release_date);
+  const date = textValue(raw.publishedDate) ?? textValue(raw.published_date) ?? textValue(raw.releaseDate) ?? textValue(raw.release_date);
   if (date && /^[0-9]{4}/.test(date.trim())) {
     return Number.parseInt(date.trim().slice(0, 4), 10);
   }

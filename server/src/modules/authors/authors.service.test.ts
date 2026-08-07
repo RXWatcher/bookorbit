@@ -608,7 +608,17 @@ describe('AuthorsService', () => {
     };
     authorsRepo.findById.mockResolvedValue({ id: 42, name: 'Local Author', bookCount: 2 });
     authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [11], total: 1, page: 0, size: 50 });
-    bookRepo.findCardsByBookIds.mockResolvedValue({ rows: [], authorRows: [], fileRows: [], genreRows: [], progressRows: [], statusRows: [], narratorRows: [], tagRows: [], seriesMembershipRows: [] });
+    bookRepo.findCardsByBookIds.mockResolvedValue({
+      rows: [],
+      authorRows: [],
+      fileRows: [],
+      genreRows: [],
+      progressRows: [],
+      statusRows: [],
+      narratorRows: [],
+      tagRows: [],
+      seriesMembershipRows: [],
+    });
     vi.mocked(assembleBookCards).mockReturnValue([localBook]);
     warehouseCatalogService.listAuthorBooks.mockResolvedValue({ items: [bookCard], total: 1 });
 
@@ -679,7 +689,17 @@ describe('AuthorsService', () => {
 
     authorsRepo.findById.mockResolvedValue({ id: 5, name: 'Author', bookCount: 3 });
     authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [3, 1, 2], total: 3, page: 0, size: 50 });
-    bookRepo.findCardsByBookIds.mockResolvedValue({ rows: [], authorRows: [], fileRows: [], genreRows: [], progressRows: [], statusRows: [], narratorRows: [], tagRows: [], seriesMembershipRows: [] });
+    bookRepo.findCardsByBookIds.mockResolvedValue({
+      rows: [],
+      authorRows: [],
+      fileRows: [],
+      genreRows: [],
+      progressRows: [],
+      statusRows: [],
+      narratorRows: [],
+      tagRows: [],
+      seriesMembershipRows: [],
+    });
     vi.mocked(assembleBookCards).mockReturnValue([book1, book2, book3]);
 
     const result = await service.findBooks(reqUser(), 5, {});

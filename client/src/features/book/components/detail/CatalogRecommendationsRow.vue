@@ -107,7 +107,7 @@ watch(
               :is="item.mediaType === 'audiobook' ? Headphones : item.mediaType === 'comic' ? PanelsTopLeft : BookOpen"
               v-else
               :size="30"
-              class="text-muted-foreground/65"
+              class="text-muted-foreground"
               :data-testid="item.mediaType === 'comic' ? 'catalog-recommendation-media-icon-comic' : undefined"
             />
             <span
@@ -119,7 +119,7 @@ watch(
           </div>
           <p class="mt-2 line-clamp-2 text-[12px] font-semibold leading-snug text-foreground">{{ item.title }}</p>
           <p v-if="creatorsLabel(item)" class="mt-0.5 truncate text-[11px] text-muted-foreground">{{ creatorsLabel(item) }}</p>
-          <p class="mt-0.5 truncate text-[11px] text-muted-foreground/80">{{ detailLabel(item) }}</p>
+          <p class="mt-0.5 truncate text-[11px] text-muted-foreground">{{ detailLabel(item) }}</p>
           <button
             data-testid="catalog-recommendation-quick-view"
             class="mt-2 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted"
