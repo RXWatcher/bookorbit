@@ -48,6 +48,7 @@ export function mapWarehouseEbookCatalogItemRow(payload: WarehouseRawBookSummary
     publisher: textValue(raw.publisher),
     identifiers: identifiers(raw),
     format: textValue(raw.format) ?? textValue(raw.fileFormat) ?? textValue(raw.file_format),
+    fileSizeBytes: catalogFileSizeBytes(raw),
     hasCover: coverFlag(raw),
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
@@ -85,6 +86,7 @@ export function mapWarehouseAudiobookCatalogItemRow(payload: WarehouseRawAudiobo
     identifiers: identifiers(raw),
     format: textValue(raw.format),
     durationSeconds: firstNonNegativeInteger(raw.durationSeconds, raw.duration_seconds, raw.duration),
+    fileSizeBytes: catalogFileSizeBytes(raw),
     hasCover: coverFlag(raw),
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
@@ -147,6 +149,61 @@ function sanitizedComicPayload(raw: Record<string, unknown>): Record<string, unk
   }
 
   return sanitized;
+}
+
+/**
+ * The item's size in bytes, from wherever the warehouse published it.
+ *
+ * Ebooks carry a top-level value under one of several spellings. Audiobooks
+ * carry none — the warehouse's Audiobook model has only per-file sizes — so
+ * theirs is the sum of `files[]`. Computed once here, at sync time, and stored
+ * on the row: deriving it per row in the statistics aggregates meant a
+ * correlated subquery over the files array for every audiobook, and four
+ * endpoints timed out because of it.
+ */
+function catalogFileSizeBytes(raw: Record<string, unknown>): number | null {
+  const direct = firstNonNegativeNumber(
+    raw.fileSizeBytes,
+    raw.file_size_bytes,
+    raw.sizeBytes,
+    raw.size_bytes,
+    raw.fileSize,
+    raw.file_size,
+    raw.bytes,
+    raw.size,
+  )
+  if (direct !== null) {
+    return direct
+  }
+
+  const files = raw.files
+  if (!Array.isArray(files)) {
+    return null
+  }
+
+  let total = 0
+  let sawAny = false
+  for (const entry of files) {
+    if (entry === null || typeof entry !== 'object') continue
+    const record = entry as Record<string, unknown>
+    const size = firstNonNegativeNumber(
+      record.fileSizeBytes,
+      record.file_size_bytes,
+      record.sizeBytes,
+      record.size_bytes,
+      record.fileSize,
+      record.file_size,
+      record.bytes,
+      record.size,
+    )
+    if (size === null) continue
+    total += size
+    sawAny = true
+  }
+
+  // null, not 0: "no size reported" and "an empty file" are different facts,
+  // and a sum of nothing must not read as the latter.
+  return sawAny ? total : null
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

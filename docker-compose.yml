@@ -68,6 +68,35 @@ services:
     container_name: bookorbit-db
     image: pgvector/pgvector:pg18
     restart: unless-stopped
+    # Docker's default /dev/shm is 64MB. Parallel aggregation over a large
+    # catalogue exhausts it and the query dies with "could not resize shared
+    # memory segment ... No space left on device".
+    shm_size: 2gb
+    # The image ships Postgres defaults sized for a laptop: 160MB
+    # shared_buffers, 4MB work_mem, and random_page_cost 4, which assumes a
+    # spinning disk. Sized here for 8 cores / 8GB RAM on NVMe — adjust to the
+    # host. Getting the working set into shared_buffers took several
+    # statistics endpoints from 8-19s to single-digit milliseconds.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=6GB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - max_parallel_workers_per_gather=4
+      - -c
+      - max_parallel_workers=8
+      - -c
+      - max_worker_processes=8
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
     environment:
       POSTGRES_USER: ${POSTGRES_USER?required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?required}

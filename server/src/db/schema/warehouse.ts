@@ -97,6 +97,11 @@ export const warehouseCatalogItems = pgTable(
       .default(sql`'{}'::jsonb`),
     format: varchar('format', { length: 64 }),
     durationSeconds: integer('duration_seconds'),
+    /** Materialised from raw_payload at sync time — see migration 0048. The
+     *  statistics aggregates read this instead of re-deriving it per row,
+     *  which for audiobooks meant a correlated subquery over the files array
+     *  and four endpoints timing out. */
+    fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
     hasCover: boolean('has_cover').notNull().default(false),
     upstreamCreatedAt: timestamp('upstream_created_at', { withTimezone: true }),
     upstreamUpdatedAt: timestamp('upstream_updated_at', { withTimezone: true }),

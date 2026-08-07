@@ -5287,8 +5287,23 @@ function catalogPageCountExpression() {
       end`;
 }
 
+/**
+ * The item's size, from the stored column first.
+ *
+ * file_size_bytes is materialised at sync time (migration 0048). The payload
+ * derivations stay as a fallback for rows synced before it existed, but they
+ * are the expensive part: for audiobooks the second and third arms expand
+ * jsonb_array_elements(raw_payload->'files') per row, which is what pushed
+ * storage-by-format, largest-books, metadata-score-distribution and
+ * publication-year-timeline past the 30s statement_timeout.
+ *
+ * COALESCE is lazy, so once the column is populated the laterals are never
+ * evaluated — which is the whole point. No index can substitute: Postgres
+ * cannot index an expression containing a subquery.
+ */
 function catalogFileSizeExpression() {
   return sql<number | null>`coalesce(
+    ${schema.warehouseCatalogItems.fileSizeBytes},
     ${catalogPayloadFileSizeExpression(schema.warehouseCatalogItems.rawPayload)},
     ${catalogPayloadFileSizeExpression(schema.warehouseCatalogDetails.rawPayload)}
   )`;
