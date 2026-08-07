@@ -115,6 +115,7 @@ export function mapWarehouseComicCatalogItemRow(payload: WarehouseRawComicSummar
     publisher: textValue(raw.publisher),
     identifiers: comicIdentifiers(raw),
     format: textValue(raw.format) ?? 'CBZ',
+    fileSizeBytes: catalogFileSizeBytes(raw),
     hasCover: coverFlag(raw),
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
