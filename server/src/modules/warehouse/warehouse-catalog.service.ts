@@ -1,4 +1,4 @@
-import { BadGatewayException, BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type {
   AcquisitionLagPoint,
   BookCard,
@@ -58,7 +58,11 @@ import { jumpBucketKindForSort } from '@bookorbit/types';
 
 import type { RequestUser } from '../../common/types/request-user';
 import type { WarehouseCatalogItemRow } from '../../db/schema';
-import { mapWarehouseAudiobookDetail } from './warehouse-catalog.mapper';
+import {
+  mapWarehouseAudiobookCatalogItemRow,
+  mapWarehouseAudiobookDetail,
+  mapWarehouseEbookCatalogItemRow,
+} from './warehouse-catalog.mapper';
 import { WarehouseClientService, type WarehouseBinaryResponse } from './warehouse-client.service';
 import { WarehouseCatalogCoverCacheService } from './warehouse-catalog-cover-cache.service';
 import { catalogAuthorRefs, catalogSeriesRef } from './catalog-link-refs';
@@ -131,6 +135,8 @@ type CatalogStatisticsDimensionValues = {
 
 @Injectable()
 export class WarehouseCatalogService {
+  private readonly logger = new Logger(WarehouseCatalogService.name);
+
   constructor(
     private readonly repository: WarehouseRepository,
     private readonly client: WarehouseClientService,
@@ -1168,13 +1174,215 @@ export class WarehouseCatalogService {
       return null;
     }
 
-    const detail = await this.repository.findCatalogDetail(AUDIOBOOK_MEDIA_TYPE, remoteId);
-    const publicDetail = detail ? mapWarehouseAudiobookDetail(detail.rawPayload) : { chapters: [], files: [] };
+    const rawDetail = await this.loadOrFetchAudiobookDetail(remoteId);
+    const publicDetail = rawDetail ? mapWarehouseAudiobookDetail(rawDetail) : { chapters: [], files: [] };
 
     return {
       ...mapAudiobookCatalogItem(item),
       chapters: publicDetail.chapters,
       files: publicDetail.files,
+    };
+  }
+
+  /**
+   * The cached warehouse detail for one audiobook, fetching and caching it on
+   * a miss.
+   *
+   * The catalog sync only ever stores the warehouse's LIST projection, which
+   * carries no chapters, narrators or genres — those come from
+   * GET /audiobooks/{id}. warehouse_catalog_details was built to hold that
+   * response, and repository.upsertCatalogDetail to write it, but nothing ever
+   * called either: the table sat empty and this method's caller always
+   * returned { chapters: [], files: [] }. Filling it on first read is what
+   * makes chapter navigation work at all.
+   *
+   * Returns null rather than throwing. A detail fetch is an ENRICHMENT of a
+   * page that already has everything the list gave us, so an unreachable or
+   * slow warehouse must degrade to "no chapters" rather than fail the request.
+   */
+  private async loadOrFetchAudiobookDetail(remoteId: string): Promise<unknown | null> {
+    const cached = await this.repository.findCatalogDetail(AUDIOBOOK_MEDIA_TYPE, remoteId);
+    if (cached) {
+      return cached.rawPayload;
+    }
+
+    const request = await this.catalogClientRequest(AUDIOBOOK_MEDIA_UNAVAILABLE_MESSAGE);
+    if (!request) {
+      return null;
+    }
+
+    try {
+      const rawPayload = await this.client.getAudiobookWireDetail({ ...request, id: remoteId });
+      await this.repository.upsertCatalogDetail({
+        mediaType: AUDIOBOOK_MEDIA_TYPE,
+        remoteId,
+        rawPayload,
+      });
+
+      // The detail carries genres and narrators; the list projection the sync
+      // stored did not, so the item row has empty arrays for both. Re-running
+      // the SAME mapper the sync uses over the richer payload corrects the row
+      // in place — no separate parsing to drift out of step with it.
+      const enriched = mapWarehouseAudiobookCatalogItemRow(rawPayload as never, new Date());
+      await this.repository.updateCatalogItemFacets(AUDIOBOOK_MEDIA_TYPE, remoteId, {
+        genres: enriched.genres,
+        narrators: enriched.narrators,
+      });
+
+      return rawPayload;
+    } catch (error) {
+      this.logger.warn(`[catalog.detail] [miss] remoteId=${remoteId} - detail fetch failed: ${String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch and cache warehouse details for audiobooks that have none, so
+   * genres and narrators stop waiting for somebody to open each book.
+   *
+   * Bounded per call and resumable — "has no cached detail" is the queue, so
+   * calling it repeatedly walks the catalogue and calling it once more at the
+   * end is a no-op.
+   *
+   * It VERIFIES rather than assumes. Two bugs in this area both looked like
+   * success: the detail cache filled while every item still had empty facets
+   * (the mapper dropped object entries), and before that the whole detail
+   * fetch was missing while the reads returned a cheerful empty list. So this
+   * counts items carrying facets before and after, and reports the delta. A
+   * batch that fetches successfully but enriches NOTHING is reported as
+   * `stalled` — the caller should stop and look rather than grind through
+   * another 184,000 items writing nothing.
+   */
+  async backfillAudiobookDetails(limit = 50): Promise<{
+    examined: number;
+    fetched: number;
+    failed: number;
+    facetsBefore: number;
+    facetsAfter: number;
+    stalled: boolean;
+    remaining: boolean;
+  }> {
+    if (!(await this.isCatalogEnabled())) {
+      return { examined: 0, fetched: 0, failed: 0, facetsBefore: 0, facetsAfter: 0, stalled: false, remaining: false };
+    }
+
+    const facetsBefore = await this.repository.countItemsWithFacets(AUDIOBOOK_MEDIA_TYPE);
+    const remoteIds = await this.repository.listRemoteIdsWithoutDetail(AUDIOBOOK_MEDIA_TYPE, limit);
+
+    let fetched = 0;
+    let failed = 0;
+    for (const remoteId of remoteIds) {
+      // Sequential on purpose. This walks a third-party service that also
+      // serves the customer-facing catalogue; a backfill is not worth
+      // degrading live reads for.
+      const detail = await this.loadOrFetchAudiobookDetail(remoteId);
+      if (detail) {
+        fetched += 1;
+      } else {
+        failed += 1;
+      }
+    }
+
+    const facetsAfter = await this.repository.countItemsWithFacets(AUDIOBOOK_MEDIA_TYPE);
+    const stalled = fetched > 0 && facetsAfter === facetsBefore;
+
+    this.logger.log(
+      `[catalog.backfill] [end] examined=${remoteIds.length} fetched=${fetched} failed=${failed} ` +
+        `facets=${facetsBefore}->${facetsAfter} stalled=${stalled}`,
+    );
+
+    return {
+      examined: remoteIds.length,
+      fetched,
+      failed,
+      facetsBefore,
+      facetsAfter,
+      stalled,
+      remaining: remoteIds.length === limit,
+    };
+  }
+
+  /**
+   * Fetch and cache the warehouse detail for one ebook, and correct the item's
+   * facets from it.
+   *
+   * Ebooks have no chapters or files to show, so unlike the audiobook path
+   * nothing renders this directly — it exists so genres and tags land on the
+   * item row, which is what genre browsing and the genre statistics read.
+   */
+  private async fetchEbookDetail(remoteId: string): Promise<boolean> {
+    const cached = await this.repository.findCatalogDetail(EBOOK_MEDIA_TYPE, remoteId);
+    if (cached) {
+      return true;
+    }
+
+    const request = await this.catalogClientRequest(EBOOK_MEDIA_UNAVAILABLE_MESSAGE);
+    if (!request) {
+      return false;
+    }
+
+    try {
+      const rawPayload = await this.client.getBookWireDetail({ ...request, id: remoteId });
+      await this.repository.upsertCatalogDetail({ mediaType: EBOOK_MEDIA_TYPE, remoteId, rawPayload });
+
+      const enriched = mapWarehouseEbookCatalogItemRow(rawPayload as never, new Date());
+      await this.repository.updateCatalogItemFacets(EBOOK_MEDIA_TYPE, remoteId, {
+        genres: enriched.genres,
+        narrators: enriched.narrators,
+      });
+      return true;
+    } catch (error) {
+      this.logger.warn(`[catalog.detail] [miss] ebook remoteId=${remoteId} - detail fetch failed: ${String(error)}`);
+      return false;
+    }
+  }
+
+  /**
+   * The ebook counterpart of backfillAudiobookDetails — same queue, same
+   * before/after verification, same refusal to keep going when nothing lands.
+   */
+  async backfillEbookDetails(limit = 50): Promise<{
+    examined: number;
+    fetched: number;
+    failed: number;
+    facetsBefore: number;
+    facetsAfter: number;
+    stalled: boolean;
+    remaining: boolean;
+  }> {
+    if (!(await this.isCatalogEnabled())) {
+      return { examined: 0, fetched: 0, failed: 0, facetsBefore: 0, facetsAfter: 0, stalled: false, remaining: false };
+    }
+
+    const facetsBefore = await this.repository.countItemsWithFacets(EBOOK_MEDIA_TYPE);
+    const remoteIds = await this.repository.listRemoteIdsWithoutDetail(EBOOK_MEDIA_TYPE, limit);
+
+    let fetched = 0;
+    let failed = 0;
+    for (const remoteId of remoteIds) {
+      if (await this.fetchEbookDetail(remoteId)) {
+        fetched += 1;
+      } else {
+        failed += 1;
+      }
+    }
+
+    const facetsAfter = await this.repository.countItemsWithFacets(EBOOK_MEDIA_TYPE);
+    const stalled = fetched > 0 && facetsAfter === facetsBefore;
+
+    this.logger.log(
+      `[catalog.backfill] [end] media=ebook examined=${remoteIds.length} fetched=${fetched} failed=${failed} ` +
+        `facets=${facetsBefore}->${facetsAfter} stalled=${stalled}`,
+    );
+
+    return {
+      examined: remoteIds.length,
+      fetched,
+      failed,
+      facetsBefore,
+      facetsAfter,
+      stalled,
+      remaining: remoteIds.length === limit,
     };
   }
 

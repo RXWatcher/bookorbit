@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import type { OnModuleInit } from '@nestjs/common';
 import type { WarehouseCatalogSyncMediaType, WarehouseCatalogSyncState, WarehouseCatalogSyncSummary } from '@bookorbit/types';
 
 import type { NewWarehouseCatalogItemRow, WarehouseCatalogSyncRunRow, WarehouseSettingRow } from '../../db/schema';
@@ -25,7 +26,7 @@ type CatalogPage<Item> = {
 type CatalogItemRow = Omit<NewWarehouseCatalogItemRow, 'id' | 'createdAt' | 'updatedAt'>;
 
 @Injectable()
-export class WarehouseCatalogSyncService {
+export class WarehouseCatalogSyncService implements OnModuleInit {
   private readonly logger = new Logger(WarehouseCatalogSyncService.name);
   private readonly activeSyncRunIds = new Set<number>();
   private readonly processToken = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -36,6 +37,27 @@ export class WarehouseCatalogSyncService {
     private readonly secret: WarehouseSecretService,
     private readonly client: WarehouseClientService,
   ) {}
+
+  /**
+   * Reconcile orphaned runs at startup.
+   *
+   * A process that dies mid-sync leaves its run marked 'running' forever:
+   * reconcileRunningSyncRuns was only ever reached through getSyncState, so a
+   * stale row was cleared only if an admin happened to open the sync status
+   * page. Restarting IS the ordinary way a sync gets interrupted — a container
+   * rebuild orphaned a 184,500-item audiobook run that then sat 'running' for
+   * a day — so this is exactly the moment to do it.
+   *
+   * Never allowed to block boot: a reconcile failure must not stop the app
+   * from serving.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.reconcileRunningSyncRuns();
+    } catch (error) {
+      this.logger.warn(`[catalog.sync.reconcile] startup reconcile failed - ${String(error)}`);
+    }
+  }
 
   async getSyncState(): Promise<WarehouseCatalogSyncState> {
     const runningRun = await this.reconcileRunningSyncRuns();

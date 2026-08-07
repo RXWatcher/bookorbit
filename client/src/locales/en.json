@@ -4580,7 +4580,10 @@
         "dropped": "{name} dropped at position {position} of {total}",
         "cancelled": "Reorder cancelled. {name} returned to position {position} of {total}.",
         "filteredHint": "Clear the filter to reorder"
-      }
+      },
+      "tagline": "Personal reading library",
+      "supportShort": "Support",
+      "libraryScanning": "{name} — scanning {pct}%"
     },
     "selectionActionBar": {
       "setReadingStatus": "Set reading status",
@@ -4774,7 +4777,9 @@
         "wantToRead": "Want to Read",
         "upNextInSeries": "Up Next in Series",
         "random": "Discover Something New",
-        "smartScope": "Smart Scope"
+        "smartScope": "Smart Scope",
+        "catalogAdditions": "New in the catalog",
+        "catalogDiscovery": "Discover in the catalog"
       },
       "shelfLayout": {
         "title": "Shelf layout",

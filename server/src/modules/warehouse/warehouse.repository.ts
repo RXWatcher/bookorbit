@@ -503,6 +503,73 @@ export class WarehouseRepository {
       });
   }
 
+  /**
+   * Write back the facets that only the warehouse's DETAIL response carries.
+   *
+   * The sync stores the warehouse's list projection, and that projection has
+   * no genres or narrators — so mapWarehouseAudiobookCatalogItemRow, which
+   * reads both, has always mapped them to empty arrays. Every row in the
+   * catalogue therefore has `genres: []` and `narrators: []`, which is why
+   * genre browsing, narrator search and the genre statistics all return
+   * nothing despite the indexes built for them.
+   *
+   * Called when a detail is fetched, so the item is corrected in place rather
+   * than waiting for a full re-sync.
+   */
+  async updateCatalogItemFacets(
+    mediaType: WarehouseMediaType,
+    remoteId: string,
+    facets: Pick<NewWarehouseCatalogItemRow, 'genres' | 'narrators'>,
+  ): Promise<void> {
+    await this.db
+      .update(schema.warehouseCatalogItems)
+      .set({ genres: facets.genres, narrators: facets.narrators, updatedAt: new Date() })
+      .where(and(eq(schema.warehouseCatalogItems.mediaType, mediaType), eq(schema.warehouseCatalogItems.remoteId, remoteId)));
+  }
+
+  /**
+   * Remote ids for one media type that have no cached detail yet.
+   *
+   * The backfill's resume point. There is no cursor or progress row: "has no
+   * detail" IS the queue, so an interrupted run simply picks up where it
+   * stopped and a finished one returns nothing.
+   */
+  async listRemoteIdsWithoutDetail(mediaType: WarehouseMediaType, limit: number): Promise<string[]> {
+    const rows = await this.db
+      .select({ remoteId: schema.warehouseCatalogItems.remoteId })
+      .from(schema.warehouseCatalogItems)
+      .where(
+        and(
+          eq(schema.warehouseCatalogItems.mediaType, mediaType),
+          sql`not exists (
+            select 1 from ${schema.warehouseCatalogDetails} d
+            where d.media_type = ${schema.warehouseCatalogItems.mediaType}
+              and d.remote_id = ${schema.warehouseCatalogItems.remoteId}
+          )`,
+        ),
+      )
+      .limit(limit);
+
+    return rows.map((row) => row.remoteId);
+  }
+
+  /** How many items of this type carry at least one genre or narrator. The
+   *  backfill's own check that it actually wrote something. */
+  async countItemsWithFacets(mediaType: WarehouseMediaType): Promise<number> {
+    const [row] = await this.db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.warehouseCatalogItems)
+      .where(
+        and(
+          eq(schema.warehouseCatalogItems.mediaType, mediaType),
+          sql`(jsonb_array_length(${schema.warehouseCatalogItems.genres}) > 0
+               or jsonb_array_length(${schema.warehouseCatalogItems.narrators}) > 0)`,
+        ),
+      );
+
+    return row?.total ?? 0;
+  }
+
   findCatalogDetail(mediaType: WarehouseMediaType, remoteId: string) {
     return this.db.query.warehouseCatalogDetails.findFirst({
       where: and(eq(schema.warehouseCatalogDetails.mediaType, mediaType), eq(schema.warehouseCatalogDetails.remoteId, remoteId)),
@@ -2678,8 +2745,11 @@ export class WarehouseRepository {
         on ${item.mediaType} = ${schema.warehouseCatalogDetails.mediaType}
        and ${item.remoteId} = ${schema.warehouseCatalogDetails.remoteId}
       where ${and(...clauses) ?? sql`true`}
-      group by ${libraryId}, ${libraryName}
-      order by ${libraryName}
+      -- By ordinal: libraryId/libraryName are parameterised CASE expressions,
+      -- and repeating them here renumbers their parameters (see the note in
+      -- metadataScoreDistribution).
+      group by 1, 2
+      order by 2
     `);
 
     return catalogLibraryMetadataCompletenessRows(result);
@@ -2812,7 +2882,11 @@ export class WarehouseRepository {
     if (mediaTypes?.length === 0) return [];
 
     const sizeBytes = catalogFileSizeExpression();
-    const format = sql<string>`lower(nullif(trim(coalesce(${schema.warehouseCatalogItems.format}, ${schema.warehouseCatalogItems.mediaType})), ''))`;
+    // ::text on the enum — format is varchar and media_type is the
+    // warehouse_media_type enum, and COALESCE refuses to mix them
+    // ("COALESCE types character varying and warehouse_media_type cannot be
+    // matched").
+    const format = sql<string>`lower(nullif(trim(coalesce(${schema.warehouseCatalogItems.format}, ${schema.warehouseCatalogItems.mediaType}::text)), ''))`;
     const clauses: SQL[] = [sql`${sizeBytes} is not null`, sql`${format} is not null`, ...buildCatalogContentFilterClauses(contentFilters)];
     if (mediaTypes) clauses.push(inArray(schema.warehouseCatalogItems.mediaType, mediaTypes));
 
@@ -2852,8 +2926,13 @@ export class WarehouseRepository {
           on ${schema.warehouseCatalogItems.mediaType} = ${schema.warehouseCatalogDetails.mediaType}
          and ${schema.warehouseCatalogItems.remoteId} = ${schema.warehouseCatalogDetails.remoteId}
         where ${and(...clauses, sql`${score} is not null`) ?? sql`${score} is not null`}
-        group by ${bucketExpr}
-        order by ${bucketExpr}
+        -- BY ORDINAL, deliberately. bucketExpr carries bound parameters, and
+        -- drizzle numbers them per occurrence: repeating the fragment here
+        -- emits $12..$22 against the select's $1..$11, so Postgres sees two
+        -- different expressions and rejects the query with "title must appear
+        -- in the GROUP BY clause".
+        group by 1
+        order by 1
       `),
       this.db.execute(sql`
         select count(distinct (${schema.warehouseCatalogItems.mediaType}::text || ':' || ${schema.warehouseCatalogItems.remoteId}))::int as count
@@ -3153,8 +3232,11 @@ export class WarehouseRepository {
         ${schema.warehouseCatalogItems.id}::int as id,
         ${schema.warehouseCatalogItems.title} as title,
         ${sizeBytes}::bigint as size_bytes,
-        coalesce(nullif(${schema.warehouseCatalogItems.format}, ''), ${schema.warehouseCatalogItems.mediaType}) as format
+        coalesce(nullif(${schema.warehouseCatalogItems.format}, ''), ${schema.warehouseCatalogItems.mediaType}::text) as format
       from ${schema.warehouseCatalogItems}
+      left join ${schema.warehouseCatalogDetails}
+        on ${schema.warehouseCatalogItems.mediaType} = ${schema.warehouseCatalogDetails.mediaType}
+       and ${schema.warehouseCatalogItems.remoteId} = ${schema.warehouseCatalogDetails.remoteId}
       where ${and(...clauses) ?? sql`true`}
       order by ${sizeBytes} desc
       limit 50

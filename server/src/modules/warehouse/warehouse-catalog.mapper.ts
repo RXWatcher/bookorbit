@@ -230,9 +230,36 @@ function listValue(value: unknown): string[] {
   }
 
   return value
-    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entryName(entry))
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+/**
+ * One list entry as a display string.
+ *
+ * The warehouse returns genres and narrators as OBJECTS, not strings —
+ * `[{ id: 41, name: 'Relationships', slug: 'relationships' }]`. This used to
+ * keep only `typeof entry === 'string'`, so every object was silently dropped
+ * and both fields mapped to []. That is why no item in the catalogue had a
+ * genre or a narrator: not a sync gap, a shape the mapper could not read.
+ */
+function entryName(entry: unknown): string {
+  if (typeof entry === 'string') {
+    return entry;
+  }
+
+  if (entry !== null && typeof entry === 'object') {
+    const record = entry as Record<string, unknown>;
+    for (const key of ['name', 'title', 'value']) {
+      const candidate = record[key];
+      if (typeof candidate === 'string') {
+        return candidate;
+      }
+    }
+  }
+
+  return '';
 }
 
 function normalizeContributorList(values: string[]): string[] {

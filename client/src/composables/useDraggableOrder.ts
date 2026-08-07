@@ -32,7 +32,15 @@ export function useDraggableOrder<T extends OrderableItem>({ source, persist, de
   watch(
     source,
     (items) => {
-      if (isDragging || liftedId.value !== null) return
+      // A reorder in progress must not be clobbered by a background refresh.
+      // But a latch that was never released must not strand the list either:
+      // isDragging is cleared only by onDragEnd, and liftedId only by a drop,
+      // so a cancelled drag, a pointer released outside the list, or an
+      // unmount mid-lift leaves this watcher permanently muted. localItems
+      // starts EMPTY, so the consumer then renders nothing for the rest of the
+      // session while `source` has had items all along — the sidebar-empty
+      // bug. An empty render is never a user reorder worth protecting.
+      if ((isDragging || liftedId.value !== null) && localItems.value.length > 0) return
       localItems.value = [...items]
       snapshot = [...items]
     },

@@ -280,14 +280,21 @@ onUnmounted(() => stopLibraryUploadListener())
 
       <SidebarSeparator />
 
-      <!-- Libraries -->
+      <!--
+        Libraries. These come from the Book Warehouse catalog, not from scanning
+        a folder on this box, so the section deliberately offers no "add"
+        button: creating an empty filesystem library here would put something
+        that can never fill beside the real ones, with nothing to tell them
+        apart. Creating one is still possible from Settings, where the
+        distinction is visible.
+      -->
       <SidebarGroup>
         <SidebarSectionHeader
           data-tour="sidebar-libraries"
           :label="t('components.sidebar.libraries')"
           :is-open="librariesOpen"
           :collapsed-count="libraries.length"
-          :can-add="hasPermission('manage_libraries')"
+          :can-add="false"
           :add-title="t('components.sidebar.newLibrary')"
           :can-reorder="hasPermission('manage_libraries')"
           :is-reordering="isReorderingLibraries"

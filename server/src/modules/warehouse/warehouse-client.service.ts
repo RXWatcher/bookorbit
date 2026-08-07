@@ -453,6 +453,19 @@ export class WarehouseClientService {
     };
   }
 
+  /**
+   * One ebook's detail response, exactly as the warehouse sent it.
+   *
+   * GET /books/{id} enriches authors, genres and tags, none of which the list
+   * projection carries — the same gap that left every audiobook without a
+   * genre. Returned unmapped because the caller stores it in
+   * warehouse_catalog_details.raw_payload, which is read back through the
+   * mappers that expect the warehouse's own field names.
+   */
+  async getBookWireDetail(request: BookCatalogRequest): Promise<WarehouseBookWireSummary> {
+    return this.getJson<WarehouseBookWireSummary>(`/books/${this.encodePathSegment(request.id)}`, request, {});
+  }
+
   async listBooks(request: PageRequest): Promise<WarehouseListPage<WarehouseBookSummary>> {
     const response = await this.getJson<WarehouseWireListPage<WarehouseBookWireSummary>>('/books', request, {
       page: request.page,
@@ -536,8 +549,22 @@ export class WarehouseClientService {
     return this.getBinary(`/comics/items/${this.encodePathSegment(request.id)}/pages/${Math.max(0, Math.trunc(request.pageIndex))}`, request);
   }
 
+  /**
+   * The detail response exactly as the warehouse sent it.
+   *
+   * Kept separate from getAudiobook because the two consumers want different
+   * things: callers want the mapped shape, while the catalog detail CACHE must
+   * hold the wire payload — warehouse_catalog_details.raw_payload is read back
+   * through mapWarehouseAudiobookDetail(raw), which parses the warehouse's
+   * field names, not ours. Storing the mapped form would round-trip into
+   * something that mapper cannot read.
+   */
+  async getAudiobookWireDetail(request: AudiobookRequest): Promise<WarehouseAudiobookWireDetail> {
+    return this.getJson<WarehouseAudiobookWireDetail>(`/audiobooks/${this.encodePathSegment(request.id)}`, request, {});
+  }
+
   async getAudiobook(request: AudiobookRequest): Promise<WarehouseAudiobookDetailPayload> {
-    const response = await this.getJson<WarehouseAudiobookWireDetail>(`/audiobooks/${this.encodePathSegment(request.id)}`, request, {});
+    const response = await this.getAudiobookWireDetail(request);
 
     return this.mapAudiobookDetail(response);
   }

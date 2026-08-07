@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { RouterLink } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import { SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import AppIcon from '@/components/AppIcon.vue'
@@ -8,13 +9,19 @@ withDefaults(
   defineProps<{
     isActive: boolean
     tooltip: string
-    to: RouteLocationRaw
+    // Optional. Callers that navigate through a click handler (AppSidebar does,
+    // because it must also close the mobile drawer) pass no route. This used to
+    // be required, so those callers rendered <RouterLink :to="undefined">, and
+    // router.resolve(undefined) threw during render — taking the whole list
+    // with it. Sections with no items looked fine; any section WITH items
+    // rendered nothing at all.
+    to?: RouteLocationRaw
     icon: Component | string
     fallbackIcon?: Component | string
     label: string
     dataTour?: string
   }>(),
-  { fallbackIcon: undefined, dataTour: undefined },
+  { fallbackIcon: undefined, dataTour: undefined, to: undefined },
 )
 
 const emit = defineEmits<{ navigate: [] }>()
@@ -46,7 +53,12 @@ const trailingRoomClass = 'pr-6'
 <template>
   <SidebarMenuItem>
     <SidebarMenuButton as-child :is-active="isActive" :tooltip="tooltip" :class="[buttonClass, slots.trailing ? trailingRoomClass : '']">
-      <RouterLink :to="to" :data-tour="dataTour" @click="handleNavigate">
+      <component
+        :is="to === undefined ? 'button' : RouterLink"
+        v-bind="to === undefined ? { type: 'button' } : { to }"
+        :data-tour="dataTour"
+        @click="handleNavigate"
+      >
         <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center">
           <component
             :is="icon"
@@ -68,7 +80,7 @@ const trailingRoomClass = 'pr-6'
           {{ label }}
         </span>
         <slot name="badge" />
-      </RouterLink>
+      </component>
     </SidebarMenuButton>
     <div v-if="slots.trailing" class="absolute right-1 top-0 flex h-8 items-center group-data-[collapsible=icon]:hidden">
       <slot name="trailing" />
