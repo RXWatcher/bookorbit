@@ -105,6 +105,8 @@ export const warehouseCatalogItems = pgTable(
     /** Materialised metadata completeness score, 0-100 — see migration 0049.
      *  Refreshed by refreshMetadataScores() after each catalog sync. */
     metadataScore: integer('metadata_score'),
+    /** Materialised published year — see migration 0050. */
+    publishedYear: integer('published_year'),
     hasCover: boolean('has_cover').notNull().default(false),
     upstreamCreatedAt: timestamp('upstream_created_at', { withTimezone: true }),
     upstreamUpdatedAt: timestamp('upstream_updated_at', { withTimezone: true }),

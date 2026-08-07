@@ -49,6 +49,7 @@ export function mapWarehouseEbookCatalogItemRow(payload: WarehouseRawBookSummary
     identifiers: identifiers(raw),
     format: textValue(raw.format) ?? textValue(raw.fileFormat) ?? textValue(raw.file_format),
     fileSizeBytes: catalogFileSizeBytes(raw),
+    publishedYear: catalogPublishedYear(raw),
     hasCover: coverFlag(raw),
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
@@ -87,6 +88,7 @@ export function mapWarehouseAudiobookCatalogItemRow(payload: WarehouseRawAudiobo
     format: textValue(raw.format),
     durationSeconds: firstNonNegativeInteger(raw.durationSeconds, raw.duration_seconds, raw.duration),
     fileSizeBytes: catalogFileSizeBytes(raw),
+    publishedYear: catalogPublishedYear(raw),
     hasCover: coverFlag(raw),
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
@@ -116,6 +118,7 @@ export function mapWarehouseComicCatalogItemRow(payload: WarehouseRawComicSummar
     identifiers: comicIdentifiers(raw),
     format: textValue(raw.format) ?? 'CBZ',
     fileSizeBytes: catalogFileSizeBytes(raw),
+    publishedYear: catalogPublishedYear(raw),
     hasCover: coverFlag(raw),
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
@@ -205,6 +208,29 @@ function catalogFileSizeBytes(raw: Record<string, unknown>): number | null {
   // null, not 0: "no size reported" and "an empty file" are different facts,
   // and a sum of nothing must not read as the latter.
   return sawAny ? total : null
+}
+
+/**
+ * The published year, from wherever the warehouse put it.
+ *
+ * Stored on the row rather than derived per query: the statistics timeline did
+ * eight jsonb extractions and two regex tests for each of ~348,000 rows on
+ * every request. Mirrors the SQL in migration 0050.
+ */
+function catalogPublishedYear(raw: Record<string, unknown>): number | null {
+  const explicit = textValue(raw.publishedYear) ?? textValue(raw.published_year)
+    ?? textValue(raw.publicationYear) ?? textValue(raw.publication_year);
+  if (explicit && /^[0-9]{4}$/.test(explicit.trim())) {
+    return Number.parseInt(explicit.trim(), 10);
+  }
+
+  const date = textValue(raw.publishedDate) ?? textValue(raw.published_date)
+    ?? textValue(raw.releaseDate) ?? textValue(raw.release_date);
+  if (date && /^[0-9]{4}/.test(date.trim())) {
+    return Number.parseInt(date.trim().slice(0, 4), 10);
+  }
+
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -130,6 +130,10 @@ export type BookCard = {
   } | null;
   status: string;
   coverAspectRatio: CoverAspectRatio;
+  /** Audiobook length. Optional because only audio items have one — but
+   *  without it the Audiobookshelf-compatible API cannot report a duration,
+   *  so clients show no length and cannot place a progress position. */
+  durationSeconds?: number | null;
   title: string | null;
   authors: string[];
   seriesId?: number | null;

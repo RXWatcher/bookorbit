@@ -71,6 +71,10 @@ export function mapWarehouseCatalogItemToBookCard(row: WarehouseBookCardRow): Bo
     // same default the libraries table uses.
     coverAspectRatio: normalizeCoverAspectRatio(undefined),
     status: 'present',
+    // Carried so the Audiobookshelf-compatible API can report a length. All
+    // 184,500 audiobooks have this; it was simply never copied onto the card,
+    // so ABS clients saw duration: null for every one of them.
+    durationSeconds: row.durationSeconds ?? null,
     title: row.title,
     authors: safeStringArray(row.authors),
     seriesId,

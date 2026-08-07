@@ -5267,7 +5267,10 @@ function catalogLibraryAddedAtExpression() {
 
 function catalogPublishedYearExpression() {
   const rawPayload = schema.warehouseCatalogItems.rawPayload;
-  return sql<number | null>`case
+  // Stored column first (migration 0050). COALESCE is lazy, so the eight jsonb
+  // extractions and two regex tests below only run for rows synced before the
+  // column existed. This was the last statistics endpoint still slow.
+  return sql<number | null>`coalesce(${schema.warehouseCatalogItems.publishedYear}, case
     when coalesce(
       ${rawPayload}->>'publishedYear',
       ${rawPayload}->>'published_year',
@@ -5293,7 +5296,7 @@ function catalogPublishedYearExpression() {
         ${rawPayload}->>'release_date'
       ) from 1 for 4)::int
     else null
-  end`;
+  end)`;
 }
 
 function catalogPageCountExpression() {
