@@ -570,6 +570,36 @@ export class WarehouseRepository {
     return row?.total ?? 0;
   }
 
+  /**
+   * Recompute metadata_score for rows that have none.
+   *
+   * Called after a catalog sync, because an upsert leaves the column null for
+   * new rows and stale for changed ones. Scoped to `is null` so it is cheap on
+   * a normal sync and only expensive the first time.
+   *
+   * It reuses catalogMetadataScoreExpression rather than restating the 19
+   * weighted terms: two copies of that formula would drift, and the whole
+   * reason the column exists is that the formula is expensive to evaluate —
+   * not that it is wrong.
+   */
+  async refreshMetadataScores(): Promise<number> {
+    const result = await this.db.execute(sql`
+      update ${schema.warehouseCatalogItems} as target
+      set metadata_score = computed.score
+      from (
+        select ${schema.warehouseCatalogItems.id} as id, ${catalogMetadataScoreExpression()} as score
+        from ${schema.warehouseCatalogItems}
+        left join ${schema.warehouseCatalogDetails}
+          on ${schema.warehouseCatalogDetails.mediaType} = ${schema.warehouseCatalogItems.mediaType}
+         and ${schema.warehouseCatalogDetails.remoteId} = ${schema.warehouseCatalogItems.remoteId}
+        where ${schema.warehouseCatalogItems.metadataScore} is null
+      ) as computed
+      where target.id = computed.id
+    `);
+
+    return result.rowCount ?? 0;
+  }
+
   findCatalogDetail(mediaType: WarehouseMediaType, remoteId: string) {
     return this.db.query.warehouseCatalogDetails.findFirst({
       where: and(eq(schema.warehouseCatalogDetails.mediaType, mediaType), eq(schema.warehouseCatalogDetails.remoteId, remoteId)),
@@ -5333,7 +5363,15 @@ function catalogMetadataScoreExpression() {
     ${catalogWeightedPresence(1, catalogTextIsPresent(catalogIdentifierTextExpression('itunesId', 'itunes_id', 'itunes')))}
   )`;
 
-  return sql<number>`floor((${earned}::numeric / 76) * 100)::int`;
+  // The stored column first: recomputing these 19 terms for ~348,000 rows and
+  // then sorting them four times for percentile_cont exceeded the 30s
+  // statement_timeout on every request, even with the catalogue fully cached.
+  // COALESCE is lazy, so the expression below is only evaluated for rows synced
+  // before the column existed.
+  return sql<number>`coalesce(
+    ${schema.warehouseCatalogItems.metadataScore},
+    floor((${earned}::numeric / 76) * 100)::int
+  )`;
 }
 
 function catalogWeightedPresence(weight: number, condition: SQLWrapper) {

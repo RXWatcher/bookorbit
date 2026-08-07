@@ -120,6 +120,13 @@
       "when": 1786100000000,
       "tag": "0048_add_catalog_item_file_size",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786101000000,
+      "tag": "0049_add_catalog_metadata_score",
+      "breakpoints": true
     }
   ]
 }

@@ -104,7 +104,31 @@ export class WarehouseCatalogSyncService implements OnModuleInit {
   }
 
   async syncAll(): Promise<WarehouseCatalogSyncSummary[]> {
-    return Promise.all([this.syncEbooks(), this.syncAudiobooks(), this.syncComics()]);
+    const summaries = await Promise.all([this.syncEbooks(), this.syncAudiobooks(), this.syncComics()]);
+    await this.refreshDerivedColumns();
+    return summaries;
+  }
+
+  /**
+   * Recompute the columns derived from a synced row.
+   *
+   * An upsert leaves metadata_score null on new rows, and the statistics
+   * endpoint falls back to computing it inline — which is exactly the 30s
+   * timeout the column exists to avoid. Scoped to `is null`, so this is cheap
+   * on an ordinary sync.
+   *
+   * Never allowed to fail the sync: the rows are already stored and correct,
+   * and a missing score degrades to the slower path rather than losing data.
+   */
+  private async refreshDerivedColumns(): Promise<void> {
+    try {
+      const updated = await this.repository.refreshMetadataScores();
+      if (updated > 0) {
+        this.logger.log(`[catalog.sync] [derived] metadata_score refreshed for ${updated} rows`);
+      }
+    } catch (error) {
+      this.logger.warn(`[catalog.sync] [derived] metadata_score refresh failed - ${String(error)}`);
+    }
   }
 
   private async syncCatalog<Item>(

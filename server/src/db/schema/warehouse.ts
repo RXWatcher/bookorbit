@@ -102,6 +102,9 @@ export const warehouseCatalogItems = pgTable(
      *  which for audiobooks meant a correlated subquery over the files array
      *  and four endpoints timing out. */
     fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
+    /** Materialised metadata completeness score, 0-100 — see migration 0049.
+     *  Refreshed by refreshMetadataScores() after each catalog sync. */
+    metadataScore: integer('metadata_score'),
     hasCover: boolean('has_cover').notNull().default(false),
     upstreamCreatedAt: timestamp('upstream_created_at', { withTimezone: true }),
     upstreamUpdatedAt: timestamp('upstream_updated_at', { withTimezone: true }),
