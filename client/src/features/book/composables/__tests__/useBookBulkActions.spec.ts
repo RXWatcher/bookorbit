@@ -75,7 +75,7 @@ function makeReadStatus(overrides: Partial<UserBookStatus> = {}): UserBookStatus
 }
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -104,8 +104,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function makeQuerySelection(overrides: Partial<QuerySelectionState> = {}): QuerySelectionState {

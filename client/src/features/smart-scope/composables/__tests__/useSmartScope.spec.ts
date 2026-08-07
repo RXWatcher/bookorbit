@@ -10,8 +10,9 @@ vi.mock('@/lib/api', () => ({
 }))
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
+    coverAspectRatio: '2/3',
     status: 'active',
     title: 'Book A',
     authors: [],
@@ -38,8 +39,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function makePage(items: Partial<BookCard>[], total: number): BooksPage {

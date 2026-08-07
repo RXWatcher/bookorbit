@@ -3,8 +3,9 @@ import type { BookCard, DashboardCatalogItem } from '@bookorbit/types'
 import { sortSmartScopeItems } from '../smart-scope-sort'
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
+    coverAspectRatio: '2/3',
     status: 'active',
     title: 'Local Book',
     subtitle: null,
@@ -31,8 +32,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     lockedFields: [],
     files: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function makeCatalogItem(overrides: Partial<DashboardCatalogItem> = {}): DashboardCatalogItem {

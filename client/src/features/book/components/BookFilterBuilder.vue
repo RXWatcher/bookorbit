@@ -113,9 +113,14 @@ const fieldOptions = computed(() => {
 
 function operatorOptions(field: RuleField): RuleOperator[] {
   const allowed = props.allowedOperators?.[field]
-  if (!allowed?.length) return FIELD_OPERATORS[field]
+  // FIELD_OPERATORS is keyed by StaticRuleField; a custom field has its own
+  // set. operatorsForField (below) already handles that split — this used to
+  // index FIELD_OPERATORS with the wider RuleField directly, which is unsound
+  // and returned `any` for every custom field.
+  const options = operatorsForField(field)
+  if (!allowed?.length) return options
   const allowedSet = new Set(allowed)
-  return FIELD_OPERATORS[field].filter((operator) => allowedSet.has(operator))
+  return options.filter((operator) => allowedSet.has(operator))
 }
 
 onMounted(() => {

@@ -411,6 +411,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/features/warehouse/views/CatalogItemDetailView.vue'),
         meta: { title: 'Library Item' },
         beforeEnter: (to) => normalizeSourceBackedLibraryRoute(to, 'library-item-detail'),
+      },
+      {
         path: '/libraries',
         name: 'libraries',
         component: () => import('@/features/library/views/LibrariesView.vue'),

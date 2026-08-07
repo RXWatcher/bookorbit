@@ -17,7 +17,7 @@ vi.mock('vue-sonner', () => ({
 import { useTableCellEditor } from '../useTableCellEditor'
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'ok',
     coverAspectRatio: '2/3',
@@ -46,8 +46,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 describe('useTableCellEditor', () => {

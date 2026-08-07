@@ -293,9 +293,10 @@ onUnmounted(() => stopLibraryUploadListener())
           data-tour="sidebar-libraries"
           :label="t('components.sidebar.libraries')"
           :is-open="librariesOpen"
-          :collapsed-count="libraries.length"
+          :count="libraries.length"
+          content-id="sidebar-section-libraries"
           :can-add="false"
-          :add-title="t('components.sidebar.newLibrary')"
+          :add-label="t('components.sidebar.newLibrary')"
           :can-reorder="hasPermission('manage_libraries')"
           :is-reordering="isReorderingLibraries"
           @toggle="toggleLibraries"
@@ -387,9 +388,10 @@ onUnmounted(() => stopLibraryUploadListener())
           data-tour="sidebar-smartScopes"
           :label="t('components.sidebar.smartScopes')"
           :is-open="smartScopesOpen"
-          :collapsed-count="smartScopes.length"
+          :count="smartScopes.length"
+          content-id="sidebar-section-smart-scopes"
           :can-add="true"
-          :add-title="t('components.sidebar.newSmartScope')"
+          :add-label="t('components.sidebar.newSmartScope')"
           :can-reorder="smartScopes.length > 1"
           :is-reordering="isReorderingSmartScopes"
           @toggle="toggleSmartScopes"
@@ -452,9 +454,10 @@ onUnmounted(() => stopLibraryUploadListener())
           data-tour="sidebar-collections"
           :label="t('components.sidebar.collections')"
           :is-open="collectionsOpen"
-          :collapsed-count="collections.length"
+          :count="collections.length"
+          content-id="sidebar-section-collections"
           :can-add="true"
-          :add-title="t('components.sidebar.newCollection')"
+          :add-label="t('components.sidebar.newCollection')"
           :can-reorder="collections.length > 1"
           :is-reordering="isReorderingCollections"
           @toggle="toggleCollections"
@@ -558,16 +561,20 @@ onUnmounted(() => stopLibraryUploadListener())
             <span>{{ t('components.sidebar.supportShort') }}</span>
           </a>
 
-          <span v-if="versionUi.showLatest" class="text-sidebar-foreground/45">•</span>
+          <!-- showUpdate/updateHref/updateVersionLabel, not showLatest/latestHref/
+               latestLabel: SidebarVersionUi was refactored to a single update
+               pill and the template kept the old names, so `v-if` read
+               undefined and the update indicator never rendered at all. -->
+          <span v-if="versionUi.showUpdate" class="text-sidebar-foreground/45">•</span>
 
           <a
-            v-if="versionUi.showLatest"
-            :href="versionUi.latestHref"
+            v-if="versionUi.showUpdate"
+            :href="versionUi.updateHref"
             target="_blank"
             rel="noopener noreferrer"
             class="inline-flex min-w-0 max-w-full font-semibold text-primary transition-colors hover:text-primary/85"
           >
-            <span class="truncate">Latest {{ versionUi.latestLabel }}</span>
+            <span class="truncate">Latest {{ versionUi.updateVersionLabel }}</span>
           </a>
         </div>
       </div>

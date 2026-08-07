@@ -9,7 +9,9 @@ import type { PdfReaderSettings } from '@bookorbit/types'
 const mockRouterBack = vi.fn<() => void>()
 const mockRouterReplace = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
 const mockRoute = {
-  params: { bookId: '42', fileId: '101' },
+  // Record, not the inferred { bookId, fileId }: the catalog-PDF cases assign
+  // { id, remoteId } instead, which the narrow inferred shape rejected.
+  params: { bookId: '42', fileId: '101' } as Record<string, string>,
   query: {} as Record<string, string>,
 }
 

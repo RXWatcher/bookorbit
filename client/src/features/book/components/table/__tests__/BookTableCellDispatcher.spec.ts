@@ -5,7 +5,7 @@ import type { CellType, ColumnId } from '@/features/book/composables/tableColumn
 import BookTableCellDispatcher from '../BookTableCellDispatcher.vue'
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -34,8 +34,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 const baseProps = {

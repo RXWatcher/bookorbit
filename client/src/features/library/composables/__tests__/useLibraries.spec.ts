@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { Library } from '@bookorbit/types'
 import { useLibraries } from '../useLibraries'
 
 const apiMock = vi.fn<(url: string) => Promise<{ ok: boolean; json: () => Promise<unknown[]> }>>()

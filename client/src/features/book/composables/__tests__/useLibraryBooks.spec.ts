@@ -14,7 +14,8 @@ function makePage(items: Partial<BookCard>[], total: number): BooksPage {
 }
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
+    coverAspectRatio: '2/3',
     id: 1,
     status: 'active',
     title: 'Book A',
@@ -42,8 +43,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function mockOkResponse(page: BooksPage) {

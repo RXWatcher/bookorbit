@@ -16,7 +16,12 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 
 COPY packages/ ./packages/
 COPY client/ ./client/
-RUN pnpm --filter client run build-only
+# `build`, not `build-only`: build-only is `vite build` alone, which does NOT
+# typecheck. That is how a Record<ScrollerType, ShelfNameKey> missing two
+# required keys reached production and rendered
+# "dashboard.settings.shelfNames.undefined" on the dashboard. `build` is
+# run-p type-check build-only, matching what the server stage already does.
+RUN pnpm --filter client run build
 
 # Stage 2: Build server + create deploy bundle
 FROM base AS server-builder
