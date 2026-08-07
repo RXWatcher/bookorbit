@@ -254,6 +254,22 @@
           "label": "Show spine on comics",
           "hint": "Apply the spine and gloss effect to comic covers (cbz, cbr, cb7)"
         },
+        "detailCoverTint": {
+          "title": "Book details cover tint",
+          "hint": "Fades colour sampled from the cover behind the artwork and title on the book details page",
+          "off": {
+            "label": "Off",
+            "hint": "Plain card background"
+          },
+          "single": {
+            "label": "One colour",
+            "hint": "The cover's dominant colour only"
+          },
+          "duotone": {
+            "label": "Two colours",
+            "hint": "Adds the cover's accent colour when it has a distinct one"
+          }
+        },
         "shadow": {
           "title": "Cover shadow strength",
           "hint": "Controls depth under covers across grid, list, table, and dashboard thumbnails",
@@ -1033,7 +1049,7 @@
       },
       "libraries": {
         "title": "Libraries",
-        "subtitle": "Manage your media libraries and trigger content scans.",
+        "subtitle": "Manage your media libraries and keep contents up to date.",
         "scanAll": "Scan All",
         "scanning": "Scanning...",
         "addLibrary": "Add Library",
@@ -2026,6 +2042,8 @@
         "daysAgo": "{count}d ago",
         "unknown": "Unknown",
         "updateAvailable": "Update available",
+        "manualUpdateRequired": "Manual update required",
+        "manualUpdateExplanation": "This plugin version cannot install its own updates. Download the plugin and copy bookorbit.koplugin to koreader/plugins/ on this device.",
         "upToDate": "Up to date",
         "versionUnknown": "Version unknown",
         "latestPlugin": "Latest plugin: v{version}",
@@ -2094,6 +2112,7 @@
         "stockStep1Prefix": "On your KOReader device, go to",
         "stockStep1Suffix": ".",
         "stockStep2": "Set the custom sync server to the URL shown above.",
+        "stockStep2InlineUrl": "Set the custom sync server to the following URL:",
         "stockStep3": "Enter the username and password you created, then tap Login.",
         "locationNote": "BookOrbit saves KOReader-compatible EPUB locations from the web reader. Restore should land close to the same position, though exact line placement can vary by reader and EPUB layout.",
         "dangerZone": "Danger Zone",
@@ -3678,6 +3697,8 @@
         "fileSize": "File Size",
         "library": "Library",
         "added": "Added",
+        "cancelDateAddedEdit": "Cancel date added edit",
+        "editDateAdded": "Edit date added",
         "dateStarted": "Date Started",
         "saving": "Saving...",
         "cancelDateStartedEdit": "Cancel date started edit",
@@ -3689,9 +3710,12 @@
         "synopsis": "Synopsis",
         "noDescription": "No description available.",
         "dateStartedFutureError": "Date Started cannot be in the future.",
+        "dateAddedRequiredError": "Date Added is required.",
+        "dateAddedFutureError": "Date Added cannot be in the future.",
         "dateFinishedFutureError": "Date Finished cannot be in the future.",
         "dateFinishedBeforeStartedError": "Date Finished must be on or after Date Started.",
         "saveReadingDatesError": "Failed to save reading dates.",
+        "saveAddedDateError": "Failed to save date added.",
         "koboPendingDelete": "Pending delete from device",
         "koboPendingDeleteTooltip": "Kobo will remove it on next sync.",
         "koboRemovedByDevice": "Removed by device",
@@ -4737,6 +4761,10 @@
       "untitled": "Untitled",
       "cover": "Cover",
       "bookCover": "Book cover"
+    },
+    "libraryLoad": {
+      "errorTitle": "Unable to load your libraries",
+      "errorDescription": "BookOrbit could not retrieve your libraries. Your library data has not been removed."
     },
     "scroller": {
       "failedToLoad": "Failed to load.",
@@ -5867,57 +5895,58 @@
         "files": "Files",
         "integrations": "Integrations",
         "personal": "Personal",
-        "app": "App updates"
+        "app": "App updates",
+        "requests": "Library Requests"
       },
       "enabledCount": "{enabled} of {total} enabled",
       "categories": {
-        "achievements": {
-          "label": "Achievements",
-          "description": "When you unlock a new reading achievement."
-        },
-        "authorEnrichment": {
-          "label": "Author enrichment",
-          "description": "When author biographies and photos finish being fetched."
-        },
-        "bookDock": {
-          "label": "Book Dock",
-          "description": "When files dropped into the dock are ready to review or finalized."
-        },
-        "bulkRename": {
-          "label": "Bulk rename",
-          "description": "When a bulk rename across many books completes or fails."
-        },
-        "catalogRequests": {
-          "label": "Library Requests",
-          "description": "Updates about your ebook and audiobook requests."
-        },
-        "email": {
-          "label": "Email delivery",
-          "description": "When sending a book to an email address succeeds or fails."
-        },
-        "fileRename": {
-          "label": "File rename",
-          "description": "When a single book file is renamed to match your naming pattern."
-        },
-        "fileWriteBack": {
-          "label": "File write-back",
-          "description": "When edited metadata is written back into book files on disk."
-        },
-        "koboSync": {
-          "label": "Kobo sync",
-          "description": "When a Kobo device finishes syncing with your library."
+        "scanning": {
+          "label": "Library scanning",
+          "description": "When a library scan finishes, fails, or finds missing books."
         },
         "metadata": {
           "label": "Metadata fetching",
           "description": "When metadata lookups for your books complete or fail."
         },
+        "authorEnrichment": {
+          "label": "Author enrichment",
+          "description": "When author biographies and photos finish being fetched."
+        },
+        "fileWriteBack": {
+          "label": "File write-back",
+          "description": "When edited metadata is written back into book files on disk."
+        },
+        "fileRename": {
+          "label": "File rename",
+          "description": "When a single book file is renamed to match your naming pattern."
+        },
+        "bulkRename": {
+          "label": "Bulk rename",
+          "description": "When a bulk rename across many books completes or fails."
+        },
         "migration": {
           "label": "Data migration",
           "description": "When an import from another library tool completes or fails."
         },
-        "scanning": {
-          "label": "Library scanning",
-          "description": "When a library scan finishes, fails, or finds missing books."
+        "bookDock": {
+          "label": "Book Dock",
+          "description": "When files dropped into the dock are ready to review or finalized."
+        },
+        "koboSync": {
+          "label": "Kobo sync",
+          "description": "When a Kobo device finishes syncing with your library."
+        },
+        "email": {
+          "label": "Email delivery",
+          "description": "When sending a book to an email address succeeds or fails."
+        },
+        "achievements": {
+          "label": "Achievements",
+          "description": "When you unlock a new reading achievement."
+        },
+        "catalogRequests": {
+          "label": "Library Requests",
+          "description": "Updates about your ebook and audiobook requests."
         }
       }
     }
@@ -6114,31 +6143,25 @@
       "cycleFooterMode": "Cycle footer info mode"
     },
     "cbz": {
-      "tabs": {
-        "view": "View",
-        "reading": "Reading",
-        "layout": "Layout"
-      },
       "fitMode": "Fit mode",
       "background": "Background",
       "scrollMode": "Scroll mode",
       "scrollModeHint": "Use \"No gaps\" for webtoons and vertical strips.",
       "readingDirection": "Reading direction",
       "pageView": "Page view",
-      "autoFallback": "Auto-fallback",
+      "twoPagePagedOnly": "Two pages are shown only in paged mode.",
+      "spreadSection": "Two-page spread",
+      "spreadFallbackHint": "This screen is too narrow for two pages, so single pages are shown.",
       "spreadAlignmentLabel": "Spread alignment",
-      "spreadAlignmentHint": "Spread alignment is unavailable in auto-fallback mode.",
       "spreadGap": "Spread gap",
       "spreadGapValue": "{value}px",
-      "focusTwoPageToggle": "Focus two-page toggle",
       "forceTwoPage": "Force two-page",
-      "off": "Off",
-      "on": "On",
       "widePages": "Wide pages",
-      "resetBookViewSettings": "Reset book view settings",
-      "resetConfirm": "Reset view settings for this book to your global defaults?",
       "firstPage": "First page",
       "lastPage": "Last page",
+      "zoomControls": "Zoom controls",
+      "zoomOut": "Zoom out",
+      "zoomIn": "Zoom in",
       "fit": {
         "page": "Page Fit",
         "width": "Page Width",
@@ -6170,7 +6193,19 @@
         "black": "Black",
         "gray": "Gray",
         "white": "White"
-      }
+      },
+      "tabs": {
+        "view": "View",
+        "reading": "Reading",
+        "layout": "Layout"
+      },
+      "autoFallback": "Auto-fallback",
+      "spreadAlignmentHint": "Spread alignment is unavailable in auto-fallback mode.",
+      "focusTwoPageToggle": "Focus two-page toggle",
+      "off": "Off",
+      "on": "On",
+      "resetBookViewSettings": "Reset book view settings",
+      "resetConfirm": "Reset view settings for this book to your global defaults?"
     },
     "audiobook": {
       "untitled": "Untitled",

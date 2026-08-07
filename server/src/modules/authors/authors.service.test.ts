@@ -34,6 +34,7 @@ describe('AuthorsService', () => {
 
   const bookRepo = {
     findCards: vi.fn(),
+    findCardsByBookIds: vi.fn(),
   };
 
   const libraryService = {
@@ -607,7 +608,7 @@ describe('AuthorsService', () => {
     };
     authorsRepo.findById.mockResolvedValue({ id: 42, name: 'Local Author', bookCount: 2 });
     authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [11], total: 1, page: 0, size: 50 });
-    bookRepo.findCards.mockResolvedValue({ rows: [], authorRows: [], fileRows: [], genreRows: [], progressRows: [] });
+    bookRepo.findCardsByBookIds.mockResolvedValue({ rows: [], authorRows: [], fileRows: [], genreRows: [], progressRows: [], statusRows: [], narratorRows: [], tagRows: [], seriesMembershipRows: [] });
     vi.mocked(assembleBookCards).mockReturnValue([localBook]);
     warehouseCatalogService.listAuthorBooks.mockResolvedValue({ items: [bookCard], total: 1 });
 
@@ -649,7 +650,7 @@ describe('AuthorsService', () => {
     const result = await service.findBooks(reqUser(), 10, {});
 
     expect(result).toEqual({ items: [], total: 0, page: 0, size: 50 });
-    expect(bookRepo.findCards).not.toHaveBeenCalled();
+    expect(bookRepo.findCardsByBookIds).not.toHaveBeenCalled();
   });
 
   it('findBooks passes sort, order, size, and libraryId to findBookIdsPage', async () => {
@@ -678,7 +679,7 @@ describe('AuthorsService', () => {
 
     authorsRepo.findById.mockResolvedValue({ id: 5, name: 'Author', bookCount: 3 });
     authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [3, 1, 2], total: 3, page: 0, size: 50 });
-    bookRepo.findCards.mockResolvedValue({ rows: [], authorRows: [], fileRows: [], genreRows: [], progressRows: [] });
+    bookRepo.findCardsByBookIds.mockResolvedValue({ rows: [], authorRows: [], fileRows: [], genreRows: [], progressRows: [], statusRows: [], narratorRows: [], tagRows: [], seriesMembershipRows: [] });
     vi.mocked(assembleBookCards).mockReturnValue([book1, book2, book3]);
 
     const result = await service.findBooks(reqUser(), 5, {});

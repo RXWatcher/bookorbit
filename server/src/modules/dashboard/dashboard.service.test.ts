@@ -921,4 +921,30 @@ describe('DashboardService', () => {
       }),
     ]);
   });
+
+  it('batches shelf selection and hydrates overlapping books once', async () => {
+    const { service, dashboardRepo, bookReadService, libraryService } = makeService();
+    const user = makeUser({ id: 8 });
+    libraryService.findAccessibleLibraryIds.mockResolvedValue([10]);
+    dashboardRepo.findRecentlyAddedBookIds.mockResolvedValue([9, 3]);
+    dashboardRepo.findWantToReadBookIds.mockResolvedValue([3, 7]);
+    bookReadService.findCardsByBookIds.mockResolvedValue(makeFindCardsResult([3, 7, 9]));
+
+    const result = await service.getScrollers(
+      {
+        items: [
+          { id: 'recent', type: 'recently-added', limit: 20 },
+          { id: 'wanted', type: 'want-to-read', limit: 20 },
+        ],
+      },
+      user,
+    );
+
+    expect(libraryService.findAccessibleLibraryIds).toHaveBeenCalledOnce();
+    expect(bookReadService.findCardsByBookIds).toHaveBeenCalledExactlyOnceWith([9, 3, 7], 8);
+    expect(result.items.map((item) => ({ id: item.id, ids: item.books.map((book) => book.id), failed: item.failed }))).toEqual([
+      { id: 'recent', ids: [9, 3], failed: false },
+      { id: 'wanted', ids: [3, 7], failed: false },
+    ]);
+  });
 });

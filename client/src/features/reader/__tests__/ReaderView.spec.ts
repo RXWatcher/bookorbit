@@ -192,7 +192,10 @@ vi.mock('../shared/composables/useReaderSettings', () => ({
 vi.mock('../epub/composables/useCustomFonts', () => ({
   useCustomFonts: () => ({
     fonts: ref([]),
+    serverFonts: ref([]),
     fetchFonts: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    fetchAllFonts: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    ensureCssFamilyLoaded: vi.fn<(family: string) => Promise<void>>().mockResolvedValue(undefined),
     generateFontFaceCSS: () => '',
   }),
 }))

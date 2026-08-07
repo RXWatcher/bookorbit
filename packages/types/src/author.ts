@@ -62,6 +62,7 @@ export type AuthorEnrichmentStatus = {
   processing: number;
   rateLimited: number;
   failed: number;
+  latestFailureAt: string | null;
   done: number;
   total: number;
 };

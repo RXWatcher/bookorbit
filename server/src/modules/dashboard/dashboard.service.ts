@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 
 import {
   CLOUD_AUDIO_LIBRARY_ID,
@@ -7,12 +7,15 @@ import {
   type BookCard,
   type DashboardCatalogAdditionsData,
   type DashboardCatalogItem,
+  type DashboardScrollerBatchResponse,
   type DashboardScrollerItem,
   type LibraryBookItem,
   type WarehouseMediaType,
 } from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
 import type { WarehouseCatalogItemRow } from '../../db/schema';
+import { mapWithConcurrency } from '../../common/utils/batch.utils';
+import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { BookReadService } from '../book/book-read.service';
 import { assembleBookCards } from '../book/utils/assemble-book-cards';
 import { SmartScopeService } from '../smart-scope/smart-scope.service';
@@ -22,13 +25,16 @@ import { catalogAuthorRefs, catalogSeriesRef } from '../warehouse/catalog-link-r
 import { mapWarehouseCatalogItemToBookCard } from '../warehouse/warehouse-book-card.mapper';
 import type { ContinueReadingRow, UpNextInSeriesRow } from './dashboard.repository';
 import { DashboardRepository } from './dashboard.repository';
+import { DASHBOARD_SCROLLER_MAX_LIMIT, type DashboardScrollerBatchDto, type DashboardScrollerBatchItemDto } from './dto/dashboard-scroller-batch.dto';
 import { ScrollerType } from './dto/scroller-type.enum';
 
-const MAX_LIMIT = 50;
+const SCROLLER_QUERY_CONCURRENCY = 3;
 type DateLike = Date | string | number | null | undefined;
 
 @Injectable()
 export class DashboardService {
+  private readonly logger = new Logger(DashboardService.name);
+
   constructor(
     private readonly dashboardRepo: DashboardRepository,
     private readonly bookReadService: BookReadService,
@@ -49,7 +55,7 @@ export class DashboardService {
   }
 
   async getCatalogAdditions(user: RequestUser, limit: number): Promise<DashboardCatalogAdditionsData> {
-    const clampedLimit = Math.min(Math.max(1, limit), MAX_LIMIT);
+    const clampedLimit = Math.min(Math.max(1, limit), DASHBOARD_SCROLLER_MAX_LIMIT);
     const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
     const rows = await this.warehouseRepo.listRecentUserCatalogItems(
@@ -62,7 +68,7 @@ export class DashboardService {
   }
 
   async getCatalogDiscovery(user: RequestUser, limit: number): Promise<DashboardCatalogAdditionsData> {
-    const clampedLimit = Math.min(Math.max(1, limit), MAX_LIMIT);
+    const clampedLimit = Math.min(Math.max(1, limit), DASHBOARD_SCROLLER_MAX_LIMIT);
     const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
     const rows = await this.warehouseRepo.listRandomCatalogItems(
@@ -74,7 +80,7 @@ export class DashboardService {
   }
 
   async getScroller(type: ScrollerType, user: RequestUser, limit: number, smartScopeId?: number): Promise<DashboardScrollerItem[]> {
-    const clampedLimit = Math.min(Math.max(1, limit), MAX_LIMIT);
+    const clampedLimit = Math.min(Math.max(1, limit), DASHBOARD_SCROLLER_MAX_LIMIT);
 
     if (type === ScrollerType.SMART_SCOPE) {
       if (!smartScopeId || smartScopeId <= 0) {
@@ -231,17 +237,26 @@ export class DashboardService {
       this.assertSmartScopeId(smartScopeId),
       user,
       0,
-      Math.min(Math.max(1, limit), MAX_LIMIT),
+      Math.min(Math.max(1, limit), DASHBOARD_SCROLLER_MAX_LIMIT),
     );
     return result.items.filter(isBookCard).map((item) => item.id);
   }
 
   async getScrollerBookIds(type: Exclude<ScrollerType, 'smart-scope'>, user: RequestUser, limit: number): Promise<number[]> {
-    return this.findScrollerBookIds(type, user, Math.min(Math.max(1, limit), MAX_LIMIT));
+    return this.findScrollerBookIds(type, user, Math.min(Math.max(1, limit), DASHBOARD_SCROLLER_MAX_LIMIT));
   }
 
   private async findScrollerBookIds(type: Exclude<ScrollerType, 'smart-scope'>, user: RequestUser, clampedLimit: number): Promise<number[]> {
     const accessibleLibraryIds = await this.libraryService.findAccessibleLibraryIds(user);
+    return this.findScrollerBookIdsForLibraries(type, user, clampedLimit, accessibleLibraryIds);
+  }
+
+  private async findScrollerBookIdsForLibraries(
+    type: Exclude<ScrollerType, 'smart-scope'>,
+    user: RequestUser,
+    clampedLimit: number,
+    accessibleLibraryIds: number[],
+  ): Promise<number[]> {
     if (accessibleLibraryIds.length === 0) return [];
 
     const contentFilters = user.isSuperuser ? undefined : user.contentFilters;
@@ -262,6 +277,85 @@ export class DashboardService {
 
     // Catalog scroller types are served by the warehouse endpoints, not here.
     return [];
+  }
+
+  // v2.5.0's batched shelf endpoint: one round trip for the whole dashboard,
+  // with a single shared card hydration across every shelf. Catalog shelves are
+  // not served here — findScrollerBookIds returns [] for them and the client
+  // routes them to the warehouse endpoints instead.
+  async getScrollers(dto: DashboardScrollerBatchDto, user: RequestUser): Promise<DashboardScrollerBatchResponse> {
+    const startedAt = Date.now();
+    const requestIds = new Set(dto.items.map((item) => item.id));
+    if (requestIds.size !== dto.items.length) throw new BadRequestException('Scroller batch item IDs must be unique');
+
+    this.logger.debug(
+      `[dashboard.scroller_batch] [start] userId=${user.id} shelfCount=${dto.items.length} concurrency=${SCROLLER_QUERY_CONCURRENCY} - scroller batch started`,
+    );
+
+    const accessibleLibraryIds = await this.libraryService.findAccessibleLibraryIds(user);
+    const selections = await mapWithConcurrency(dto.items, SCROLLER_QUERY_CONCURRENCY, async (item) => {
+      const selectionStartedAt = Date.now();
+      try {
+        const bookIds = await this.findBatchScrollerBookIds(item, user, accessibleLibraryIds);
+        return { item, bookIds, failed: false };
+      } catch (error) {
+        const errorClass = error instanceof Error ? error.constructor.name : typeof error;
+        const message = sanitizeLogValue(error instanceof Error ? error.message : error);
+        this.logger.warn(
+          `[dashboard.scroller_query] [fail] userId=${user.id} type=${item.type} smartScopeId=${item.smartScopeId ?? 0} durationMs=${Date.now() - selectionStartedAt} errorClass=${errorClass} error="${message}" - scroller selection failed`,
+        );
+        return { item, bookIds: [] as number[], failed: true };
+      }
+    });
+
+    const uniqueBookIds = [...new Set(selections.flatMap((selection) => selection.bookIds))];
+    const hydrationStartedAt = Date.now();
+    this.logger.debug(`[dashboard.card_hydration] [start] userId=${user.id} uniqueBookCount=${uniqueBookIds.length} - shared card hydration started`);
+    let cards: BookCard[];
+    try {
+      cards = await this.loadCardsByIds(uniqueBookIds, user.id);
+      this.logger.debug(
+        `[dashboard.card_hydration] [end] userId=${user.id} uniqueBookCount=${uniqueBookIds.length} resultCount=${cards.length} durationMs=${Date.now() - hydrationStartedAt} - shared card hydration completed`,
+      );
+    } catch (error) {
+      const errorClass = error instanceof Error ? error.constructor.name : typeof error;
+      const message = sanitizeLogValue(error instanceof Error ? error.message : error);
+      this.logger.warn(
+        `[dashboard.card_hydration] [fail] userId=${user.id} uniqueBookCount=${uniqueBookIds.length} durationMs=${Date.now() - hydrationStartedAt} errorClass=${errorClass} error="${message}" - shared card hydration failed`,
+      );
+      throw error;
+    }
+    const cardsById = new Map(cards.map((card) => [card.id, card]));
+    const items = selections.map(({ item, bookIds, failed }) => ({
+      id: item.id,
+      books: bookIds.map((id) => cardsById.get(id)).filter((card): card is BookCard => card != null),
+      failed,
+    }));
+
+    this.logger.debug(
+      `[dashboard.scroller_batch] [end] userId=${user.id} shelfCount=${items.length} failedCount=${items.filter((item) => item.failed).length} uniqueBookCount=${uniqueBookIds.length} durationMs=${Date.now() - startedAt} - scroller batch completed`,
+    );
+    return { items };
+  }
+
+  private async findBatchScrollerBookIds(item: DashboardScrollerBatchItemDto, user: RequestUser, accessibleLibraryIds: number[]): Promise<number[]> {
+    const startedAt = Date.now();
+    this.logger.debug(
+      `[dashboard.scroller_query] [start] userId=${user.id} type=${item.type} smartScopeId=${item.smartScopeId ?? 0} limit=${item.limit} - scroller selection started`,
+    );
+
+    let bookIds: number[];
+    if (item.type === ScrollerType.SMART_SCOPE) {
+      const smartScopeId = this.assertSmartScopeId(item.smartScopeId);
+      bookIds = await this.smartScopeService.executeSmartScopeBookIds(smartScopeId, user, item.limit);
+    } else {
+      bookIds = await this.findScrollerBookIdsForLibraries(item.type, user, item.limit, accessibleLibraryIds);
+    }
+
+    this.logger.debug(
+      `[dashboard.scroller_query] [end] userId=${user.id} type=${item.type} smartScopeId=${item.smartScopeId ?? 0} resultCount=${bookIds.length} durationMs=${Date.now() - startedAt} - scroller selection completed`,
+    );
+    return bookIds;
   }
 
   private assertSmartScopeId(smartScopeId?: number): number {

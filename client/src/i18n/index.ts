@@ -12,6 +12,10 @@ export const i18n = createI18n({
   legacy: false,
   locale: DEFAULT_LOCALE,
   fallbackLocale: DEFAULT_LOCALE,
+  // Non-English catalogs are intentionally partial and fall back to English;
+  // without these, every fallback logs a console warning.
+  missingWarn: false,
+  fallbackWarn: false,
   messages: { en: compileIcuCatalog(en, DEFAULT_LOCALE) },
 })
 

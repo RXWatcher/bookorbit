@@ -2,10 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 
 import type { RequestUser } from '../../common/types/request-user';
 import { RecommendationService } from './recommendation.service';
-import { CLOUD_AUDIO_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
-
-const expectedCatalogAuthorRef = (name: string) => ({ id: expect.any(Number), name });
-const expectedCatalogSeriesRef = (name: string) => ({ id: expect.any(Number), name });
+import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 
 function makeUser(isSuperuser = false): RequestUser {
   return {
@@ -47,13 +44,10 @@ function makeService() {
   const embedder = {
     embedBook: vi.fn(),
   };
-  const warehouseRepo = {
-    queryUserCatalogItems: vi.fn(),
-  };
 
-  const service = new RecommendationService(recRepo as never, bookRepo as never, libraryService as never, embedder as never, warehouseRepo as never);
+  const service = new RecommendationService(recRepo as never, bookRepo as never, libraryService as never, embedder as never);
 
-  return { service, recRepo, bookRepo, libraryService, embedder, warehouseRepo };
+  return { service, recRepo, bookRepo, libraryService, embedder };
 }
 
 describe('RecommendationService', () => {
@@ -223,112 +217,6 @@ describe('RecommendationService', () => {
       authors: [],
       isAudiobook: false,
     });
-  });
-
-  it('returns safe cached source-backed library recommendations from target series and authors', async () => {
-    const { service, recRepo, bookRepo, libraryService, warehouseRepo } = makeService();
-    const user = makeUser();
-
-    bookRepo.findLibraryIdByBookId.mockResolvedValue(9);
-    libraryService.findAll.mockResolvedValue([{ id: 7 }, { id: CLOUD_AUDIO_LIBRARY_ID }]);
-    recRepo.getTargetBookData.mockResolvedValue({
-      embedding: [0.2],
-      seriesName: 'Dune',
-      rating: null,
-      authorNames: ['Frank Herbert'],
-      genreTagNames: [],
-    });
-    warehouseRepo.queryUserCatalogItems.mockResolvedValue({
-      rows: [
-        {
-          id: 101,
-          mediaType: 'audiobook',
-          remoteId: 'audio-1',
-          title: 'Dune Audio',
-          subtitle: null,
-          sortTitle: 'Dune Audio',
-          authors: ['Frank Herbert'],
-          narrators: ['Simon Vance'],
-          series: 'Dune',
-          genres: [],
-          tags: [],
-          language: 'en',
-          publisher: 'Orbit',
-          identifiers: {},
-          format: 'm4b',
-          durationSeconds: 3600,
-          hasCover: true,
-          upstreamCreatedAt: new Date('2025-01-01T00:00:00.000Z'),
-          upstreamUpdatedAt: new Date('2025-01-02T00:00:00.000Z'),
-          rawPayload: { source: 'catalog-source' },
-          syncedAt: new Date('2026-01-01T00:00:00.000Z'),
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-        },
-      ],
-      total: 1,
-      page: 0,
-      limit: 12,
-    });
-
-    const result = await service.getCatalogRecommendations(55, user);
-
-    expect(libraryService.verifyUserAccess).toHaveBeenCalledWith(user.id, 9, false);
-    expect(warehouseRepo.queryUserCatalogItems).toHaveBeenCalledWith(user.id, {
-      includeAllCatalogItems: true,
-      filter: {
-        type: 'group',
-        join: 'OR',
-        rules: [
-          { type: 'rule', field: 'series', operator: 'contains', value: 'Dune' },
-          { type: 'rule', field: 'author', operator: 'includesAny', value: ['Frank Herbert'] },
-        ],
-      },
-      page: 0,
-      limit: 12,
-      mediaType: 'audiobook',
-      contentFilters: EMPTY_CONTENT_FILTER_RULES,
-    });
-    expect(result).toEqual([
-      {
-        type: 'catalog-item',
-        mediaType: 'audiobook',
-        remoteId: 'audio-1',
-        title: 'Dune Audio',
-        subtitle: null,
-        seriesName: 'Dune',
-        seriesRef: expectedCatalogSeriesRef('Dune'),
-        authors: ['Frank Herbert'],
-        authorRefs: [expectedCatalogAuthorRef('Frank Herbert')],
-        narrators: ['Simon Vance'],
-        libraryName: 'Audiobooks',
-        formats: ['m4b'],
-        hasCover: true,
-      },
-    ]);
-    expect(JSON.stringify(result)).not.toContain('catalog-source');
-    expect(result[0]).not.toHaveProperty('rawPayload');
-    expect(result[0]).not.toHaveProperty('upstreamUpdatedAt');
-  });
-
-  it('does not query owned catalog recommendations when source-backed libraries are inaccessible', async () => {
-    const { service, recRepo, bookRepo, libraryService, warehouseRepo } = makeService();
-    const user = makeUser();
-
-    bookRepo.findLibraryIdByBookId.mockResolvedValue(9);
-    libraryService.findAll.mockResolvedValue([{ id: 7 }]);
-    recRepo.getTargetBookData.mockResolvedValue({
-      embedding: [0.2],
-      seriesName: 'Dune',
-      rating: null,
-      authorNames: ['Frank Herbert'],
-      genreTagNames: [],
-    });
-
-    await expect(service.getCatalogRecommendations(55, user)).resolves.toEqual([]);
-
-    expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
-    expect(warehouseRepo.queryUserCatalogItems).not.toHaveBeenCalled();
   });
 
   it('filters out ANN results that cannot be mapped to cards', async () => {

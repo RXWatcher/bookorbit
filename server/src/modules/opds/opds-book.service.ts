@@ -156,6 +156,30 @@ export interface OpdsManifestBookRow {
   files: OpdsManifestFileRow[];
 }
 
+export interface OpdsManifestFileRow {
+  id: number;
+  format: string;
+  sizeBytes: number | null;
+  fileHash: string | null;
+  filename: string | null;
+  contentVersion: Date;
+}
+
+export interface OpdsManifestBookRow {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  authors: string[];
+  seriesName: string | null;
+  seriesIndex: number | null;
+  language: string | null;
+  publisher: string | null;
+  publishedYear: number | null;
+  isbn10: string | null;
+  isbn13: string | null;
+  files: OpdsManifestFileRow[];
+}
+
 @Injectable()
 export class OpdsBookService {
   constructor(
@@ -279,6 +303,199 @@ export class OpdsBookService {
     }
 
     return this.paginatedBookQuery(and(...clauses)!, sortOrder, page, size, userId, { contextSeries: seriesFilter });
+  }
+
+  // Resolves authorization and every catalog filter into one where clause. The
+  // interactive list and the bulk manifest share it so their membership cannot
+  // drift apart. Returns null when the scope is provably empty.
+  private async buildCatalogScope(
+    userId: number,
+    filters: OpdsBookFilters | undefined,
+    isSuperuser: boolean,
+    contentFilters: ContentFilterRules | undefined,
+  ): Promise<{ where: SQL; contextSeries?: SeriesFilter } | null> {
+    const accessibleIds = await this.getAccessibleLibraryIds(userId, isSuperuser);
+    if (accessibleIds.length === 0) return null;
+
+    if (filters?.ids && filters.ids.length === 0) return null;
+
+    if (filters?.libraryId && !accessibleIds.includes(filters.libraryId)) {
+      throw new ForbiddenException('No access to this library');
+    }
+
+    if (filters?.collectionId) {
+      const [collection] = await this.db
+        .select({ userId: collections.userId })
+        .from(collections)
+        .where(eq(collections.id, filters.collectionId))
+        .limit(1);
+      if (!collection || collection.userId !== userId) {
+        throw new ForbiddenException('No access to this collection');
+      }
+    }
+
+    if (filters?.smartScopeId) {
+      const where = await this.buildSmartScopeWhere(userId, filters.smartScopeId, accessibleIds, contentFilters, filters.q);
+      return where ? { where } : null;
+    }
+
+    const clauses: SQL[] = [inArray(books.libraryId, accessibleIds), eq(books.status, 'present')];
+
+    if (filters?.libraryId) clauses.push(eq(books.libraryId, filters.libraryId));
+
+    if (filters?.ids) clauses.push(inArray(books.id, filters.ids));
+
+    if (filters?.collectionId) {
+      clauses.push(
+        sql`${books.id} IN (SELECT ${collectionBooks.bookId} FROM ${collectionBooks} WHERE ${collectionBooks.collectionId} = ${filters.collectionId})`,
+      );
+    }
+
+    if (filters?.author) {
+      clauses.push(
+        sql`${books.id} IN (SELECT ${bookAuthors.bookId} FROM ${bookAuthors} INNER JOIN ${authors} ON ${authors.id} = ${bookAuthors.authorId} WHERE ${authors.name} = ${filters.author})`,
+      );
+    }
+
+    const seriesFilter = this.resolveSeriesFilter(filters);
+    if (seriesFilter) clauses.push(this.buildSeriesMembershipClause(seriesFilter));
+
+    if (filters?.format) {
+      const format = filters.format.trim().toLowerCase();
+      if (format) {
+        clauses.push(
+          sql`${books.id} IN (SELECT ${bookFiles.bookId} FROM ${bookFiles} WHERE ${bookFiles.role} = 'content' AND lower(${bookFiles.format}) = ${format})`,
+        );
+      }
+    }
+
+    if (filters?.readStatus) {
+      clauses.push(this.buildReadStatusClause(userId, filters.readStatus));
+    }
+
+    if (filters?.q) {
+      const searchClause = this.buildCatalogSearchClause(filters.q);
+      if (searchClause) clauses.push(searchClause);
+    }
+
+    if (!isSuperuser && contentFilters) {
+      clauses.push(...buildContentFilterClauses(contentFilters, this.db));
+    }
+
+    return { where: and(...clauses)!, contextSeries: seriesFilter };
+  }
+
+  // Cursor page for the KOReader bulk download manifest. Ordering by the
+  // immutable book id keeps pagination stable while the library changes
+  // underneath a long bulk run: a concurrently added book gets a higher id, so
+  // no already-returned row can repeat and no earlier row can be skipped.
+  async getBookManifestPage(
+    userId: number,
+    opts: { filters?: OpdsBookFilters; afterId?: number; limit: number },
+    isSuperuser = false,
+    contentFilters?: ContentFilterRules,
+  ): Promise<{ rows: OpdsManifestBookRow[]; hasNext: boolean }> {
+    const scope = await this.buildCatalogScope(userId, opts.filters, isSuperuser, contentFilters);
+    if (!scope) return { rows: [], hasNext: false };
+
+    const clauses: SQL[] = [scope.where];
+    if (opts.afterId !== undefined) clauses.push(gt(books.id, opts.afterId));
+
+    const idRows = await this.db
+      .select({ id: books.id })
+      .from(books)
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(and(...clauses)!)
+      .orderBy(books.id)
+      .limit(opts.limit + 1);
+
+    const hasNext = idRows.length > opts.limit;
+    const ids = idRows.slice(0, opts.limit).map((row) => row.id);
+    return { rows: await this.fetchManifestRows(ids), hasNext };
+  }
+
+  private async fetchManifestRows(bookIds: number[]): Promise<OpdsManifestBookRow[]> {
+    if (bookIds.length === 0) return [];
+
+    const [metaRows, authorRows, fileRows] = await Promise.all([
+      this.db
+        .select({
+          id: books.id,
+          folderPath: books.folderPath,
+          title: bookMetadata.title,
+          subtitle: bookMetadata.subtitle,
+          seriesName: bookMetadata.seriesName,
+          seriesIndex: bookMetadata.seriesIndex,
+          language: bookMetadata.language,
+          publisher: bookMetadata.publisher,
+          publishedYear: bookMetadata.publishedYear,
+          isbn10: bookMetadata.isbn10,
+          isbn13: bookMetadata.isbn13,
+        })
+        .from(books)
+        .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+        .where(inArray(books.id, bookIds)),
+      this.db
+        .select({ bookId: bookAuthors.bookId, name: authors.name })
+        .from(bookAuthors)
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(inArray(bookAuthors.bookId, bookIds))
+        .orderBy(bookAuthors.displayOrder),
+      this.db
+        .select({
+          bookId: books.id,
+          id: bookFiles.id,
+          format: bookFiles.format,
+          sizeBytes: bookFiles.sizeBytes,
+          fileHash: bookFiles.fileHash,
+          absolutePath: bookFiles.absolutePath,
+          updatedAt: bookFiles.updatedAt,
+        })
+        .from(bookFiles)
+        .innerJoin(books, eq(books.id, bookFiles.bookId))
+        .where(and(inArray(bookFiles.bookId, bookIds), eq(bookFiles.role, 'content')))
+        .orderBy(sql`case when ${bookFiles.id} = ${books.primaryFileId} then 0 else 1 end`, bookFiles.sortOrder, bookFiles.id),
+    ]);
+
+    const authorsByBook = new Map<number, string[]>();
+    for (const row of authorRows) {
+      const list = authorsByBook.get(row.bookId) ?? [];
+      list.push(row.name);
+      authorsByBook.set(row.bookId, list);
+    }
+
+    const filesByBook = new Map<number, OpdsManifestFileRow[]>();
+    for (const row of fileRows) {
+      const list = filesByBook.get(row.bookId) ?? [];
+      list.push({
+        id: row.id,
+        format: row.format ?? 'unknown',
+        sizeBytes: row.sizeBytes,
+        fileHash: row.fileHash,
+        // Only the basename leaves the server; the stored absolute path never does.
+        filename: row.absolutePath.split('/').pop() ?? null,
+        contentVersion: row.updatedAt,
+      });
+      filesByBook.set(row.bookId, list);
+    }
+
+    const idOrder = new Map(bookIds.map((id, index) => [id, index]));
+    return metaRows
+      .map((row) => ({
+        id: row.id,
+        title: row.title ?? row.folderPath.split('/').pop() ?? 'Untitled',
+        subtitle: row.subtitle,
+        authors: authorsByBook.get(row.id) ?? [],
+        seriesName: row.seriesName,
+        seriesIndex: row.seriesIndex,
+        language: row.language,
+        publisher: row.publisher,
+        publishedYear: row.publishedYear,
+        isbn10: row.isbn10,
+        isbn13: row.isbn13,
+        files: filesByBook.get(row.id) ?? [],
+      }))
+      .sort((a, b) => (idOrder.get(a.id) ?? 0) - (idOrder.get(b.id) ?? 0));
   }
 
   private buildReadStatusClause(userId: number, readStatus: 'unread' | 'reading' | 'finished'): SQL {
@@ -759,6 +976,31 @@ export class OpdsBookService {
       .orderBy(collections.name);
   }
 
+  // Badge counts only need the totals, so these skip the per-entity book counts
+  // their list siblings compute. Counting collections through getUserCollections
+  // would aggregate over collection_books just to read the row count back.
+  async countUserCollections(userId: number): Promise<number> {
+    const [row] = await this.db.select({ total: count() }).from(collections).where(eq(collections.userId, userId));
+    return Number(row?.total ?? 0);
+  }
+
+  async countUserSmartScopes(userId: number): Promise<number> {
+    const [row] = await this.db
+      .select({ total: count() })
+      .from(smartScopes)
+      .where(or(eq(smartScopes.userId, userId), eq(smartScopes.isPublic, true)));
+    return Number(row?.total ?? 0);
+  }
+
+  // The scope is shared with getBooksPage so a count can never disagree with the
+  // list it labels, but nothing is fetched or hydrated to produce it.
+  async countBooks(userId: number, filters?: OpdsBookFilters, isSuperuser = false, contentFilters?: ContentFilterRules): Promise<number> {
+    const scope = await this.buildCatalogScope(userId, filters, isSuperuser, contentFilters);
+    if (!scope) return 0;
+    const [row] = await this.db.select({ total: count() }).from(books).leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id)).where(scope.where);
+    return Number(row?.total ?? 0);
+  }
+
   async getUserSmartScopes(userId: number) {
     return this.db
       .select({
@@ -1215,128 +1457,6 @@ export class OpdsBookService {
       .orderBy(bookSeriesMemberships.displayOrder, bookSeriesMemberships.seriesId);
   }
 
-  async countUserCollections(userId: number): Promise<number> {
-    const [row] = await this.db.select({ total: count() }).from(collections).where(eq(collections.userId, userId));
-    return Number(row?.total ?? 0);
-  }
-
-  async countUserSmartScopes(userId: number): Promise<number> {
-    const [row] = await this.db
-      .select({ total: count() })
-      .from(smartScopes)
-      .where(or(eq(smartScopes.userId, userId), eq(smartScopes.isPublic, true)));
-    return Number(row?.total ?? 0);
-  }
-
-  async getBookManifestPage(
-    userId: number,
-    opts: { filters?: OpdsBookFilters; afterId?: number; limit: number },
-    isSuperuser = false,
-    contentFilters?: ContentFilterRules,
-  ): Promise<{ rows: OpdsManifestBookRow[]; hasNext: boolean }> {
-    const scope = await this.buildCatalogScope(userId, opts.filters, isSuperuser, contentFilters);
-    if (!scope) return { rows: [], hasNext: false };
-
-    const clauses: SQL[] = [scope.where];
-    if (opts.afterId !== undefined) clauses.push(gt(books.id, opts.afterId));
-
-    const idRows = await this.db
-      .select({ id: books.id })
-      .from(books)
-      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
-      .where(and(...clauses)!)
-      .orderBy(books.id)
-      .limit(opts.limit + 1);
-
-    const hasNext = idRows.length > opts.limit;
-    const ids = idRows.slice(0, opts.limit).map((row) => row.id);
-    return { rows: await this.fetchManifestRows(ids), hasNext };
-  }
-
-  private async fetchManifestRows(bookIds: number[]): Promise<OpdsManifestBookRow[]> {
-    if (bookIds.length === 0) return [];
-
-    const [metaRows, authorRows, fileRows] = await Promise.all([
-      this.db
-        .select({
-          id: books.id,
-          folderPath: books.folderPath,
-          title: bookMetadata.title,
-          subtitle: bookMetadata.subtitle,
-          seriesName: bookMetadata.seriesName,
-          seriesIndex: bookMetadata.seriesIndex,
-          language: bookMetadata.language,
-          publisher: bookMetadata.publisher,
-          publishedYear: bookMetadata.publishedYear,
-          isbn10: bookMetadata.isbn10,
-          isbn13: bookMetadata.isbn13,
-        })
-        .from(books)
-        .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
-        .where(inArray(books.id, bookIds)),
-      this.db
-        .select({ bookId: bookAuthors.bookId, name: authors.name })
-        .from(bookAuthors)
-        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
-        .where(inArray(bookAuthors.bookId, bookIds))
-        .orderBy(bookAuthors.displayOrder),
-      this.db
-        .select({
-          bookId: books.id,
-          id: bookFiles.id,
-          format: bookFiles.format,
-          sizeBytes: bookFiles.sizeBytes,
-          fileHash: bookFiles.fileHash,
-          absolutePath: bookFiles.absolutePath,
-          updatedAt: bookFiles.updatedAt,
-        })
-        .from(bookFiles)
-        .innerJoin(books, eq(books.id, bookFiles.bookId))
-        .where(and(inArray(bookFiles.bookId, bookIds), eq(bookFiles.role, 'content')))
-        .orderBy(sql`case when ${bookFiles.id} = ${books.primaryFileId} then 0 else 1 end`, bookFiles.sortOrder, bookFiles.id),
-    ]);
-
-    const authorsByBook = new Map<number, string[]>();
-    for (const row of authorRows) {
-      const list = authorsByBook.get(row.bookId) ?? [];
-      list.push(row.name);
-      authorsByBook.set(row.bookId, list);
-    }
-
-    const filesByBook = new Map<number, OpdsManifestFileRow[]>();
-    for (const row of fileRows) {
-      const list = filesByBook.get(row.bookId) ?? [];
-      list.push({
-        id: row.id,
-        format: row.format ?? 'unknown',
-        sizeBytes: row.sizeBytes,
-        fileHash: row.fileHash,
-        // Only the basename leaves the server; the stored absolute path never does.
-        filename: row.absolutePath.split('/').pop() ?? null,
-        contentVersion: row.updatedAt,
-      });
-      filesByBook.set(row.bookId, list);
-    }
-
-    const idOrder = new Map(bookIds.map((id, index) => [id, index]));
-    return metaRows
-      .map((row) => ({
-        id: row.id,
-        title: row.title ?? row.folderPath.split('/').pop() ?? 'Untitled',
-        subtitle: row.subtitle,
-        authors: authorsByBook.get(row.id) ?? [],
-        seriesName: row.seriesName,
-        seriesIndex: row.seriesIndex,
-        language: row.language,
-        publisher: row.publisher,
-        publishedYear: row.publishedYear,
-        isbn10: row.isbn10,
-        isbn13: row.isbn13,
-        files: filesByBook.get(row.id) ?? [],
-      }))
-      .sort((a, b) => (idOrder.get(a.id) ?? 0) - (idOrder.get(b.id) ?? 0));
-  }
-
   /** Loads a smart scope if the user may read it, else null. */
   private async loadReadableSmartScope(userId: number, smartScopeId: number) {
     const [smartScope] = await this.db.select().from(smartScopes).where(eq(smartScopes.id, smartScopeId)).limit(1);
@@ -1377,90 +1497,6 @@ export class OpdsBookService {
     const smartScope = await this.loadReadableSmartScope(userId, smartScopeId);
     if (!smartScope) return null;
     return this.smartScopeWhere(smartScope, userId, accessibleIds, contentFilters, q);
-  }
-
-  private async buildCatalogScope(
-    userId: number,
-    filters: OpdsBookFilters | undefined,
-    isSuperuser: boolean,
-    contentFilters: ContentFilterRules | undefined,
-  ): Promise<{ where: SQL; contextSeries?: SeriesFilter } | null> {
-    const accessibleIds = await this.getAccessibleLibraryIds(userId, isSuperuser);
-    if (accessibleIds.length === 0) return null;
-
-    if (filters?.ids && filters.ids.length === 0) return null;
-
-    if (filters?.libraryId && !accessibleIds.includes(filters.libraryId)) {
-      throw new ForbiddenException('No access to this library');
-    }
-
-    if (filters?.collectionId) {
-      const [collection] = await this.db
-        .select({ userId: collections.userId })
-        .from(collections)
-        .where(eq(collections.id, filters.collectionId))
-        .limit(1);
-      if (!collection || collection.userId !== userId) {
-        throw new ForbiddenException('No access to this collection');
-      }
-    }
-
-    if (filters?.smartScopeId) {
-      const where = await this.buildSmartScopeWhere(userId, filters.smartScopeId, accessibleIds, contentFilters, filters.q);
-      return where ? { where } : null;
-    }
-
-    const clauses: SQL[] = [inArray(books.libraryId, accessibleIds), eq(books.status, 'present')];
-
-    if (filters?.libraryId) clauses.push(eq(books.libraryId, filters.libraryId));
-
-    if (filters?.ids) clauses.push(inArray(books.id, filters.ids));
-
-    if (filters?.collectionId) {
-      clauses.push(
-        sql`${books.id} IN (SELECT ${collectionBooks.bookId} FROM ${collectionBooks} WHERE ${collectionBooks.collectionId} = ${filters.collectionId})`,
-      );
-    }
-
-    if (filters?.author) {
-      clauses.push(
-        sql`${books.id} IN (SELECT ${bookAuthors.bookId} FROM ${bookAuthors} INNER JOIN ${authors} ON ${authors.id} = ${bookAuthors.authorId} WHERE ${authors.name} = ${filters.author})`,
-      );
-    }
-
-    const seriesFilter = this.resolveSeriesFilter(filters);
-    if (seriesFilter) clauses.push(this.buildSeriesMembershipClause(seriesFilter));
-
-    if (filters?.format) {
-      const format = filters.format.trim().toLowerCase();
-      if (format) {
-        clauses.push(
-          sql`${books.id} IN (SELECT ${bookFiles.bookId} FROM ${bookFiles} WHERE ${bookFiles.role} = 'content' AND lower(${bookFiles.format}) = ${format})`,
-        );
-      }
-    }
-
-    if (filters?.readStatus) {
-      clauses.push(this.buildReadStatusClause(userId, filters.readStatus));
-    }
-
-    if (filters?.q) {
-      const searchClause = this.buildCatalogSearchClause(filters.q);
-      if (searchClause) clauses.push(searchClause);
-    }
-
-    if (!isSuperuser && contentFilters) {
-      clauses.push(...buildContentFilterClauses(contentFilters, this.db));
-    }
-
-    return { where: and(...clauses)!, contextSeries: seriesFilter };
-  }
-
-  async countBooks(userId: number, filters?: OpdsBookFilters, isSuperuser = false, contentFilters?: ContentFilterRules): Promise<number> {
-    const scope = await this.buildCatalogScope(userId, filters, isSuperuser, contentFilters);
-    if (!scope) return 0;
-    const [row] = await this.db.select({ total: count() }).from(books).leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id)).where(scope.where);
-    return Number(row?.total ?? 0);
   }
 }
 

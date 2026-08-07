@@ -75,8 +75,8 @@ function buildMultipartBody(fileName: string, content: Buffer, contentType: stri
   return { body: Buffer.concat([preamble, content, closing]), boundary };
 }
 
-const validAvatarPng = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEklEQVQImWPwbvjv3fCfAUIBAC9WByn7QY+1AAAAAElFTkSuQmCC',
+const onePixelPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWM4YWT0HwAFHgIsBxDy5AAAAABJRU5ErkJggg==',
   'base64',
 );
 
@@ -558,7 +558,7 @@ describe('Users admin lifecycle (e2e)', { timeout: 180_000 }, () => {
       const oversizedUpload = await uploadAvatar(regularA.accessToken, 'avatar.jpg', Buffer.alloc(5 * 1024 * 1024 + 1, 1), 'image/jpeg');
       expectError(oversizedUpload, 400, 'Image exceeds 5 MB limit');
 
-      const validUpload = await uploadAvatar(regularA.accessToken, 'avatar.png', validAvatarPng, 'image/png');
+      const validUpload = await uploadAvatar(regularA.accessToken, 'avatar.png', onePixelPng, 'image/png');
       expect(validUpload.statusCode).toBe(201);
       const validUploadBody = validUpload.json() as { avatarUrl: string | null };
       expect(validUploadBody.avatarUrl).toContain(`/api/v1/users/${regularA.userId}/avatar?v=`);

@@ -25,8 +25,7 @@ function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
 function makeController() {
   const dashboardService = {
     getScroller: vi.fn(),
-    getCatalogAdditions: vi.fn(),
-    getCatalogDiscovery: vi.fn(),
+    getScrollers: vi.fn(),
   };
   const widgetService = {
     getReadingGoal: vi.fn(),
@@ -65,27 +64,16 @@ describe('DashboardController', () => {
       expect(result).toEqual(mockResult);
     });
 
-    it('getCatalogAdditions delegates to dashboardService with the provided limit', async () => {
+    it('getScrollers delegates the bounded batch to dashboardService', async () => {
       const { controller, dashboardService } = makeController();
-      const user = makeUser({ id: 8 });
-      const mockResult = { items: [{ type: 'catalog-item', mediaType: 'ebook', remoteId: 'ebook-1' }] };
-      dashboardService.getCatalogAdditions.mockResolvedValue(mockResult);
+      const user = makeUser({ id: 7 });
+      const dto = { items: [{ id: 'one', type: 'recently-added' as const, limit: 20 }] };
+      const mockResult = { items: [{ id: 'one', books: [], failed: false }] };
+      dashboardService.getScrollers.mockResolvedValue(mockResult);
 
-      const result = await controller.getCatalogAdditions(12, user);
+      const result = await controller.getScrollers(user, dto);
 
-      expect(dashboardService.getCatalogAdditions).toHaveBeenCalledWith(user, 12);
-      expect(result).toEqual(mockResult);
-    });
-
-    it('getCatalogDiscovery delegates to dashboardService with the provided limit', async () => {
-      const { controller, dashboardService } = makeController();
-      const user = makeUser({ id: 8 });
-      const mockResult = { items: [{ type: 'catalog-item', mediaType: 'ebook', remoteId: 'ebook-1' }] };
-      dashboardService.getCatalogDiscovery.mockResolvedValue(mockResult);
-
-      const result = await controller.getCatalogDiscovery(12, user);
-
-      expect(dashboardService.getCatalogDiscovery).toHaveBeenCalledWith(user, 12);
+      expect(dashboardService.getScrollers).toHaveBeenCalledWith(dto, user);
       expect(result).toEqual(mockResult);
     });
   });

@@ -242,7 +242,7 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
 
       expect(limitedSearch.statusCode).toBe(200);
       expect(limitedSearch.json()).toEqual([
-        expect.objectContaining({
+        {
           id: visibleEpub.bookId,
           title: 'Alpha Contract EPUB',
           seriesName: null,
@@ -250,8 +250,9 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
           libraryId: visibleLibrary.libraryId,
           libraryName: visibleLibraryName,
           formats: ['epub'],
-        }),
-        expect.objectContaining({
+          updatedAt: expect.any(String),
+        },
+        {
           id: visiblePdf.bookId,
           title: 'Beta Contract PDF',
           seriesName: null,
@@ -259,8 +260,9 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
           libraryId: visibleLibrary.libraryId,
           libraryName: visibleLibraryName,
           formats: ['pdf'],
-        }),
-        expect.objectContaining({
+          updatedAt: expect.any(String),
+        },
+        {
           id: visibleCbz.bookId,
           title: 'Gamma Contract Comic',
           seriesName: null,
@@ -268,7 +270,8 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
           libraryId: visibleLibrary.libraryId,
           libraryName: visibleLibraryName,
           formats: ['cbz'],
-        }),
+          updatedAt: expect.any(String),
+        },
       ]);
 
       const authorSearch = await ctx.app.inject({
@@ -410,14 +413,14 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
         payload: { status: 'reading' },
       });
 
-      expect(setStatus.statusCode, setStatus.body).toBe(200);
-      expect(setStatus.json()).toEqual(
-        expect.objectContaining({
-          status: 'reading',
-          source: 'manual',
-          finishedAt: null,
-        }),
-      );
+      expect(setStatus.statusCode).toBe(200);
+      expect(setStatus.json()).toMatchObject({
+        status: 'reading',
+        source: 'manual',
+        startedAt: expect.any(String),
+        finishedAt: null,
+        updatedAt: expect.any(String),
+      });
 
       const getFileProgress = await ctx.app.inject({
         method: 'GET',
@@ -439,10 +442,15 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
       });
 
       expect(otherUserFileProgress.statusCode).toBe(200);
-      expect(otherUserFileProgress.json()).toMatchObject({
+      expect(otherUserFileProgress.json()).toEqual({
         cfi: null,
         pageNumber: null,
         percentage: 0,
+        koboLocationSource: null,
+        koboLocationType: null,
+        koboLocationValue: null,
+        koboContentSourceProgressPercent: null,
+        koreaderProgress: null,
       });
 
       const limitedBookProgress = await ctx.app.inject({
@@ -469,13 +477,18 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
 
       expect(otherUserBookProgress.statusCode).toBe(200);
       expect(otherUserBookProgress.json()).toEqual([
-        expect.objectContaining({
+        {
           fileId: visibleEpub.bookFileId,
           cfi: null,
           pageNumber: null,
           percentage: 0,
+          koboLocationSource: null,
+          koboLocationType: null,
+          koboLocationValue: null,
+          koboContentSourceProgressPercent: null,
+          koreaderProgress: null,
           updatedAt: null,
-        }),
+        },
       ]);
 
       const limitedDetail = await ctx.app.inject({
@@ -499,7 +512,7 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
             filename: 'alpha-contract.epub',
           },
         ],
-        collections: [],
+        collections: expect.any(Array),
         readStatus: {
           status: 'reading',
           source: 'manual',
@@ -608,7 +621,7 @@ describe('Book API contract (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, () => {
 
       expect(exportResponse.statusCode).toBe(201);
       expect(exportResponse.headers['content-type']).toContain('application/zip');
-      expect(exportResponse.headers['content-disposition']).toContain('attachment; filename="books.zip"');
+      expect(exportResponse.headers['content-disposition']).toBe('attachment; filename="books.zip"; filename*=UTF-8\'\'books.zip');
 
       const zipEntries = await listZipEntries(exportResponse);
       expect(zipEntries).toEqual(['alpha-contract.epub', 'beta-contract.pdf']);

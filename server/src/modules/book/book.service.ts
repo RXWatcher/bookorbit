@@ -105,6 +105,7 @@ import type { MetadataExportColumnMode } from './dto/metadata-export-options.dto
 import { SaveProgressDto } from './dto/save-progress.dto';
 import { UpsertAudioProgressDto } from './dto/upsert-audio-progress.dto';
 import { UpdateBookMetadataDto } from './dto/update-book-metadata.dto';
+import { UpdateBookAddedAtDto } from './dto/update-book-added-at.dto';
 import { UpdatePersonalNoteDto } from './dto/update-personal-note.dto';
 import type { UpdateBookMetadataAndLocksDto } from './dto/update-book-metadata-and-locks.dto';
 import { buildBookDetailSupplementalFields } from './utils/build-book-detail-supplemental-fields';
@@ -1448,6 +1449,18 @@ export class BookService {
     return result;
   }
 
+  async executeBookIdsQuery(userId: number, where: SQL | undefined, query: BookQuery): Promise<number[]> {
+    const customFieldTypes = await this.resolveCustomSortFieldTypes(query.sort);
+    const orderBy = this.queryBuilder.buildOrderBy(query.sort, userId, customFieldTypes);
+    return this.bookRepo.findCardIds({
+      where,
+      orderBy,
+      limit: query.pagination.size,
+      offset: query.pagination.page * query.pagination.size,
+      userId,
+    });
+  }
+
   async queryJumpBucketsForLibrary(user: RequestUser, libraryId: number, query: JumpBucketsQuery): Promise<JumpBucketsResponse> {
     await this.libraryService.verifyUserAccess(user.id, libraryId, this.isSuperuser(user));
     const timeZone = this.resolveUserTimeZone(user);
@@ -1909,6 +1922,15 @@ export class BookService {
       );
       throw err;
     }
+  }
+
+  async updateAddedAt(id: number, dto: UpdateBookAddedAtDto, user: RequestUser): Promise<BookDetailDto> {
+    await this.verifyBookAccess(id, user);
+    const timeZone = this.resolveUserTimeZone(user);
+    if (!isDateKey(dto.addedAt)) throw new BadRequestException('addedAt must be a valid date');
+    if (dto.addedAt > toDateKeyInTimeZone(new Date(), timeZone)) throw new BadRequestException('addedAt cannot be in the future');
+    await this.bookRepo.updateAddedAt(id, toTimeZoneStartOfDay(dto.addedAt, timeZone));
+    return this.getDetail(id, user);
   }
 
   async updateMetadataAndLocks(

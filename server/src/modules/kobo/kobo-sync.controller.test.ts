@@ -1,7 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 
 import { KoboSyncController } from './kobo-sync.controller';
-import { encodeKoboCatalogEbookId } from './kobo-catalog-id';
 
 function makeReply() {
   return {
@@ -23,8 +22,6 @@ describe('KoboSyncController', () => {
   const readingStateService = {
     getRawState: vi.fn(),
     upsertState: vi.fn(),
-    getCatalogRawState: vi.fn(),
-    upsertCatalogState: vi.fn(),
   };
   const proxyService = {
     forward: vi.fn(),
@@ -75,6 +72,7 @@ describe('KoboSyncController', () => {
     expect(resources.image_host).toBe('https://reader.example.com');
     expect(resources.image_url_template).toContain('/api/v1/kobo/device-token/v1/books/{ImageId}/thumbnail/{Width}/{Height}/false/image.jpg');
     expect(resources.library_sync).toBe('https://reader.example.com/api/v1/kobo/device-token/v1/library/sync');
+    expect(resources.reading_state).toBe('https://reader.example.com/api/v1/kobo/device-token/v1/library/{Ids}/state');
     expect(resources.get_tests_request).toBe('https://reader.example.com/api/v1/kobo/device-token/v1/analytics/gettests');
     expect(resources.post_analytics_event).toBe('https://reader.example.com/api/v1/kobo/device-token/v1/analytics/event');
   });
@@ -97,6 +95,7 @@ describe('KoboSyncController', () => {
 
     expect(resources.image_host).toBe('http://192.168.8.134:5173');
     expect(resources.library_sync).toBe('http://192.168.8.134:5173/api/v1/kobo/dev/v1/library/sync');
+    expect(resources.reading_state).toBe('http://192.168.8.134:5173/api/v1/kobo/dev/v1/library/{Ids}/state');
   });
 
   it('initialization does not append x-forwarded-port when it is the default for the scheme', () => {
@@ -323,25 +322,6 @@ describe('KoboSyncController', () => {
     expect(proxyService.forward).toHaveBeenNthCalledWith(1, req, reply, 'token-1');
   });
 
-  it('serves metadata, delete, and reading state for opaque catalog ebook ids without proxying', async () => {
-    const catalogId = encodeKoboCatalogEbookId(42);
-    const req = { headers: { host: 'localhost:3000' }, protocol: 'http', hostname: 'localhost', socket: { localPort: 3000 } };
-    const reply = makeReply();
-    syncService.getBookMetadata.mockResolvedValue([{ Title: 'Catalog Book' }]);
-    readingStateService.getCatalogRawState.mockResolvedValue({ EntitlementId: catalogId });
-
-    await controller.getBookMetadata(catalogId, { id: 4 } as never, { deviceId: 5, deviceToken: 'token-5' } as never, req as never, reply as never);
-    await controller.deleteFromLibrary(catalogId, { id: 4 } as never, { deviceId: 5, deviceToken: 'token-5' } as never, req as never, reply as never);
-    await controller.getReadingState(catalogId, { id: 4 } as never, { deviceId: 5, deviceToken: 'token-5' } as never, req as never, reply as never);
-
-    expect(syncService.getBookMetadata).toHaveBeenCalledWith(4, catalogId, 'token-5', 'http://localhost:3000');
-    expect(syncService.removeBookFromSync).toHaveBeenCalledWith(4, 5, catalogId);
-    expect(readingStateService.getCatalogRawState).toHaveBeenCalledWith(4, 42, catalogId);
-    expect(proxyService.forward).not.toHaveBeenCalled();
-    expect(reply.send).toHaveBeenNthCalledWith(1, [{ Title: 'Catalog Book' }]);
-    expect(reply.send).toHaveBeenNthCalledWith(3, [{ EntitlementId: catalogId }]);
-  });
-
   it('serves metadata, delete ack, and reading-state payloads for valid ids', async () => {
     const req = { headers: { host: 'localhost:3000' }, protocol: 'http', hostname: 'localhost', socket: { localPort: 3000 } };
     const reply = makeReply();
@@ -419,36 +399,111 @@ describe('KoboSyncController', () => {
     expect(reply.send).toHaveBeenCalledWith({ RequestResult: 'Success' });
   });
 
-  it('updates catalog ebook reading state through local catalog state', async () => {
-    const catalogId = encodeKoboCatalogEbookId(42);
+  it('handles reading-state updates locally for mapped Kobo entitlement ids', async () => {
+    const entitlementId = '8285b8bd-cf7c-4653-9191-8c9f6e87842b';
+    const state = { EntitlementId: entitlementId, CurrentBookmark: { ProgressPercent: 56 } };
+    const req = {
+      method: 'PUT',
+      url: `/api/v1/kobo/dev77/v1/library/${entitlementId}/state`,
+      body: { ReadingStates: [state] },
+    };
+    const reply = makeReply();
+    bookIdentityService.resolveBookIdByEntitlementId.mockResolvedValue(77);
     settingsService.getSettings.mockResolvedValue({
       readingThreshold: 1,
       finishedThreshold: 99,
       convertToKepub: true,
       forceEnableHyphenation: false,
       kepubConversionLimitMb: 100,
+      twoWayProgressSync: true,
     });
-    readingStateService.upsertCatalogState.mockResolvedValue({ RequestResult: 'Success' });
-    const reply = makeReply();
+    readingStateService.upsertState.mockResolvedValue({ RequestResult: 'Success' });
 
     await controller.updateReadingState(
-      catalogId,
-      { ReadingStates: [{ EntitlementId: catalogId, CurrentBookmark: { ProgressPercent: 56 } }] },
+      entitlementId,
+      req.body,
       { id: 8 } as never,
-      { deviceToken: 'dev77' } as never,
-      { method: 'PUT', url: `/api/v1/kobo/dev77/v1/library/${catalogId}/state` } as never,
+      { deviceId: 77, deviceToken: 'dev77' } as never,
+      req as never,
       reply as never,
     );
 
-    expect(readingStateService.upsertCatalogState).toHaveBeenCalledWith(
-      8,
-      42,
-      { EntitlementId: catalogId, CurrentBookmark: { ProgressPercent: 56 } },
-      1,
-      99,
-      catalogId,
-    );
-    expect(readingStateService.upsertState).not.toHaveBeenCalled();
+    expect(bookIdentityService.resolveBookIdByEntitlementId).toHaveBeenCalledWith(8, entitlementId);
+    expect(readingStateService.upsertState).toHaveBeenCalledWith(8, 77, state, 1, 99, true, 77);
+    expect(proxyService.forward).not.toHaveBeenCalled();
     expect(reply.send).toHaveBeenCalledWith({ RequestResult: 'Success' });
+  });
+
+  it('proxies reading-state updates for unmapped Kobo Store entitlement ids', async () => {
+    const entitlementId = 'baee12cd-e85f-4d98-be7f-ac5ec1289fb5';
+    const body = { ReadingStates: [{ EntitlementId: entitlementId, CurrentBookmark: { ProgressPercent: 6 } }] };
+    const req = {
+      method: 'PUT',
+      url: `/api/v1/kobo/dev77/v1/library/${entitlementId}/state`,
+      headers: { authorization: 'Bearer kobo-oauth-token' },
+      body,
+    };
+    const reply = makeReply();
+    bookIdentityService.resolveBookIdByEntitlementId.mockResolvedValue(null);
+
+    await controller.updateReadingState(
+      entitlementId,
+      body,
+      { id: 8 } as never,
+      { deviceId: 77, deviceToken: 'dev77' } as never,
+      req as never,
+      reply as never,
+    );
+
+    expect(proxyService.forward).toHaveBeenCalledWith(req, reply, 'dev77');
+    expect(settingsService.getSettings).not.toHaveBeenCalled();
+    expect(readingStateService.upsertState).not.toHaveBeenCalled();
+    expect(historyService.recordSuccess).not.toHaveBeenCalled();
+    expect(historyService.recordFailure).not.toHaveBeenCalled();
+  });
+
+  it('proxies comma-separated reading-state ids without partially handling the batch', async () => {
+    const ids = '8285b8bd-cf7c-4653-9191-8c9f6e87842b,baee12cd-e85f-4d98-be7f-ac5ec1289fb5';
+    const req = {
+      method: 'GET',
+      url: `/api/v1/kobo/dev77/v1/library/${ids}/state`,
+      headers: { authorization: 'Bearer kobo-oauth-token' },
+    };
+    const reply = makeReply();
+    bookIdentityService.resolveBookIdByEntitlementId.mockResolvedValue(null);
+
+    await controller.getReadingState(ids, { id: 8 } as never, { deviceId: 77, deviceToken: 'dev77' } as never, req as never, reply as never);
+
+    expect(bookIdentityService.resolveBookIdByEntitlementId).toHaveBeenCalledWith(8, ids);
+    expect(proxyService.forward).toHaveBeenCalledWith(req, reply, 'dev77');
+    expect(readingStateService.getRawState).not.toHaveBeenCalled();
+  });
+
+  it('records failed reading-state updates before rethrowing', async () => {
+    const error = new Error('state failed');
+    settingsService.getSettings.mockResolvedValue({
+      readingThreshold: 1,
+      finishedThreshold: 99,
+      convertToKepub: true,
+      forceEnableHyphenation: false,
+      kepubConversionLimitMb: 100,
+      twoWayProgressSync: true,
+    });
+    readingStateService.upsertState.mockRejectedValue(error);
+    const reply = makeReply();
+
+    await expect(
+      controller.updateReadingState(
+        '77',
+        { CurrentBookmark: { ProgressPercent: 56 } },
+        { id: 8 } as never,
+        { deviceId: 77, deviceToken: 'dev77' } as never,
+        { method: 'PUT', url: '/api/v1/kobo/dev77/v1/library/77/state' } as never,
+        reply as never,
+      ),
+    ).rejects.toThrow('state failed');
+
+    expect(historyService.recordFailure).toHaveBeenCalledWith(expect.objectContaining({ userId: 8, deviceId: 77, event: 'progress_update' }), error);
+    expect(reply.send).not.toHaveBeenCalled();
   });
 });
