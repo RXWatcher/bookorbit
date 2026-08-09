@@ -2536,6 +2536,10 @@
       "contentRestrictionsActive": "Content restrictions active",
       "statusActive": "Active",
       "statusInactive": "Inactive",
+      "lockedBadge": "Locked",
+      "unlockAccount": "Unlock account",
+      "unlockHint": "Clear the sign-in lockout",
+      "unlockAria": "Unlock {name}",
       "resetPassword": "Reset password",
       "resetPasswordOidcHint": "OIDC users reset passwords in their identity provider",
       "resetPasswordSharedHint": "Shared accounts do not have passwords",
@@ -2548,7 +2552,8 @@
       "errors": {
         "load": "Failed to load",
         "deleteUser": "Failed to delete user",
-        "resetPassword": "Failed to create a password reset link"
+        "resetPassword": "Failed to create a password reset link",
+        "unlock": "Failed to unlock the account"
       },
       "defaultLibraryAccess": {
         "title": "Default Library Access",
@@ -2880,6 +2885,7 @@
       "UserSuperuserEnable": "Enable superuser access",
       "UserSuperuserDisable": "Disable superuser access",
       "UserContentFiltersSet": "Update content filters",
+      "UserUnlock": "Unlock account",
       "ReadingInsightsSharingUpdate": "Update insight sharing",
       "ReadingInsightsProfileView": "View shared insights",
       "LibraryCreate": "Create library",
@@ -2987,7 +2993,8 @@
       "forgotPassword": "Forgot password?",
       "errors": {
         "invalidCredentials": "Invalid username or password",
-        "tooManyAttempts": "Too many login attempts. Please wait a minute and try again."
+        "tooManyAttempts": "Too many login attempts. Please wait a minute and try again.",
+        "accountLocked": "Your password is correct, but this account is temporarily locked after too many failed sign-in attempts. Try again in {minutes, plural, one {# minute} other {# minutes}}, or reset your password to unlock it now."
       }
     },
     "oidc": {
