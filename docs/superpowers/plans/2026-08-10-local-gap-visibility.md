@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - Node >= 24, pnpm >= 9.
-- Never hand write migration SQL. Edit `server/src/db/schema/*.ts`, then `cd server && pnpm db:generate`.
-- There is no local PostgreSQL in this environment, so `pnpm db:migrate` cannot run and must NOT be attempted. `pnpm db:generate` works offline because it diffs the schema files against the migration journal. Generate the migration, inspect the SQL, commit it, and leave it unapplied. Every test in this plan is pure or mocked and needs no database.
+- Tables under `warehouse_*` live in the hand managed lineage `server/src/db/warehouse-migrations/`, NOT in `server/src/db/migrations/`. For those, hand write the SQL following the eleven existing hand written migrations there, and add a `_journal.json` entry. Do not run `pnpm db:generate` for them. The repo rule against hand written migrations governs the primary lineage that drizzle-kit actually manages.
+- There is no local PostgreSQL in this environment, so `pnpm db:migrate` cannot run and must NOT be attempted. Migrations are committed unapplied. Every test in this plan is pure or mocked and needs no database.
 - Never use em dashes in any output: code, comments, strings, commit messages, docs.
 - Never add a `Co-authored-by` trailer to any commit.
 - Test files use `.test.ts`. Vitest globals are available, so do not import `describe`, `it`, `expect` or `vi`.
@@ -105,13 +105,63 @@ In the same table's constraint array, alongside the existing `check(...)` entrie
 Run: `cd server && npx vitest run src/db/schema/schema.test.ts -t 'marks catalog item origin'`
 Expected: PASS.
 
-- [ ] **Step 5: Generate the migration**
+- [ ] **Step 5: Hand write the migration**
 
-Run: `cd server && pnpm db:generate --name add_catalog_item_source`
+Do NOT run `pnpm db:generate` and do NOT run `pnpm db:migrate`.
 
-Do not run `pnpm db:migrate`. There is no local database and the migration stays unapplied.
+`warehouse_catalog_items` belongs to a second, hand managed migration lineage at
+`server/src/db/warehouse-migrations/`, applied at runtime by `server/src/scripts/migrate.ts`
+against its own ledger table. `drizzle.config.ts` does not point at that folder, its `meta/`
+snapshots have been stale since 0042, and 0048 through 0050 have no snapshot at all. Eleven of
+its nineteen migrations are hand written, identifiable by `IF NOT EXISTS`, which drizzle-kit
+never emits. Follow that precedent. `0048_add_catalog_item_file_size.sql` is the closest model.
 
-Open the generated file under `server/src/db/migrations/`. It must contain `CREATE TYPE "public"."catalog_item_source"` and `ALTER TABLE "warehouse_catalog_items" ADD COLUMN`. Creating a new enum type and using it in one migration is safe. The two migration restriction applies only to `ALTER TYPE ... ADD VALUE`, which this is not.
+Create `server/src/db/warehouse-migrations/0051_add_catalog_item_source.sql`:
+
+```sql
+-- Distinguish rows synced from the Book Warehouse from rows discovered by
+-- scanning the local filesystem, so the two can share one table and one set of
+-- indexes without a query time union.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'catalog_item_source') THEN
+    CREATE TYPE "catalog_item_source" AS ENUM ('warehouse', 'local');
+  END IF;
+END
+$$;
+
+ALTER TABLE "warehouse_catalog_items"
+  ADD COLUMN IF NOT EXISTS "source" "catalog_item_source" DEFAULT 'warehouse' NOT NULL;
+
+ALTER TABLE "warehouse_catalog_items"
+  ADD COLUMN IF NOT EXISTS "local_path" text;
+
+CREATE INDEX IF NOT EXISTS "warehouse_catalog_items_source_idx"
+  ON "warehouse_catalog_items" ("media_type", "source");
+
+ALTER TABLE "warehouse_catalog_items"
+  DROP CONSTRAINT IF EXISTS "warehouse_catalog_items_local_path_chk";
+
+ALTER TABLE "warehouse_catalog_items"
+  ADD CONSTRAINT "warehouse_catalog_items_local_path_chk"
+  CHECK ("source" <> 'local' OR "local_path" IS NOT NULL);
+```
+
+Then append an entry to `server/src/db/warehouse-migrations/meta/_journal.json`, matching the
+shape of the existing entries exactly:
+
+```json
+{
+  "idx": 51,
+  "version": "7",
+  "when": 1786103000000,
+  "tag": "0051_add_catalog_item_source",
+  "breakpoints": true
+}
+```
+
+Do not add a snapshot file. 0048, 0049 and 0050 have none, and inventing one would make the
+stale chain worse.
 
 - [ ] **Step 6: Commit**
 
@@ -1196,16 +1246,14 @@ describe("LocalScanService", () => {
   it("inserts only the books the catalogue does not already have", async () => {
     const inserted: unknown[] = [];
     const repository = {
-      findEnabledRoots: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            id: 7,
-            mediaType: "ebook",
-            absolutePath: root,
-            excludePatterns: [],
-          },
-        ]),
+      findEnabledRoots: vi.fn().mockResolvedValue([
+        {
+          id: 7,
+          mediaType: "ebook",
+          absolutePath: root,
+          excludePatterns: [],
+        },
+      ]),
       streamCatalogKeyRows: vi.fn().mockImplementation(async function* () {
         yield [
           {
@@ -1240,16 +1288,14 @@ describe("LocalScanService", () => {
   it("gives every local row a deterministic namespaced remote id", async () => {
     const inserted: Array<{ remoteId: string }> = [];
     const repository = {
-      findEnabledRoots: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            id: 7,
-            mediaType: "ebook",
-            absolutePath: root,
-            excludePatterns: [],
-          },
-        ]),
+      findEnabledRoots: vi.fn().mockResolvedValue([
+        {
+          id: 7,
+          mediaType: "ebook",
+          absolutePath: root,
+          excludePatterns: [],
+        },
+      ]),
       streamCatalogKeyRows: vi.fn().mockImplementation(async function* () {
         yield [];
       }),
@@ -1492,15 +1538,13 @@ import { LocalScanController } from "./local-scan.controller";
 describe("LocalScanController", () => {
   it("delegates a single root scan to the service", async () => {
     const service = {
-      scanRoot: vi
-        .fn()
-        .mockResolvedValue({
-          rootId: 7,
-          scanned: 1,
-          matched: 0,
-          inserted: 1,
-          skipped: 0,
-        }),
+      scanRoot: vi.fn().mockResolvedValue({
+        rootId: 7,
+        scanned: 1,
+        matched: 0,
+        inserted: 1,
+        skipped: 0,
+      }),
       scanAll: vi.fn(),
     };
     const controller = new LocalScanController(service as never);
