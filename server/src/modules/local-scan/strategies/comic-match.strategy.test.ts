@@ -14,13 +14,7 @@ describe('ComicMatchStrategy', () => {
   });
 
   it('returns null when the issue number is missing', () => {
-    expect(
-      strategy.catalogKey({
-        remoteId: 'a',
-        title: 'Wolverines',
-        rawPayload: { title: 'Wolverines' },
-      }),
-    ).toBeNull();
+    expect(strategy.catalogKey({ remoteId: 'a', title: 'Wolverines', rawPayload: { title: 'Wolverines' } })).toBeNull();
   });
 
   it('keys disk candidates parsed from the filename', () => {
@@ -33,14 +27,23 @@ describe('ComicMatchStrategy', () => {
     ).toBe('wolverines|13');
   });
 
+  it('produces the same key from both sides for the same issue', () => {
+    const fromCatalog = strategy.catalogKey({
+      remoteId: 'abc',
+      title: 'Wolverines 13',
+      rawPayload: { title: 'Wolverines 13', issueNumber: '13' },
+    });
+    const fromDisk = strategy.diskKey({
+      absolutePath: '/mnt/c/Wolverines 013.cbz',
+      relativePath: 'Wolverines 013.cbz',
+      fileName: 'Wolverines 013.cbz',
+    });
+
+    expect(fromCatalog).toBe(fromDisk);
+  });
+
   it('returns null when the filename carries no trailing issue number', () => {
-    expect(
-      strategy.diskKey({
-        absolutePath: '/mnt/c/Wolverines.cbz',
-        relativePath: 'Wolverines.cbz',
-        fileName: 'Wolverines.cbz',
-      }),
-    ).toBeNull();
+    expect(strategy.diskKey({ absolutePath: '/mnt/c/Wolverines.cbz', relativePath: 'Wolverines.cbz', fileName: 'Wolverines.cbz' })).toBeNull();
   });
 
   it('derives a title from the filename without the extension', () => {

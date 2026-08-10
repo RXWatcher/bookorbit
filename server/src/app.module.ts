@@ -29,6 +29,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { CoverModule } from './modules/cover/cover.module';
 import { KoboModule } from './modules/kobo/kobo.module';
 import { LibraryModule } from './modules/library/library.module';
+import { LocalScanModule } from './modules/local-scan/local-scan.module';
 import { SmartScopeModule } from './modules/smart-scope/smart-scope.module';
 import { OpdsModule } from './modules/opds/opds.module';
 import { PathModule } from './modules/path/path.module';
@@ -123,6 +124,7 @@ import { BookMoveModule } from './modules/book-move/book-move.module';
     CustomIconModule,
     RecommendationModule,
     KoboModule,
+    LocalScanModule,
     OpdsModule,
     BookmarkModule,
     AnnotationModule,

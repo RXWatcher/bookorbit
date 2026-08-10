@@ -11,11 +11,7 @@ describe('AudiobookMatchStrategy', () => {
         remoteId: 'abc',
         title: 'Lightseekers',
         rawPayload: {
-          files: [
-            {
-              storage_key: `${PREFIX}Femi Kayode/Lightseekers (2021)/Femi Kayode - Lightseekers (2021).m4b`,
-            },
-          ],
+          files: [{ storage_key: `${PREFIX}Femi Kayode/Lightseekers (2021)/Femi Kayode - Lightseekers (2021).m4b` }],
         },
       }),
     ).toBe('Femi Kayode/Lightseekers (2021)');
@@ -26,21 +22,13 @@ describe('AudiobookMatchStrategy', () => {
       strategy.catalogKey({
         remoteId: 'abc',
         title: 'Other',
-        rawPayload: {
-          files: [{ storage_key: '/media/somewhere-else/Author/Book/file.m4b' }],
-        },
+        rawPayload: { files: [{ storage_key: '/media/somewhere-else/Author/Book/file.m4b' }] },
       }),
     ).toBeNull();
   });
 
   it('returns null when there are no files', () => {
-    expect(
-      strategy.catalogKey({
-        remoteId: 'a',
-        title: 't',
-        rawPayload: { files: [] },
-      }),
-    ).toBeNull();
+    expect(strategy.catalogKey({ remoteId: 'a', title: 't', rawPayload: { files: [] } })).toBeNull();
     expect(strategy.catalogKey({ remoteId: 'a', title: 't', rawPayload: {} })).toBeNull();
   });
 
@@ -52,6 +40,21 @@ describe('AudiobookMatchStrategy', () => {
         fileName: 'file.m4b',
       }),
     ).toBe('Femi Kayode/Lightseekers (2021)');
+  });
+
+  it('produces the same key from both sides for the same book', () => {
+    const fromCatalog = strategy.catalogKey({
+      remoteId: 'abc',
+      title: 'Lightseekers',
+      rawPayload: { files: [{ storage_key: `${PREFIX}Femi Kayode/Lightseekers (2021)/x.m4b` }] },
+    });
+    const fromDisk = strategy.diskKey({
+      absolutePath: '/mnt/ab/Femi Kayode/Lightseekers (2021)/x.m4b',
+      relativePath: 'Femi Kayode/Lightseekers (2021)/x.m4b',
+      fileName: 'x.m4b',
+    });
+
+    expect(fromCatalog).toBe(fromDisk);
   });
 
   it('derives a title from the book directory', () => {
