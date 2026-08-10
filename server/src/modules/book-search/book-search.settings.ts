@@ -1,7 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
+import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
 import { WarehouseSecretService, type EncryptedWarehouseSecret } from '../warehouse/warehouse-secret.service';
@@ -27,12 +28,15 @@ export interface BookSearchSettings {
 
 @Injectable()
 export class BookSearchSettingsService {
+  private readonly logger = new Logger(BookSearchSettingsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly secret: WarehouseSecretService,
   ) {}
 
   private async read(): Promise<StoredConfig> {
+    const startedAt = Date.now();
     const row = await this.db.query.appSettings.findFirst({
       where: eq(schema.appSettings.key, SETTINGS_KEY),
     });
@@ -46,7 +50,13 @@ export class BookSearchSettingsService {
         activeIndex: typeof parsed.activeIndex === 'string' && parsed.activeIndex ? parsed.activeIndex : DEFAULT_INDEX,
         apiKey: parsed.apiKey ?? null,
       };
-    } catch {
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      const errorClass = error instanceof Error ? error.name : 'UnknownError';
+      const errorMessage = sanitizeLogValue(error instanceof Error ? error.message : String(error));
+      this.logger.warn(
+        `[book_search.settings_parse] [fail] key=${SETTINGS_KEY} durationMs=${durationMs} errorClass=${errorClass} error="${errorMessage}" - failed to parse persisted book search settings, using defaults`,
+      );
       return { enabled: false, url: '', activeIndex: DEFAULT_INDEX, apiKey: null };
     }
   }
@@ -65,9 +75,16 @@ export class BookSearchSettingsService {
     const config = await this.read();
     if (!config.apiKey) return null;
 
+    const startedAt = Date.now();
     try {
       return this.secret.decrypt(config.apiKey);
-    } catch {
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      const errorClass = error instanceof Error ? error.name : 'UnknownError';
+      const errorMessage = sanitizeLogValue(error instanceof Error ? error.message : String(error));
+      this.logger.warn(
+        `[book_search.settings_decrypt] [fail] key=${SETTINGS_KEY} durationMs=${durationMs} errorClass=${errorClass} error="${errorMessage}" - failed to decrypt book search api key, returning null`,
+      );
       return null;
     }
   }

@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import { BookSearchSettingsService } from './book-search.settings';
 
 function makeDb(stored: string | null) {
@@ -70,5 +72,43 @@ describe('BookSearchSettingsService', () => {
     const written = JSON.parse((values.mock.calls[0][0] as { value: string }).value) as Record<string, unknown>;
     expect(written.apiKey).toEqual({ ciphertext: 'CT', nonce: 'n', tag: 't' });
     expect(JSON.stringify(written)).not.toContain('new-key');
+  });
+
+  it('falls back to defaults and logs a warning when the stored settings blob is not valid JSON', async () => {
+    const { db } = makeDb('not valid json');
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await expect(new BookSearchSettingsService(db, secret).get()).resolves.toEqual({
+      enabled: false,
+      url: '',
+      activeIndex: 'bookorbit_books',
+      hasApiKey: false,
+    });
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('returns null and logs a warning when the stored api key cannot be decrypted', async () => {
+    const { db } = makeDb(
+      JSON.stringify({
+        enabled: true,
+        url: 'http://m:7700',
+        activeIndex: 'i',
+        apiKey: { ciphertext: 'CT', nonce: 'n', tag: 't' },
+      }),
+    );
+    const brokenSecret = {
+      encrypt: vi.fn(),
+      decrypt: vi.fn().mockImplementation(() => {
+        throw new Error('unable to authenticate data');
+      }),
+    } as never;
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await expect(new BookSearchSettingsService(db, brokenSecret).getApiKey()).resolves.toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
   });
 });
