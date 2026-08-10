@@ -24,5 +24,18 @@ export interface LocalScanSummary {
   scanned: number;
   matched: number;
   inserted: number;
-  skipped: number;
+  /** Candidates the strategy could not derive a key for. These are invisible in the
+   *  library, so a non-zero value means content was dropped, not deduplicated. */
+  unkeyed: number;
+  /** Sibling files resolving to a book already handled in this run. Expected and harmless. */
+  deduped: number;
+  /** Rows dropped because a warehouse sync landed the same book mid-walk. */
+  reconciled: number;
+  unreadableDirs: number;
+  symlinksSkipped: number;
+}
+
+export interface WalkStats {
+  unreadableDirs: number;
+  symlinksSkipped: number;
 }

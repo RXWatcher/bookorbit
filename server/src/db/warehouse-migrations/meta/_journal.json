@@ -148,6 +148,13 @@
       "when": 1786104000000,
       "tag": "0052_add_local_scan_roots",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786105000000,
+      "tag": "0053_add_local_scan_run_state",
+      "breakpoints": true
     }
   ]
 }

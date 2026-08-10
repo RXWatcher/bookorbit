@@ -2,11 +2,16 @@ import * as fs from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+import type { WalkStats } from './local-scan.types';
 import { walkFiles } from './local-scan.walker';
 
-async function collect(root: string, extensions: string[], excludePatterns: string[] = []): Promise<string[]> {
+function newStats(): WalkStats {
+  return { unreadableDirs: 0, symlinksSkipped: 0 };
+}
+
+async function collect(root: string, extensions: string[], excludePatterns: string[] = [], stats: WalkStats = newStats()): Promise<string[]> {
   const found: string[] = [];
-  for await (const candidate of walkFiles(root, { extensions, excludePatterns })) {
+  for await (const candidate of walkFiles(root, { extensions, excludePatterns, stats })) {
     found.push(candidate.relativePath);
   }
   return found.sort();
@@ -38,18 +43,59 @@ describe('walkFiles', () => {
 
   it('matches extensions case insensitively', async () => {
     await fs.writeFile(join(root, 'Author', 'Book (1)', 'other.EPUB'), 'x');
-    const found = await collect(root, ['.epub'], ['.caltrash']);
-    expect(found).toContain('Author/Book (1)/other.EPUB');
+    await expect(collect(root, ['.epub'], ['.caltrash'])).resolves.toContain('Author/Book (1)/other.EPUB');
   });
 
-  it('yields file level candidates carrying a file name', async () => {
-    for await (const candidate of walkFiles(root, { extensions: ['.epub'], excludePatterns: ['.caltrash'] })) {
-      expect(candidate.fileName).toBe('book.epub');
-      expect(candidate.absolutePath.endsWith(candidate.relativePath)).toBe(true);
+  it('yields exactly one candidate carrying a usable file name and path', async () => {
+    const found: Array<{ fileName: string; absolutePath: string; relativePath: string }> = [];
+    for await (const candidate of walkFiles(root, { extensions: ['.epub'], excludePatterns: ['.caltrash'], stats: newStats() })) {
+      found.push(candidate);
+    }
+
+    expect(found).toHaveLength(1);
+    expect(found[0].fileName).toBe('book.epub');
+    expect(found[0].absolutePath.endsWith(found[0].relativePath)).toBe(true);
+  });
+
+  it('follows a symlinked file', async () => {
+    await fs.symlink(join(root, 'Author', 'Book (1)', 'book.epub'), join(root, 'Author', 'Book (1)', 'linked.epub'));
+    const stats = newStats();
+
+    const found = await collect(root, ['.epub'], ['.caltrash'], stats);
+
+    expect(found).toContain('Author/Book (1)/linked.epub');
+    expect(stats.symlinksSkipped).toBe(0);
+  });
+
+  it('counts a symlinked directory instead of descending into it', async () => {
+    await fs.symlink(join(root, 'Author'), join(root, 'AuthorLink'));
+    const stats = newStats();
+
+    const found = await collect(root, ['.epub'], ['.caltrash'], stats);
+
+    expect(found).toEqual(['Author/Book (1)/book.epub']);
+    expect(stats.symlinksSkipped).toBe(1);
+  });
+
+  it('counts a directory it cannot open rather than failing silently', async () => {
+    const locked = join(root, 'locked');
+    await fs.mkdir(locked);
+    await fs.writeFile(join(locked, 'hidden.epub'), 'x');
+    await fs.chmod(locked, 0o000);
+    const stats = newStats();
+
+    try {
+      await collect(root, ['.epub'], ['.caltrash'], stats);
+      expect(stats.unreadableDirs).toBe(1);
+    } finally {
+      await fs.chmod(locked, 0o755);
     }
   });
 
-  it('does not throw when the root does not exist', async () => {
-    await expect(collect(join(root, 'missing'), ['.epub'])).resolves.toEqual([]);
+  it('counts the root itself as unreadable when it does not exist', async () => {
+    const stats = newStats();
+
+    await expect(collect(join(root, 'missing'), ['.epub'], [], stats)).resolves.toEqual([]);
+    expect(stats.unreadableDirs).toBe(1);
   });
 });
