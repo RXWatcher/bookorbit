@@ -1876,6 +1876,8 @@
         "twoWaySyncHint": "Sync reading position between BookOrbit and Kobo. Requires KEPUB delivery for precise locations and reliable page restore.",
         "syncHighlights": "Sync BookOrbit highlights to Kobo",
         "syncHighlightsHint": "Send highlights made in BookOrbit or KOReader to your Kobo. Kobo highlights are imported into BookOrbit even when this is off. Linked annotations sync edits and deletes both ways. Requires KEPUB delivery; the book on Kobo must be the KEPUB downloaded from BookOrbit.",
+        "storeSync": "Include Kobo store titles",
+        "storeSyncHint": "Also deliver books from your Kobo account, including Kobo Plus and purchases, alongside your BookOrbit library. Without this, only BookOrbit books reach the device. Store titles are downloaded from Kobo directly and are not added to your BookOrbit library.",
         "convertKepub": "Convert to KEPUB",
         "convertKepubHint": "Send eligible EPUBs as KEPUB. This stays on when progress sync or BookOrbit-to-Kobo highlights are enabled. On the next Kobo sync, affected books are offered again as KEPUB downloads; remove any old EPUB copy if Kobo keeps opening it.",
         "forceHyphenation": "Force hyphenation",
