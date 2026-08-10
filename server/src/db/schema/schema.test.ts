@@ -30,6 +30,7 @@ import {
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { FILE_ROLES } from '../../modules/scanner/lib/classify';
 import { localScanRoots } from './local-scan';
+import { searchIndexEvents, searchIndexEntityTypeEnum, searchIndexOperationEnum } from './search-index';
 
 describe('Database Schema Logic', () => {
   beforeAll(() => {
@@ -354,6 +355,15 @@ describe('Database Schema Logic', () => {
     it('is unique per media type and path', () => {
       expect(localScanRoots.absolutePath.notNull).toBe(true);
       expect(localScanRoots.enabled.default).toBe(true);
+    });
+  });
+
+  describe('searchIndexEvents', () => {
+    it('records what changed and how, one row per change', () => {
+      expect(searchIndexEntityTypeEnum.enumValues).toEqual(['catalog_item', 'native_book']);
+      expect(searchIndexOperationEnum.enumValues).toEqual(['upsert', 'delete']);
+      expect(searchIndexEvents.entityId.notNull).toBe(true);
+      expect(searchIndexEvents.enqueuedAt.notNull).toBe(true);
     });
   });
 });
