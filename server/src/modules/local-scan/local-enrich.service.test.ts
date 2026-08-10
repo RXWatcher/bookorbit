@@ -24,9 +24,9 @@ function makeRepository(rows: Array<{ id: number; localPath: string | null }>) {
       await Promise.resolve();
       yield rows;
     }),
-    applyEnrichment: vi.fn().mockImplementation((id: number, values: Record<string, unknown>) => {
-      applied.set(id, values);
-      return Promise.resolve();
+    applyEnrichmentBatch: vi.fn().mockImplementation((updates: Array<{ id: number; values: Record<string, unknown> }>) => {
+      for (const update of updates) applied.set(update.id, update.values);
+      return Promise.resolve(updates.length);
     }),
   };
   return { repository, applied };

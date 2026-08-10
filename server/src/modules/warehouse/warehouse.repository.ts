@@ -117,12 +117,63 @@ export type UserOwnedCatalogItemRow = WarehouseCatalogItemRow & {
   lastReadAt?: Date | null;
   finishedAt?: Date | null;
 };
+/**
+ * A catalogue list row without raw_payload.
+ *
+ * The list mappers read scalar columns only, but the queries used to select every column,
+ * which pulled the whole upstream payload for each row on every page. For audiobooks that
+ * jsonb carries the entire files array with per-file tags and descriptions, so a page of 50
+ * transferred and parsed megabytes of jsonb that was then discarded.
+ */
+export type CatalogListRow = Omit<UserOwnedCatalogItemRow, 'rawPayload'>;
+
 type CatalogPage = {
   rows: UserOwnedCatalogItemRow[];
   total: number;
   page: number;
   limit: number;
 };
+
+/** The list endpoints return rows without raw_payload; queryUserCatalogItems still needs it. */
+type CatalogListPage = {
+  rows: CatalogListRow[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+/** Every catalogue column except raw_payload. Kept in one place so the three list queries
+ *  cannot drift apart. */
+const catalogListColumns = {
+  id: schema.warehouseCatalogItems.id,
+  mediaType: schema.warehouseCatalogItems.mediaType,
+  remoteId: schema.warehouseCatalogItems.remoteId,
+  title: schema.warehouseCatalogItems.title,
+  subtitle: schema.warehouseCatalogItems.subtitle,
+  sortTitle: schema.warehouseCatalogItems.sortTitle,
+  authors: schema.warehouseCatalogItems.authors,
+  narrators: schema.warehouseCatalogItems.narrators,
+  series: schema.warehouseCatalogItems.series,
+  seriesIndex: schema.warehouseCatalogItems.seriesIndex,
+  genres: schema.warehouseCatalogItems.genres,
+  tags: schema.warehouseCatalogItems.tags,
+  language: schema.warehouseCatalogItems.language,
+  publisher: schema.warehouseCatalogItems.publisher,
+  identifiers: schema.warehouseCatalogItems.identifiers,
+  format: schema.warehouseCatalogItems.format,
+  durationSeconds: schema.warehouseCatalogItems.durationSeconds,
+  fileSizeBytes: schema.warehouseCatalogItems.fileSizeBytes,
+  metadataScore: schema.warehouseCatalogItems.metadataScore,
+  publishedYear: schema.warehouseCatalogItems.publishedYear,
+  hasCover: schema.warehouseCatalogItems.hasCover,
+  source: schema.warehouseCatalogItems.source,
+  localPath: schema.warehouseCatalogItems.localPath,
+  upstreamCreatedAt: schema.warehouseCatalogItems.upstreamCreatedAt,
+  upstreamUpdatedAt: schema.warehouseCatalogItems.upstreamUpdatedAt,
+  syncedAt: schema.warehouseCatalogItems.syncedAt,
+  createdAt: schema.warehouseCatalogItems.createdAt,
+  updatedAt: schema.warehouseCatalogItems.updatedAt,
+} as const;
 type CatalogDimensionRow = {
   name: string;
   itemCount: number;
@@ -1918,8 +1969,8 @@ export class WarehouseRepository {
       finishedAt: schema.warehouseUserState.finishedAt,
     };
 
-    const rows = includeAllCatalogItems
-      ? await this.db
+    const rowsQuery = includeAllCatalogItems
+      ? this.db
           .select(selectFields)
           .from(schema.warehouseCatalogItems)
           .leftJoin(schema.warehouseUserItems, buildUserCatalogJoin(userId))
@@ -1942,7 +1993,7 @@ export class WarehouseRepository {
           .orderBy(orderBy)
           .limit(limit)
           .offset(page * limit)
-      : await this.db
+      : this.db
           .select(selectFields)
           .from(schema.warehouseUserItems)
           .innerJoin(
@@ -1972,8 +2023,8 @@ export class WarehouseRepository {
           .limit(limit)
           .offset(page * limit);
 
-    const totalRows = includeAllCatalogItems
-      ? await this.db
+    const totalQuery = includeAllCatalogItems
+      ? this.db
           .select({ total: sql<number>`count(*)::int` })
           .from(schema.warehouseCatalogItems)
           .leftJoin(
@@ -1992,7 +2043,7 @@ export class WarehouseRepository {
             ),
           )
           .where(where)
-      : await this.db
+      : this.db
           .select({ total: sql<number>`count(*)::int` })
           .from(schema.warehouseUserItems)
           .innerJoin(
@@ -2018,6 +2069,9 @@ export class WarehouseRepository {
             ),
           )
           .where(where);
+
+    // Independent of each other, so the page and its count go to the database together.
+    const [rows, totalRows] = await Promise.all([rowsQuery, totalQuery]);
 
     return {
       rows,
@@ -2222,23 +2276,25 @@ export class WarehouseRepository {
     return row;
   }
 
-  async listEbookCatalog(query: WarehouseEbookCatalogQuery): Promise<CatalogPage> {
+  async listEbookCatalog(query: WarehouseEbookCatalogQuery): Promise<CatalogListPage> {
     const { page, limit } = clampPageLimit(query.page, query.limit);
     const where = buildEbookCatalogWhere(query);
     const orderBy = buildEbookCatalogOrder(query.sort, query.order);
 
-    const rows = await this.db
-      .select()
-      .from(schema.warehouseCatalogItems)
-      .where(where)
-      .orderBy(orderBy)
-      .limit(limit)
-      .offset((page - 1) * limit);
-
-    const totalRows = await this.db
-      .select({ total: sql<number>`count(*)::int` })
-      .from(schema.warehouseCatalogItems)
-      .where(where);
+    // The page and its count are independent, so they run together rather than in series.
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select(catalogListColumns)
+        .from(schema.warehouseCatalogItems)
+        .where(where)
+        .orderBy(orderBy)
+        .limit(limit)
+        .offset((page - 1) * limit),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.warehouseCatalogItems)
+        .where(where),
+    ]);
 
     return {
       rows,
@@ -2248,23 +2304,25 @@ export class WarehouseRepository {
     };
   }
 
-  async listComicCatalog(query: WarehouseComicCatalogQuery): Promise<CatalogPage> {
+  async listComicCatalog(query: WarehouseComicCatalogQuery): Promise<CatalogListPage> {
     const { page, limit } = clampPageLimit(query.page, query.limit);
     const where = buildComicCatalogWhere(query);
     const orderBy = buildEbookCatalogOrder(query.sort, query.order);
 
-    const rows = await this.db
-      .select()
-      .from(schema.warehouseCatalogItems)
-      .where(where)
-      .orderBy(orderBy)
-      .limit(limit)
-      .offset((page - 1) * limit);
-
-    const totalRows = await this.db
-      .select({ total: sql<number>`count(*)::int` })
-      .from(schema.warehouseCatalogItems)
-      .where(where);
+    // The page and its count are independent, so they run together rather than in series.
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select(catalogListColumns)
+        .from(schema.warehouseCatalogItems)
+        .where(where)
+        .orderBy(orderBy)
+        .limit(limit)
+        .offset((page - 1) * limit),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.warehouseCatalogItems)
+        .where(where),
+    ]);
 
     return {
       rows,
@@ -2274,23 +2332,25 @@ export class WarehouseRepository {
     };
   }
 
-  async listAudiobookCatalog(query: WarehouseAudiobookCatalogQuery): Promise<CatalogPage> {
+  async listAudiobookCatalog(query: WarehouseAudiobookCatalogQuery): Promise<CatalogListPage> {
     const { page, limit } = clampPageLimit(query.page, query.limit);
     const where = buildAudiobookCatalogWhere(query);
     const orderBy = buildAudiobookCatalogOrder(query.sort, query.order);
 
-    const rows = await this.db
-      .select()
-      .from(schema.warehouseCatalogItems)
-      .where(where)
-      .orderBy(orderBy)
-      .limit(limit)
-      .offset((page - 1) * limit);
-
-    const totalRows = await this.db
-      .select({ total: sql<number>`count(*)::int` })
-      .from(schema.warehouseCatalogItems)
-      .where(where);
+    // The page and its count are independent, so they run together rather than in series.
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select(catalogListColumns)
+        .from(schema.warehouseCatalogItems)
+        .where(where)
+        .orderBy(orderBy)
+        .limit(limit)
+        .offset((page - 1) * limit),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.warehouseCatalogItems)
+        .where(where),
+    ]);
 
     return {
       rows,

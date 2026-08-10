@@ -466,34 +466,36 @@ export class AnnotationSyncRepository {
     const source: AnnotationSyncSource = 'kobo';
     const bookIds = new Set<number>();
 
-    const tombstones = await this.db
-      .selectDistinct({ bookId: annotations.bookId })
-      .from(annotationSyncState)
-      .innerJoin(annotations, eq(annotations.id, annotationSyncState.annotationId))
-      .where(
-        and(
-          eq(annotationSyncState.userId, userId),
-          eq(annotationSyncState.source, source),
-          eq(annotationSyncState.deviceId, deviceId),
-          isNotNull(annotations.deletedAt),
-          isNull(annotationSyncState.deleteAckedAt),
+    // Two independent reads feeding the same set, so they go together.
+    const [tombstones, edits] = await Promise.all([
+      this.db
+        .selectDistinct({ bookId: annotations.bookId })
+        .from(annotationSyncState)
+        .innerJoin(annotations, eq(annotations.id, annotationSyncState.annotationId))
+        .where(
+          and(
+            eq(annotationSyncState.userId, userId),
+            eq(annotationSyncState.source, source),
+            eq(annotationSyncState.deviceId, deviceId),
+            isNotNull(annotations.deletedAt),
+            isNull(annotationSyncState.deleteAckedAt),
+          ),
         ),
-      );
+      this.db
+        .selectDistinct({ bookId: annotations.bookId })
+        .from(annotationSyncState)
+        .innerJoin(annotations, eq(annotations.id, annotationSyncState.annotationId))
+        .where(
+          and(
+            eq(annotationSyncState.userId, userId),
+            eq(annotationSyncState.source, source),
+            eq(annotationSyncState.deviceId, deviceId),
+            isNull(annotations.deletedAt),
+            sql`${annotations.version} > ${annotationSyncState.lastAppliedVersion}`,
+          ),
+        ),
+    ]);
     for (const row of tombstones) bookIds.add(row.bookId);
-
-    const edits = await this.db
-      .selectDistinct({ bookId: annotations.bookId })
-      .from(annotationSyncState)
-      .innerJoin(annotations, eq(annotations.id, annotationSyncState.annotationId))
-      .where(
-        and(
-          eq(annotationSyncState.userId, userId),
-          eq(annotationSyncState.source, source),
-          eq(annotationSyncState.deviceId, deviceId),
-          isNull(annotations.deletedAt),
-          sql`${annotations.version} > ${annotationSyncState.lastAppliedVersion}`,
-        ),
-      );
     for (const row of edits) bookIds.add(row.bookId);
 
     const notServedToThisDevice = notExists(

@@ -1,4 +1,4 @@
-import { access, readFile } from 'fs/promises';
+import { readdir, readFile } from 'fs/promises';
 import { basename, dirname, join } from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 
@@ -20,10 +20,11 @@ export interface LocalEnrichSummary {
   coversFound: number;
 }
 
-async function exists(path: string): Promise<boolean> {
+/** One directory read answers the cover question, rather than probing each candidate name. */
+async function hasCoverFile(bookDir: string): Promise<boolean> {
   try {
-    await access(path);
-    return true;
+    const entries = await readdir(bookDir);
+    return entries.some((entry) => COVER_NAMES.includes(entry.toLowerCase()));
   } catch {
     return false;
   }
@@ -48,6 +49,8 @@ export class LocalEnrichService {
     const startedAt = Date.now();
     const summary: LocalEnrichSummary = { examined: 0, enriched: 0, noSidecar: 0, unparsable: 0, coversFound: 0 };
     this.logger.log('[local_enrich.run] [start] - sidecar enrichment started');
+
+    let pending: Array<{ id: number; values: LocalEnrichmentValues }> = [];
 
     try {
       for await (const batch of this.repository.streamLocalItemsNeedingEnrichment(BATCH_SIZE)) {
@@ -90,18 +93,20 @@ export class LocalEnrichService {
             }
           }
 
-          for (const coverName of COVER_NAMES) {
-            if (await exists(join(bookDir, coverName))) {
-              values.hasCover = true;
-              summary.coversFound += 1;
-              break;
-            }
+          if (await hasCoverFile(bookDir)) {
+            values.hasCover = true;
+            summary.coversFound += 1;
           }
 
-          await this.repository.applyEnrichment(row.id, values);
-          summary.enriched += 1;
+          pending.push({ id: row.id, values });
+          if (pending.length >= BATCH_SIZE) {
+            summary.enriched += await this.repository.applyEnrichmentBatch(pending);
+            pending = [];
+          }
         }
       }
+
+      summary.enriched += await this.repository.applyEnrichmentBatch(pending);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const errorClass = error instanceof Error ? error.constructor.name : 'Unknown';

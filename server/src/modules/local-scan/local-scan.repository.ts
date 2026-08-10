@@ -193,8 +193,40 @@ export class LocalScanRepository {
     }
   }
 
-  async applyEnrichment(id: number, values: LocalEnrichmentValues): Promise<void> {
-    await this.db.update(schema.warehouseCatalogItems).set(values).where(eq(schema.warehouseCatalogItems.id, id));
+  /**
+   * Applies a batch of enrichments in one statement.
+   *
+   * This used to be one UPDATE per book, which meant 62,384 round trips for a single run.
+   * A single UPDATE ... FROM (VALUES ...) does the same work in one, and the jsonb columns
+   * are cast explicitly because a VALUES list carries no type information of its own.
+   */
+  async applyEnrichmentBatch(updates: Array<{ id: number; values: LocalEnrichmentValues }>): Promise<number> {
+    if (updates.length === 0) return 0;
+
+    const tuples = updates.map(({ id, values }) => {
+      const v = values;
+      return sql`(${id}::int, ${v.title ?? null}::text, ${v.sortTitle ?? null}::text, ${JSON.stringify(v.authors ?? [])}::jsonb, ${v.series ?? null}::text, ${v.seriesIndex ?? null}::real, ${v.publisher ?? null}::text, ${v.language ?? null}::varchar, ${JSON.stringify(v.tags ?? [])}::jsonb, ${v.publishedYear ?? null}::int, ${JSON.stringify(v.identifiers ?? {})}::jsonb, ${v.hasCover ?? false}::boolean)`;
+    });
+
+    const result = await this.db.execute(sql`
+      update warehouse_catalog_items as t set
+        title = v.title,
+        sort_title = v.sort_title,
+        authors = v.authors,
+        series = v.series,
+        series_index = v.series_index,
+        publisher = v.publisher,
+        language = v.language,
+        tags = v.tags,
+        published_year = v.published_year,
+        identifiers = v.identifiers,
+        has_cover = v.has_cover,
+        updated_at = now()
+      from (values ${sql.join(tuples, sql`, `)}) as v(id, title, sort_title, authors, series, series_index, publisher, language, tags, published_year, identifiers, has_cover)
+      where t.id = v.id
+    `);
+
+    return result.rowCount ?? 0;
   }
 
   async findAllRootPaths(): Promise<string[]> {

@@ -148,27 +148,29 @@ export class BookMoveRepository {
 
       const batchIds = bookRows.map((row) => row.bookId);
 
-      const fileRows = await this.db
-        .select({
-          bookId: bookFiles.bookId,
-          id: bookFiles.id,
-          absolutePath: bookFiles.absolutePath,
-          relPath: bookFiles.relPath,
-          role: bookFiles.role,
-          format: bookFiles.format,
-          fileHash: bookFiles.fileHash,
-          sortOrder: bookFiles.sortOrder,
-        })
-        .from(bookFiles)
-        .where(inArray(bookFiles.bookId, batchIds))
-        .orderBy(asc(bookFiles.id));
-
-      const authorRows = await this.db
-        .select({ bookId: bookAuthors.bookId, name: authors.name })
-        .from(bookAuthors)
-        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
-        .where(inArray(bookAuthors.bookId, batchIds))
-        .orderBy(asc(bookAuthors.displayOrder));
+      // Both read only batchIds, so one round trip per batch instead of two.
+      const [fileRows, authorRows] = await Promise.all([
+        this.db
+          .select({
+            bookId: bookFiles.bookId,
+            id: bookFiles.id,
+            absolutePath: bookFiles.absolutePath,
+            relPath: bookFiles.relPath,
+            role: bookFiles.role,
+            format: bookFiles.format,
+            fileHash: bookFiles.fileHash,
+            sortOrder: bookFiles.sortOrder,
+          })
+          .from(bookFiles)
+          .where(inArray(bookFiles.bookId, batchIds))
+          .orderBy(asc(bookFiles.id)),
+        this.db
+          .select({ bookId: bookAuthors.bookId, name: authors.name })
+          .from(bookAuthors)
+          .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+          .where(inArray(bookAuthors.bookId, batchIds))
+          .orderBy(asc(bookAuthors.displayOrder)),
+      ]);
 
       const filesByBook = new Map<number, MoveBookFile[]>();
       for (const file of fileRows) {

@@ -68,6 +68,7 @@ import {
   WarehouseRepository,
   type CatalogAuthorSummaryRow,
   type CatalogAuthorSummaryPage,
+  type CatalogListRow,
   type CatalogChallengePatternData,
   type CatalogDiversityData,
   type CatalogReadingDnaData,
@@ -1667,7 +1668,7 @@ function mapCatalogDimensionItem(row: { name: string; itemCount: number }): Ware
   };
 }
 
-function mapEbookCatalogItem(row: WarehouseCatalogItemRow): WarehouseEbookCatalogItem {
+function mapEbookCatalogItem(row: CatalogListRow): WarehouseEbookCatalogItem {
   const authorRefs = catalogAuthorRefs(row.authors);
   const seriesRef = catalogSeriesRef(row.series);
   return {
@@ -1689,7 +1690,7 @@ function mapEbookCatalogItem(row: WarehouseCatalogItemRow): WarehouseEbookCatalo
   };
 }
 
-function mapComicCatalogItem(row: WarehouseCatalogItemRow): WarehouseComicCatalogItem {
+function mapComicCatalogItem(row: CatalogListRow): WarehouseComicCatalogItem {
   const item: WarehouseComicCatalogItem = {
     ...mapEbookCatalogItem(row),
     mediaType: 'comic',
@@ -1705,7 +1706,7 @@ function mapComicCatalogItem(row: WarehouseCatalogItemRow): WarehouseComicCatalo
   return item;
 }
 
-function mapAudiobookCatalogItem(row: WarehouseCatalogItemRow): WarehouseAudiobookCatalogItem {
+function mapAudiobookCatalogItem(row: CatalogListRow): WarehouseAudiobookCatalogItem {
   const authorRefs = catalogAuthorRefs(row.authors);
   const seriesRef = catalogSeriesRef(row.series);
   return {
