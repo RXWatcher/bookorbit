@@ -5716,19 +5716,7 @@ function buildEbookCatalogWhere(query: WarehouseEbookCatalogQuery): SQL {
   const trimmedQuery = query.q?.trim();
 
   if (trimmedQuery) {
-    const pattern = `%${trimmedQuery}%`;
-
-    clauses.push(
-      or(
-        ilike(schema.warehouseCatalogItems.title, pattern),
-        catalogAuthorNameMatches(pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.series}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.identifiers}::text, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.format}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.language}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.publisher}, '')`, pattern),
-      )!,
-    );
+    clauses.push(buildCatalogSearchWhere(trimmedQuery));
   }
 
   pushIfPresent(clauses, catalogAuthorTextFilter(query.author));
@@ -5767,19 +5755,7 @@ function buildComicCatalogWhere(query: WarehouseComicCatalogQuery): SQL {
   const trimmedQuery = query.q?.trim();
 
   if (trimmedQuery) {
-    const pattern = `%${trimmedQuery}%`;
-
-    clauses.push(
-      or(
-        ilike(schema.warehouseCatalogItems.title, pattern),
-        catalogAuthorNameMatches(pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.series}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.identifiers}::text, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.format}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.language}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.publisher}, '')`, pattern),
-      )!,
-    );
+    clauses.push(buildCatalogSearchWhere(trimmedQuery));
   }
 
   pushIfPresent(clauses, catalogAuthorTextFilter(query.author));
@@ -5800,20 +5776,7 @@ function buildAudiobookCatalogWhere(query: WarehouseAudiobookCatalogQuery): SQL 
   const trimmedQuery = query.q?.trim();
 
   if (trimmedQuery) {
-    const pattern = `%${trimmedQuery}%`;
-
-    clauses.push(
-      or(
-        ilike(schema.warehouseCatalogItems.title, pattern),
-        catalogAuthorNameMatches(pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.narrators}::text, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.series}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.identifiers}::text, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.format}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.language}, '')`, pattern),
-        ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.publisher}, '')`, pattern),
-      )!,
-    );
+    clauses.push(buildCatalogSearchWhere(trimmedQuery));
   }
 
   pushIfPresent(clauses, catalogAuthorTextFilter(query.author));

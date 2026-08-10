@@ -5142,8 +5142,12 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."language"');
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."publisher"');
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."has_cover"');
+      // Ebook search now shares one implementation with the other media types, which also
+      // matches narrators. That field is empty for ebooks, so the extra clause changes the
+      // parameter count without changing which rows match.
       expect(renderedWhere?.params).toEqual([
         'ebook',
+        '%dune%',
         '%dune%',
         '%dune%',
         '%dune%',
