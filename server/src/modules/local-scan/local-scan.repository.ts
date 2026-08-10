@@ -197,6 +197,24 @@ export class LocalScanRepository {
     await this.db.update(schema.warehouseCatalogItems).set(values).where(eq(schema.warehouseCatalogItems.id, id));
   }
 
+  async findAllRootPaths(): Promise<string[]> {
+    const rows = await this.db.select({ absolutePath: schema.localScanRoots.absolutePath }).from(schema.localScanRoots);
+    return rows.map((row) => row.absolutePath);
+  }
+
+  async findLocalItemPath(mediaType: WarehouseMediaType, remoteId: string): Promise<string | null> {
+    const row = await this.db.query.warehouseCatalogItems.findFirst({
+      columns: { localPath: true },
+      where: and(
+        eq(schema.warehouseCatalogItems.mediaType, mediaType),
+        eq(schema.warehouseCatalogItems.remoteId, remoteId),
+        eq(schema.warehouseCatalogItems.source, 'local'),
+      ),
+    });
+
+    return row?.localPath ?? null;
+  }
+
   findRootStatuses() {
     return this.db
       .select({

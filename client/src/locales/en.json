@@ -1150,7 +1150,8 @@
         "account-activity": "Account Activity",
         "magic-links": "Magic Links",
         "oidc": "OIDC / SSO",
-        "server-fonts": "Server Fonts"
+        "server-fonts": "Server Fonts",
+        "local-scan": "Local Scan"
       },
       "serverFonts": {
         "title": "Server Fonts",
@@ -1158,6 +1159,26 @@
         "listLabel": "Server fonts",
         "noFontsYet": "No server fonts yet",
         "noFontsHint": "Fonts you add here appear in every user's reader."
+      },
+      "localScan": {
+        "title": "Local Scan",
+        "subtitle": "Find books on the filesystem that the Book Warehouse catalogue does not have, and fill their metadata from the sidecars stored beside them.",
+        "scanAll": "Scan all roots",
+        "scan": "Scan",
+        "enrich": "Refresh metadata",
+        "enrichHint": "Refresh metadata reads the metadata.opf and cover file stored next to each book. It needs no API keys and makes no external calls.",
+        "disabled": "disabled",
+        "never": "never",
+        "lastRun": "Last finished: {when}",
+        "loadFailed": "Could not load scan roots.",
+        "actionFailed": "The request failed. Check the server logs.",
+        "unkeyedWarning": "{count} files could not be identified and are not in the library.",
+        "summary": {
+          "scanned": "Scanned",
+          "matched": "Already known",
+          "inserted": "Added",
+          "deduped": "Duplicates"
+        }
       }
     },
     "common": {
@@ -7051,7 +7072,8 @@
       "account-activity": "Account Activity",
       "magic-links": "Magic Links",
       "oidc": "OIDC / SSO",
-      "server-fonts": "Server Fonts"
+      "server-fonts": "Server Fonts",
+      "local-scan": "Local Scan"
     },
     "system": {
       "file-naming": "File Naming",

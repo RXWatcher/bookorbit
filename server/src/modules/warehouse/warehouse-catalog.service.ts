@@ -1,4 +1,4 @@
-import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import type {
   AcquisitionLagPoint,
   BookCard,
@@ -61,6 +61,7 @@ import type { WarehouseCatalogItemRow } from '../../db/schema';
 import { mapWarehouseAudiobookCatalogItemRow, mapWarehouseAudiobookDetail, mapWarehouseEbookCatalogItemRow } from './warehouse-catalog.mapper';
 import { WarehouseClientService, type WarehouseBinaryResponse } from './warehouse-client.service';
 import { WarehouseCatalogCoverCacheService } from './warehouse-catalog-cover-cache.service';
+import { LocalContentService } from '../local-scan/local-content.service';
 import { catalogAuthorRefs, catalogSeriesRef } from './catalog-link-refs';
 import { LIBRARY_ITEM_NOT_AVAILABLE_MESSAGE, LIBRARY_MEDIA_UNAVAILABLE_MESSAGE } from './warehouse-user-facing-messages';
 import {
@@ -138,7 +139,25 @@ export class WarehouseCatalogService {
     private readonly client: WarehouseClientService,
     private readonly secret: WarehouseSecretService,
     private readonly coverCache: WarehouseCatalogCoverCacheService,
+    @Optional() private readonly localContent?: LocalContentService,
   ) {}
+
+  /** Local rows carry their bytes on the mount rather than at the warehouse, so every binary
+   *  path checks here first. Returns null for a warehouse row, which takes the original path. */
+  private async localBinary(
+    mediaType: WarehouseMediaType,
+    remoteId: string,
+    kind: 'file' | 'cover',
+    range?: string,
+  ): Promise<WarehouseBinaryResponse | null> {
+    if (!this.localContent) return null;
+
+    const localPath = await this.localContent.findLocalPath(mediaType, remoteId);
+    if (!localPath) return null;
+
+    const response = kind === 'cover' ? await this.localContent.getCover(localPath) : await this.localContent.getFile(localPath, range);
+    return response as WarehouseBinaryResponse;
+  }
 
   async listEbooks(query: WarehouseEbookCatalogQuery): Promise<WarehouseEbookCatalogPage> {
     if (!(await this.isCatalogEnabled())) {
@@ -1060,6 +1079,9 @@ export class WarehouseCatalogService {
   }
 
   async downloadEbook(user: RequestUser, remoteId: string, range?: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(EBOOK_MEDIA_TYPE, remoteId, 'file', range);
+    if (local) return local;
+
     const request = await this.ebookBinaryRequest(user, remoteId);
     const clientRequest = ebookClientRequest(request);
 
@@ -1071,6 +1093,9 @@ export class WarehouseCatalogService {
   }
 
   async downloadComic(user: RequestUser, remoteId: string, range?: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(COMIC_MEDIA_TYPE, remoteId, 'file', range);
+    if (local) return local;
+
     const request = await this.comicBinaryRequest(user, remoteId);
 
     try {
@@ -1103,6 +1128,9 @@ export class WarehouseCatalogService {
   }
 
   async getEbookCover(user: RequestUser, remoteId: string, size: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(EBOOK_MEDIA_TYPE, remoteId, 'cover');
+    if (local) return local;
+
     const request = await this.ebookBinaryRequest(user, remoteId);
     const cached = await this.readCachedEbookCover(request.sourceKey, remoteId, size);
     if (cached) {
@@ -1395,6 +1423,9 @@ export class WarehouseCatalogService {
   }
 
   async getAudiobookCover(user: RequestUser, remoteId: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(AUDIOBOOK_MEDIA_TYPE, remoteId, 'cover');
+    if (local) return local;
+
     const request = await this.audiobookBinaryRequest(user, remoteId);
     const cached = await this.readCachedAudiobookCover(request.sourceKey, remoteId);
     if (cached) {

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
 import { AchievementModule } from '../achievement/achievement.module';
 import { NotificationModule } from '../notification/notification.module';
@@ -18,8 +18,10 @@ import { WarehouseSettingsService } from './warehouse-settings.service';
 import { WarehouseUserStateController } from './warehouse-user-state.controller';
 import { WarehouseUserStateService } from './warehouse-user-state.service';
 
+import { LocalScanModule } from '../local-scan/local-scan.module';
+
 @Module({
-  imports: [NotificationModule, AchievementModule],
+  imports: [forwardRef(() => LocalScanModule), NotificationModule, AchievementModule],
   controllers: [
     WarehouseAdminController,
     WarehouseCatalogController,

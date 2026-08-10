@@ -8,6 +8,7 @@ import OidcSettings from './OidcSettings.vue'
 import AccountActivityPage from '@/features/admin/AccountActivityPage.vue'
 import MagicLinksSettings from './MagicLinksSettings.vue'
 import ServerFontsSettings from './ServerFontsSettings.vue'
+import LocalScanSettings from './LocalScanSettings.vue'
 import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { ADMIN_TAB_INFO, ADMIN_TABS, normalizeAdminTab, type AdminTab as Tab } from './lib/admin-tabs'
 
@@ -56,6 +57,7 @@ const tabWidths: Record<Tab, string> = {
   'magic-links': 'max-w-5xl',
   oidc: 'max-w-3xl',
   'server-fonts': 'max-w-3xl',
+  'local-scan': 'max-w-4xl',
 }
 
 function selectTab(tab: Tab) {
@@ -92,5 +94,6 @@ function selectTab(tab: Tab) {
     <MagicLinksSettings v-else-if="activeTab === 'magic-links'" :with-header="false" with-embedded-create-action />
     <OidcSettings v-else-if="activeTab === 'oidc'" embedded />
     <ServerFontsSettings v-else-if="activeTab === 'server-fonts'" embedded />
+    <LocalScanSettings v-else-if="activeTab === 'local-scan'" embedded />
   </div>
 </template>
