@@ -23,6 +23,8 @@ import { users } from './auth';
 
 export const warehouseMediaTypeEnum = pgEnum('warehouse_media_type', ['ebook', 'audiobook', 'comic']);
 
+export const catalogItemSourceEnum = pgEnum('catalog_item_source', ['warehouse', 'local']);
+
 export const warehouseSyncMediaTypeEnum = pgEnum('warehouse_sync_media_type', ['ebook', 'audiobook', 'comic', 'mixed']);
 
 export const warehouseSyncStatusEnum = pgEnum('warehouse_sync_status', ['running', 'completed', 'failed']);
@@ -108,6 +110,8 @@ export const warehouseCatalogItems = pgTable(
     /** Materialised published year — see migration 0050. */
     publishedYear: integer('published_year'),
     hasCover: boolean('has_cover').notNull().default(false),
+    source: catalogItemSourceEnum('source').notNull().default('warehouse'),
+    localPath: text('local_path'),
     upstreamCreatedAt: timestamp('upstream_created_at', { withTimezone: true }),
     upstreamUpdatedAt: timestamp('upstream_updated_at', { withTimezone: true }),
     rawPayload: jsonb('raw_payload')
@@ -139,8 +143,10 @@ export const warehouseCatalogItems = pgTable(
     index('warehouse_catalog_items_publisher_trgm_idx').using('gin', t.publisher.op('gin_trgm_ops')),
     index('warehouse_catalog_items_language_idx').on(t.mediaType, t.language),
     index('warehouse_catalog_items_format_idx').on(t.mediaType, t.format),
+    index('warehouse_catalog_items_source_idx').on(t.mediaType, t.source),
     check('warehouse_catalog_items_series_index_nonnegative_chk', sql`${t.seriesIndex} is null or ${t.seriesIndex} >= 0`),
     check('warehouse_catalog_items_duration_seconds_nonnegative_chk', sql`${t.durationSeconds} is null or ${t.durationSeconds} >= 0`),
+    check('warehouse_catalog_items_local_path_chk', sql`${t.source} <> 'local' or ${t.localPath} is not null`),
   ],
 );
 

@@ -16,6 +16,7 @@ import { emailRecipients, emailRecipientGroups } from './email-recipients';
 import { readerDefaultPreferences, readerPreferences, readingProgress, annotations, userReadingDailyStats } from './reader';
 import { migrationSources, migrationProfiles, migrationPlanArtifacts, migrationRuns, migrationRunMetrics } from './migration';
 import {
+  catalogItemSourceEnum,
   warehouseCatalogItems,
   warehouseCatalogItemAuthors,
   warehouseCatalogSyncRuns,
@@ -311,6 +312,13 @@ describe('Database Schema Logic', () => {
           return reference.columns.map((col) => col.name).join(',') === 'user_id' && reference.foreignTable === users && fk.onDelete === 'cascade';
         }),
       ).toBe(true);
+    });
+
+    it('marks catalog item origin and requires a path for local rows', () => {
+      expect(catalogItemSourceEnum.enumValues).toEqual(['warehouse', 'local']);
+      expect(warehouseCatalogItems.source.notNull).toBe(true);
+      expect(warehouseCatalogItems.source.default).toBe('warehouse');
+      expect(warehouseCatalogItems.localPath.notNull).toBe(false);
     });
   });
 
