@@ -320,11 +320,46 @@ export * from "./local-scan";
 Run: `cd server && npx vitest run src/db/schema/schema.test.ts -t 'is unique per media type and path'`
 Expected: PASS.
 
-- [ ] **Step 5: Generate the migration**
+- [ ] **Step 5: Hand write the migration**
 
-Run: `cd server && pnpm db:generate --name add_local_scan_roots`
+Do NOT run `pnpm db:generate` and do NOT run `pnpm db:migrate`.
 
-Do not run `pnpm db:migrate`. There is no local database and the migration stays unapplied.
+`local_scan_roots` has a column typed `warehouse_media_type`, an enum owned by the hand managed
+lineage, so this table belongs there too. Generating it into the primary lineage would emit SQL
+referencing a type that lineage has never heard of.
+
+Create `server/src/db/warehouse-migrations/0052_add_local_scan_roots.sql`:
+
+```sql
+-- Configured filesystem roots the local scanner walks, one per media type.
+CREATE TABLE IF NOT EXISTS "local_scan_roots" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "media_type" "warehouse_media_type" NOT NULL,
+  "absolute_path" text NOT NULL,
+  "enabled" boolean DEFAULT true NOT NULL,
+  "exclude_patterns" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "last_scan_started_at" timestamp with time zone,
+  "last_scan_finished_at" timestamp with time zone,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "local_scan_roots_media_path_unique" UNIQUE ("media_type", "absolute_path")
+);
+```
+
+Then append to `server/src/db/warehouse-migrations/meta/_journal.json`, matching the existing
+entry shape exactly:
+
+```json
+{
+  "idx": 52,
+  "version": "7",
+  "when": 1786104000000,
+  "tag": "0052_add_local_scan_roots",
+  "breakpoints": true
+}
+```
+
+Do not add a snapshot file.
 
 - [ ] **Step 6: Commit**
 
