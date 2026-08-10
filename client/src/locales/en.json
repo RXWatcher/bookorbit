@@ -6871,6 +6871,7 @@
       "clearAllFilters": "Clear all filters",
       "expandSeries": "Expand series",
       "collapseSeries": "Collapse series",
+      "collapseLockedWhileSelecting": "Series stay expanded while selecting",
       "expanded": "Expanded",
       "exportMetadata": "Export metadata",
       "showControlsAria": "Show library controls",
