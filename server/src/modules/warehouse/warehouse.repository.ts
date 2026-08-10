@@ -1963,7 +1963,7 @@ export class WarehouseRepository {
     // sort breaks ties.
     const relevance = q ? buildCatalogRelevanceOrder(q) : undefined;
     const orderBy = relevance
-      ? [relevance, ...toOrderArray(buildCatalogUserItemsOrder(query.sort))]
+      ? [relevance, sql`length(${schema.warehouseCatalogItems.title})`, ...toOrderArray(buildCatalogUserItemsOrder(query.sort))]
       : toOrderArray(buildCatalogUserItemsOrder(query.sort));
 
     const selectFields = {
@@ -2117,7 +2117,7 @@ export class WarehouseRepository {
     // sort breaks ties.
     const relevance = q ? buildCatalogRelevanceOrder(q) : undefined;
     const orderBy = relevance
-      ? [relevance, ...toOrderArray(buildCatalogUserItemsOrder(query.sort))]
+      ? [relevance, sql`length(${schema.warehouseCatalogItems.title})`, ...toOrderArray(buildCatalogUserItemsOrder(query.sort))]
       : toOrderArray(buildCatalogUserItemsOrder(query.sort));
     const primaryField = (query.sort?.[0] ?? { field: 'title' as const }).field;
     const bucketExpr = buildCatalogJumpBucketExpr(primaryField);

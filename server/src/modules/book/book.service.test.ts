@@ -3219,7 +3219,10 @@ describe('BookService', () => {
           q: 'dune',
         } as never),
       ).resolves.toEqual({
-        items: [ebookItem, audioItem, comicItem, localBook],
+        // Searching ranks by how closely a title matches, so the two shortest titles that
+        // are essentially just the query come first. Ordering is incidental to this test,
+        // which is about which library ids get queried.
+        items: [ebookItem, localBook, audioItem, comicItem],
         total: 4,
         page: 0,
         size: 10,

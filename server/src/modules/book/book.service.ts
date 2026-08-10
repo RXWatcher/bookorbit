@@ -332,6 +332,10 @@ function sortLibraryBookItems(items: LibraryBookItem[], sort: BookQuery['sort'],
       if (term) {
         const relevance = libraryBookRelevance(a.item, term) - libraryBookRelevance(b.item, term);
         if (relevance !== 0) return relevance;
+        // Within a tier, the title that is closest to being just the query wins, so
+        // "The Will of the Many" beats "How Many Old Ladies Will Die?".
+        const excess = (a.item.title ?? '').length - (b.item.title ?? '').length;
+        if (excess !== 0) return excess;
       }
       for (const spec of sort) {
         const av = getLibraryBookItemSortValue(a.item, spec.field);
