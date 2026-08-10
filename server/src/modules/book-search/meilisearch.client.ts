@@ -1,4 +1,4 @@
-import { BadGatewayException } from '@nestjs/common';
+import { BadGatewayException, GatewayTimeoutException } from '@nestjs/common';
 
 import type { BookSearchDocument } from './book-search.types';
 
@@ -18,21 +18,34 @@ export class MeilisearchClient {
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${this.options.url}${path}`, {
-        method: init.method,
-        headers: {
-          Authorization: `Bearer ${this.options.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-        signal: controller.signal,
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${this.options.url}${path}`, {
+          method: init.method,
+          headers: {
+            Authorization: `Bearer ${this.options.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: init.body === undefined ? undefined : JSON.stringify(init.body),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        const name = err instanceof Error ? err.name : undefined;
+        if (name === 'AbortError') {
+          throw new GatewayTimeoutException('Search server request timed out');
+        }
+        throw new BadGatewayException('Search server request failed');
+      }
 
       if (!response.ok) {
         throw new BadGatewayException(`Search server returned ${response.status}`);
       }
 
-      return (await response.json()) as T;
+      try {
+        return (await response.json()) as T;
+      } catch {
+        throw new BadGatewayException('Search server returned an invalid response');
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -59,6 +72,13 @@ export class MeilisearchClient {
     });
   }
 
+  async createIndex(index: string): Promise<void> {
+    await this.request('/indexes', {
+      method: 'POST',
+      body: { uid: index, primaryKey: 'id' },
+    });
+  }
+
   async addDocuments(index: string, documents: BookSearchDocument[]): Promise<void> {
     await this.request(`/indexes/${index}/documents`, {
       method: 'PUT',
@@ -75,8 +95,8 @@ export class MeilisearchClient {
 
   async search(index: string, params: { q: string; offset: number; limit: number; filter?: string[] }): Promise<{ ids: string[]; total: number }> {
     const body = await this.request<{
-      hits: Array<{ id: string }>;
-      estimatedTotalHits: number;
+      hits?: Array<{ id: string }>;
+      estimatedTotalHits?: number;
     }>(`/indexes/${index}/search`, {
       method: 'POST',
       body: {
@@ -88,9 +108,11 @@ export class MeilisearchClient {
       },
     });
 
+    const hits = Array.isArray(body?.hits) ? body.hits : [];
+
     return {
-      ids: body.hits.map((hit) => hit.id),
-      total: body.estimatedTotalHits ?? 0,
+      ids: hits.map((hit) => hit.id).filter((id): id is string => typeof id === 'string'),
+      total: body?.estimatedTotalHits ?? 0,
     };
   }
 }

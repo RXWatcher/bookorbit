@@ -1,3 +1,5 @@
+import { GatewayTimeoutException, HttpException } from '@nestjs/common';
+
 import { MeilisearchClient } from './meilisearch.client';
 
 function mockFetch(handler: (url: string, init: RequestInit) => { status?: number; body?: unknown }) {
@@ -98,5 +100,40 @@ describe('MeilisearchClient', () => {
         apiKey: 'bad',
       }).addDocuments('books', []),
     ).rejects.toThrow();
+  });
+
+  it('returns an empty result when the search response has no hits key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch(() => ({ body: { estimatedTotalHits: 5 } })),
+    );
+
+    await expect(
+      new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).search('books', { q: 'dune', offset: 0, limit: 10 }),
+    ).resolves.toEqual({ ids: [], total: 5 });
+  });
+
+  it('surfaces a fetch rejection as an HttpException rather than a raw Error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
+
+    const client = new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' });
+
+    await expect(client.addDocuments('books', [])).rejects.toBeInstanceOf(HttpException);
+  });
+
+  it('surfaces a timeout as a gateway timeout HttpException', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError));
+
+    const client = new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' });
+
+    await expect(client.addDocuments('books', [])).rejects.toBeInstanceOf(GatewayTimeoutException);
+  });
+
+  it('returns false from health rather than throwing when the server is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
+
+    await expect(new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).health()).resolves.toBe(false);
   });
 });
