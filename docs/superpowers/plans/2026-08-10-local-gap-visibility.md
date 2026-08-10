@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - Node >= 24, pnpm >= 9.
-- Never hand write migration SQL. Edit `server/src/db/schema/*.ts`, then `cd server && pnpm db:generate`, then `pnpm db:migrate`.
+- Never hand write migration SQL. Edit `server/src/db/schema/*.ts`, then `cd server && pnpm db:generate`.
+- There is no local PostgreSQL in this environment, so `pnpm db:migrate` cannot run and must NOT be attempted. `pnpm db:generate` works offline because it diffs the schema files against the migration journal. Generate the migration, inspect the SQL, commit it, and leave it unapplied. Every test in this plan is pure or mocked and needs no database.
 - Never use em dashes in any output: code, comments, strings, commit messages, docs.
 - Never add a `Co-authored-by` trailer to any commit.
 - Test files use `.test.ts`. Vitest globals are available, so do not import `describe`, `it`, `expect` or `vi`.
@@ -26,29 +27,31 @@
 
 ## File Structure
 
-| File | Responsibility |
-| --- | --- |
-| `server/src/db/schema/warehouse.ts` | Add `catalogItemSourceEnum`, `source` and `localPath` columns, check constraint, source index |
-| `server/src/db/schema/local-scan.ts` | New `localScanRoots` table |
-| `server/src/modules/local-scan/local-scan.types.ts` | `LocalCandidate`, `LocalMatchStrategy`, `LocalScanSummary` |
-| `server/src/modules/local-scan/strategies/ebook-match.strategy.ts` | Calibre path matching |
-| `server/src/modules/local-scan/strategies/audiobook-match.strategy.ts` | `storage_key` path matching |
-| `server/src/modules/local-scan/strategies/comic-match.strategy.ts` | Title plus issue heuristic |
-| `server/src/modules/local-scan/local-scan.walker.ts` | Streaming directory walk with exclusions |
-| `server/src/modules/local-scan/local-scan.repository.ts` | Root CRUD, catalogue key loading, batched inserts |
-| `server/src/modules/local-scan/local-scan.service.ts` | Orchestration |
-| `server/src/modules/local-scan/local-scan.controller.ts` | Admin trigger and status |
-| `server/src/modules/local-scan/local-scan.module.ts` | Wiring |
+| File                                                                   | Responsibility                                                                                |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `server/src/db/schema/warehouse.ts`                                    | Add `catalogItemSourceEnum`, `source` and `localPath` columns, check constraint, source index |
+| `server/src/db/schema/local-scan.ts`                                   | New `localScanRoots` table                                                                    |
+| `server/src/modules/local-scan/local-scan.types.ts`                    | `LocalCandidate`, `LocalMatchStrategy`, `LocalScanSummary`                                    |
+| `server/src/modules/local-scan/strategies/ebook-match.strategy.ts`     | Calibre path matching                                                                         |
+| `server/src/modules/local-scan/strategies/audiobook-match.strategy.ts` | `storage_key` path matching                                                                   |
+| `server/src/modules/local-scan/strategies/comic-match.strategy.ts`     | Title plus issue heuristic                                                                    |
+| `server/src/modules/local-scan/local-scan.walker.ts`                   | Streaming directory walk with exclusions                                                      |
+| `server/src/modules/local-scan/local-scan.repository.ts`               | Root CRUD, catalogue key loading, batched inserts                                             |
+| `server/src/modules/local-scan/local-scan.service.ts`                  | Orchestration                                                                                 |
+| `server/src/modules/local-scan/local-scan.controller.ts`               | Admin trigger and status                                                                      |
+| `server/src/modules/local-scan/local-scan.module.ts`                   | Wiring                                                                                        |
 
 ---
 
 ### Task 1: Catalogue source columns
 
 **Files:**
+
 - Modify: `server/src/db/schema/warehouse.ts`
 - Test: `server/src/db/schema/schema.test.ts`
 
 **Interfaces:**
+
 - Produces: `catalogItemSourceEnum` with values `['warehouse', 'local']`; `warehouseCatalogItems.source`; `warehouseCatalogItems.localPath`.
 
 - [ ] **Step 1: Write the failing test**
@@ -56,10 +59,13 @@
 Append to `server/src/db/schema/schema.test.ts`, inside the existing describe block that covers `warehouseCatalogItems`:
 
 ```typescript
-it('marks catalog item origin and requires a path for local rows', () => {
-  expect(schema.catalogItemSourceEnum.enumValues).toEqual(['warehouse', 'local']);
+it("marks catalog item origin and requires a path for local rows", () => {
+  expect(schema.catalogItemSourceEnum.enumValues).toEqual([
+    "warehouse",
+    "local",
+  ]);
   expect(schema.warehouseCatalogItems.source.notNull).toBe(true);
-  expect(schema.warehouseCatalogItems.source.default).toBe('warehouse');
+  expect(schema.warehouseCatalogItems.source.default).toBe("warehouse");
   expect(schema.warehouseCatalogItems.localPath.notNull).toBe(false);
 });
 ```
@@ -74,7 +80,10 @@ Expected: FAIL, `catalogItemSourceEnum` is undefined.
 In `server/src/db/schema/warehouse.ts`, add after `warehouseMediaTypeEnum` (line 24):
 
 ```typescript
-export const catalogItemSourceEnum = pgEnum('catalog_item_source', ['warehouse', 'local']);
+export const catalogItemSourceEnum = pgEnum("catalog_item_source", [
+  "warehouse",
+  "local",
+]);
 ```
 
 Inside the `warehouseCatalogItems` column block, directly after `hasCover`:
@@ -96,18 +105,19 @@ In the same table's constraint array, alongside the existing `check(...)` entrie
 Run: `cd server && npx vitest run src/db/schema/schema.test.ts -t 'marks catalog item origin'`
 Expected: PASS.
 
-- [ ] **Step 5: Generate and apply the migration**
+- [ ] **Step 5: Generate the migration**
 
-Run: `cd server && pnpm db:generate`
-Then: `pnpm db:migrate`
+Run: `cd server && pnpm db:generate --name add_catalog_item_source`
 
-Open the generated file under `server/drizzle/`. It must contain `CREATE TYPE "public"."catalog_item_source"` and `ALTER TABLE "warehouse_catalog_items" ADD COLUMN`. Creating a new enum type and using it in one migration is safe. The two migration restriction applies only to `ALTER TYPE ... ADD VALUE`, which this is not.
+Do not run `pnpm db:migrate`. There is no local database and the migration stays unapplied.
+
+Open the generated file under `server/src/db/migrations/`. It must contain `CREATE TYPE "public"."catalog_item_source"` and `ALTER TABLE "warehouse_catalog_items" ADD COLUMN`. Creating a new enum type and using it in one migration is safe. The two migration restriction applies only to `ALTER TYPE ... ADD VALUE`, which this is not.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd server && npx prettier --write . && npx eslint .
-git add server/src/db/schema/warehouse.ts server/src/db/schema/schema.test.ts server/drizzle
+git add server/src/db/schema/warehouse.ts server/src/db/schema/schema.test.ts server/src/db/migrations
 git commit -m "feat(catalog): add source and local_path to catalog items"
 ```
 
@@ -118,27 +128,34 @@ git commit -m "feat(catalog): add source and local_path to catalog items"
 The entire design depends on the catalogue sync never deleting rows. If a future change adds a prune, local content is destroyed silently. This test makes that regression loud.
 
 **Files:**
+
 - Create: `server/src/modules/warehouse/warehouse-catalog-sync.no-delete.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: nothing consumed by later tasks.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync } from "fs";
+import { join } from "path";
 
-const REPOSITORY = join(__dirname, 'warehouse.repository.ts');
-const SYNC_SERVICE = join(__dirname, 'warehouse-catalog-sync.service.ts');
+const REPOSITORY = join(__dirname, "warehouse.repository.ts");
+const SYNC_SERVICE = join(__dirname, "warehouse-catalog-sync.service.ts");
 
-describe('catalog sync never deletes catalog items', () => {
-  it('has no delete against warehouseCatalogItems', () => {
-    const sources = [readFileSync(REPOSITORY, 'utf8'), readFileSync(SYNC_SERVICE, 'utf8')];
+describe("catalog sync never deletes catalog items", () => {
+  it("has no delete against warehouseCatalogItems", () => {
+    const sources = [
+      readFileSync(REPOSITORY, "utf8"),
+      readFileSync(SYNC_SERVICE, "utf8"),
+    ];
 
     for (const source of sources) {
-      expect(source).not.toMatch(/delete\(\s*schema\.warehouseCatalogItems\s*\)/);
+      expect(source).not.toMatch(
+        /delete\(\s*schema\.warehouseCatalogItems\s*\)/,
+      );
       expect(source).not.toMatch(/notInArray\([^)]*warehouseCatalogItems/);
     }
   });
@@ -163,11 +180,13 @@ git commit -m "test(warehouse): guard catalog items against sync deletion"
 ### Task 3: Scan roots table
 
 **Files:**
+
 - Create: `server/src/db/schema/local-scan.ts`
 - Modify: `server/src/db/schema/index.ts`
 - Test: `server/src/db/schema/schema.test.ts`
 
 **Interfaces:**
+
 - Produces: `localScanRoots` table with columns `id`, `mediaType`, `absolutePath`, `enabled`, `excludePatterns`, `lastScanStartedAt`, `lastScanFinishedAt`, `createdAt`, `updatedAt`.
 
 - [ ] **Step 1: Write the failing test**
@@ -175,8 +194,8 @@ git commit -m "test(warehouse): guard catalog items against sync deletion"
 Append to `server/src/db/schema/schema.test.ts`:
 
 ```typescript
-describe('localScanRoots', () => {
-  it('is unique per media type and path', () => {
+describe("localScanRoots", () => {
+  it("is unique per media type and path", () => {
     expect(schema.localScanRoots.absolutePath.notNull).toBe(true);
     expect(schema.localScanRoots.enabled.default).toBe(true);
   });
@@ -193,38 +212,57 @@ Expected: FAIL, `localScanRoots` is undefined.
 Create `server/src/db/schema/local-scan.ts`:
 
 ```typescript
-import { sql } from 'drizzle-orm';
-import { boolean, jsonb, pgTable, serial, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  jsonb,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  unique,
+} from "drizzle-orm/pg-core";
 
-import { warehouseMediaTypeEnum } from './warehouse';
+import { warehouseMediaTypeEnum } from "./warehouse";
 
 export const localScanRoots = pgTable(
-  'local_scan_roots',
+  "local_scan_roots",
   {
-    id: serial('id').primaryKey(),
-    mediaType: warehouseMediaTypeEnum('media_type').notNull(),
-    absolutePath: text('absolute_path').notNull(),
-    enabled: boolean('enabled').notNull().default(true),
-    excludePatterns: jsonb('exclude_patterns')
+    id: serial("id").primaryKey(),
+    mediaType: warehouseMediaTypeEnum("media_type").notNull(),
+    absolutePath: text("absolute_path").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    excludePatterns: jsonb("exclude_patterns")
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
-    lastScanStartedAt: timestamp('last_scan_started_at', { withTimezone: true }),
-    lastScanFinishedAt: timestamp('last_scan_finished_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true })
+    lastScanStartedAt: timestamp("last_scan_started_at", {
+      withTimezone: true,
+    }),
+    lastScanFinishedAt: timestamp("last_scan_finished_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull()
       .$onUpdateFn(() => new Date()),
   },
-  (t) => [unique('local_scan_roots_media_path_unique').on(t.mediaType, t.absolutePath)],
+  (t) => [
+    unique("local_scan_roots_media_path_unique").on(
+      t.mediaType,
+      t.absolutePath,
+    ),
+  ],
 );
 ```
 
 Add to `server/src/db/schema/index.ts`, following the existing re-export style:
 
 ```typescript
-export * from './local-scan';
+export * from "./local-scan";
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -232,15 +270,17 @@ export * from './local-scan';
 Run: `cd server && npx vitest run src/db/schema/schema.test.ts -t 'is unique per media type and path'`
 Expected: PASS.
 
-- [ ] **Step 5: Generate and apply the migration**
+- [ ] **Step 5: Generate the migration**
 
-Run: `cd server && pnpm db:generate && pnpm db:migrate`
+Run: `cd server && pnpm db:generate --name add_local_scan_roots`
+
+Do not run `pnpm db:migrate`. There is no local database and the migration stays unapplied.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd server && npx prettier --write . && npx eslint .
-git add server/src/db/schema/local-scan.ts server/src/db/schema/index.ts server/src/db/schema/schema.test.ts server/drizzle
+git add server/src/db/schema/local-scan.ts server/src/db/schema/index.ts server/src/db/schema/schema.test.ts server/src/db/migrations
 git commit -m "feat(local-scan): add local scan roots table"
 ```
 
@@ -249,9 +289,11 @@ git commit -m "feat(local-scan): add local scan roots table"
 ### Task 4: Shared types and the strategy contract
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/local-scan.types.ts`
 
 **Interfaces:**
+
 - Produces:
   - `LocalCandidate = { absolutePath: string; relativePath: string; fileName: string }`
   - `CatalogKeyRow = { remoteId: string; title: string; rawPayload: Record<string, unknown> }`
@@ -265,7 +307,7 @@ There is no behaviour to test in a types only file, so this task has no test ste
 Create `server/src/modules/local-scan/local-scan.types.ts`:
 
 ```typescript
-import type { WarehouseMediaType } from '@bookorbit/types';
+import type { WarehouseMediaType } from "@bookorbit/types";
 
 export interface LocalCandidate {
   absolutePath: string;
@@ -315,74 +357,87 @@ git commit -m "feat(local-scan): add scan types and match strategy contract"
 Catalogue side key is `raw_payload.calibre_path`, for example `Diana Xarissa/Joy and Jealousy (17937)`. Disk side key is the book directory relative to the scan root. Filename matching must never be used: the warehouse names files `Author/Series/NN - Title.epub` while Calibre names them `Title - Author.epub`, and a whole share comparison found only 10 matching names out of 698,013.
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/strategies/ebook-match.strategy.ts`
 - Test: `server/src/modules/local-scan/strategies/ebook-match.strategy.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LocalMatchStrategy`, `LocalCandidate`, `CatalogKeyRow` from Task 4.
 - Produces: `EbookMatchStrategy` class implementing `LocalMatchStrategy`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import { EbookMatchStrategy } from './ebook-match.strategy';
+import { EbookMatchStrategy } from "./ebook-match.strategy";
 
-describe('EbookMatchStrategy', () => {
+describe("EbookMatchStrategy", () => {
   const strategy = new EbookMatchStrategy();
 
-  it('keys catalogue rows on calibre_path', () => {
+  it("keys catalogue rows on calibre_path", () => {
     expect(
       strategy.catalogKey({
-        remoteId: 'abc',
-        title: 'Joy and Jealousy',
-        rawPayload: { calibre_path: 'Diana Xarissa/Joy and Jealousy (17937)' },
+        remoteId: "abc",
+        title: "Joy and Jealousy",
+        rawPayload: { calibre_path: "Diana Xarissa/Joy and Jealousy (17937)" },
       }),
-    ).toBe('Diana Xarissa/Joy and Jealousy (17937)');
+    ).toBe("Diana Xarissa/Joy and Jealousy (17937)");
   });
 
-  it('strips leading slashes so both sides agree', () => {
-    expect(strategy.catalogKey({ remoteId: 'a', title: 't', rawPayload: { calibre_path: '/Author/Book (1)' } })).toBe('Author/Book (1)');
+  it("strips leading slashes so both sides agree", () => {
+    expect(
+      strategy.catalogKey({
+        remoteId: "a",
+        title: "t",
+        rawPayload: { calibre_path: "/Author/Book (1)" },
+      }),
+    ).toBe("Author/Book (1)");
   });
 
-  it('returns null when the row carries no calibre_path', () => {
-    expect(strategy.catalogKey({ remoteId: 'a', title: 't', rawPayload: {} })).toBeNull();
+  it("returns null when the row carries no calibre_path", () => {
+    expect(
+      strategy.catalogKey({ remoteId: "a", title: "t", rawPayload: {} }),
+    ).toBeNull();
   });
 
-  it('keys disk candidates on the book directory', () => {
+  it("keys disk candidates on the book directory", () => {
     expect(
       strategy.diskKey({
-        absolutePath: '/mnt/books/Diana Xarissa/Joy and Jealousy (17937)/Joy and Jealousy - Diana Xarissa.epub',
-        relativePath: 'Diana Xarissa/Joy and Jealousy (17937)/Joy and Jealousy - Diana Xarissa.epub',
-        fileName: 'Joy and Jealousy - Diana Xarissa.epub',
+        absolutePath:
+          "/mnt/books/Diana Xarissa/Joy and Jealousy (17937)/Joy and Jealousy - Diana Xarissa.epub",
+        relativePath:
+          "Diana Xarissa/Joy and Jealousy (17937)/Joy and Jealousy - Diana Xarissa.epub",
+        fileName: "Joy and Jealousy - Diana Xarissa.epub",
       }),
-    ).toBe('Diana Xarissa/Joy and Jealousy (17937)');
+    ).toBe("Diana Xarissa/Joy and Jealousy (17937)");
   });
 
-  it('ignores calibre internal directories', () => {
+  it("ignores calibre internal directories", () => {
     expect(
       strategy.diskKey({
-        absolutePath: '/mnt/books/.caltrash/b/x.epub',
-        relativePath: '.caltrash/b/x.epub',
-        fileName: 'x.epub',
+        absolutePath: "/mnt/books/.caltrash/b/x.epub",
+        relativePath: ".caltrash/b/x.epub",
+        fileName: "x.epub",
       }),
     ).toBeNull();
     expect(
       strategy.diskKey({
-        absolutePath: '/mnt/books/.calnotes/backup/x.epub',
-        relativePath: '.calnotes/backup/x.epub',
-        fileName: 'x.epub',
+        absolutePath: "/mnt/books/.calnotes/backup/x.epub",
+        relativePath: ".calnotes/backup/x.epub",
+        fileName: "x.epub",
       }),
     ).toBeNull();
   });
 
-  it('derives a title from the book directory', () => {
+  it("derives a title from the book directory", () => {
     expect(
       strategy.titleFor({
-        absolutePath: '/mnt/books/Diana Xarissa/Joy and Jealousy (17937)/x.epub',
-        relativePath: 'Diana Xarissa/Joy and Jealousy (17937)/x.epub',
-        fileName: 'x.epub',
+        absolutePath:
+          "/mnt/books/Diana Xarissa/Joy and Jealousy (17937)/x.epub",
+        relativePath: "Diana Xarissa/Joy and Jealousy (17937)/x.epub",
+        fileName: "x.epub",
       }),
-    ).toBe('Joy and Jealousy');
+    ).toBe("Joy and Jealousy");
   });
 });
 ```
@@ -395,36 +450,41 @@ Expected: FAIL, cannot find module `./ebook-match.strategy`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
-import type { WarehouseMediaType } from '@bookorbit/types';
+import type { WarehouseMediaType } from "@bookorbit/types";
 
-import type { CatalogKeyRow, LocalCandidate, LocalMatchStrategy } from '../local-scan.types';
+import type {
+  CatalogKeyRow,
+  LocalCandidate,
+  LocalMatchStrategy,
+} from "../local-scan.types";
 
-const CALIBRE_INTERNAL_PREFIXES = ['.caltrash/', '.calnotes/'];
+const CALIBRE_INTERNAL_PREFIXES = [".caltrash/", ".calnotes/"];
 const TRAILING_CALIBRE_ID = / \(\d+\)$/;
 
 export class EbookMatchStrategy implements LocalMatchStrategy {
-  readonly mediaType: WarehouseMediaType = 'ebook';
+  readonly mediaType: WarehouseMediaType = "ebook";
 
   catalogKey(row: CatalogKeyRow): string | null {
     const value = row.rawPayload.calibre_path;
-    if (typeof value !== 'string' || value.length === 0) return null;
-    return value.replace(/^\/+/, '');
+    if (typeof value !== "string" || value.length === 0) return null;
+    return value.replace(/^\/+/, "");
   }
 
   diskKey(candidate: LocalCandidate): string | null {
-    const relative = candidate.relativePath.replace(/^\/+/, '');
-    if (CALIBRE_INTERNAL_PREFIXES.some((prefix) => relative.startsWith(prefix))) return null;
+    const relative = candidate.relativePath.replace(/^\/+/, "");
+    if (CALIBRE_INTERNAL_PREFIXES.some((prefix) => relative.startsWith(prefix)))
+      return null;
 
-    const segments = relative.split('/');
+    const segments = relative.split("/");
     if (segments.length < 3) return null;
-    return segments.slice(0, 2).join('/');
+    return segments.slice(0, 2).join("/");
   }
 
   titleFor(candidate: LocalCandidate): string {
     const key = this.diskKey(candidate);
     if (!key) return candidate.fileName;
-    const bookDirectory = key.split('/')[1] ?? candidate.fileName;
-    return bookDirectory.replace(TRAILING_CALIBRE_ID, '');
+    const bookDirectory = key.split("/")[1] ?? candidate.fileName;
+    return bookDirectory.replace(TRAILING_CALIBRE_ID, "");
   }
 }
 ```
@@ -449,68 +509,86 @@ git commit -m "feat(local-scan): add ebook calibre path match strategy"
 Catalogue side key is the directory part of `raw_payload.files[].storage_key`, which is absolute and prefixed `/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/`. That prefix maps onto the scan root, so it is stripped to produce a root relative key.
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/strategies/audiobook-match.strategy.ts`
 - Test: `server/src/modules/local-scan/strategies/audiobook-match.strategy.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LocalMatchStrategy`, `LocalCandidate`, `CatalogKeyRow` from Task 4.
 - Produces: `AudiobookMatchStrategy`, constructed as `new AudiobookMatchStrategy(remotePrefix: string)`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import { AudiobookMatchStrategy } from './audiobook-match.strategy';
+import { AudiobookMatchStrategy } from "./audiobook-match.strategy";
 
-const PREFIX = '/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/';
+const PREFIX = "/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/";
 
-describe('AudiobookMatchStrategy', () => {
+describe("AudiobookMatchStrategy", () => {
   const strategy = new AudiobookMatchStrategy(PREFIX);
 
-  it('keys catalogue rows on the storage_key directory with the prefix removed', () => {
+  it("keys catalogue rows on the storage_key directory with the prefix removed", () => {
     expect(
       strategy.catalogKey({
-        remoteId: 'abc',
-        title: 'Lightseekers',
+        remoteId: "abc",
+        title: "Lightseekers",
         rawPayload: {
-          files: [{ storage_key: `${PREFIX}Femi Kayode/Lightseekers (2021)/Femi Kayode - Lightseekers (2021).m4b` }],
+          files: [
+            {
+              storage_key: `${PREFIX}Femi Kayode/Lightseekers (2021)/Femi Kayode - Lightseekers (2021).m4b`,
+            },
+          ],
         },
       }),
-    ).toBe('Femi Kayode/Lightseekers (2021)');
+    ).toBe("Femi Kayode/Lightseekers (2021)");
   });
 
-  it('returns null when storage_key sits outside the configured prefix', () => {
+  it("returns null when storage_key sits outside the configured prefix", () => {
     expect(
       strategy.catalogKey({
-        remoteId: 'abc',
-        title: 'Other',
-        rawPayload: { files: [{ storage_key: '/media/somewhere-else/Author/Book/file.m4b' }] },
+        remoteId: "abc",
+        title: "Other",
+        rawPayload: {
+          files: [
+            { storage_key: "/media/somewhere-else/Author/Book/file.m4b" },
+          ],
+        },
       }),
     ).toBeNull();
   });
 
-  it('returns null when there are no files', () => {
-    expect(strategy.catalogKey({ remoteId: 'a', title: 't', rawPayload: { files: [] } })).toBeNull();
-    expect(strategy.catalogKey({ remoteId: 'a', title: 't', rawPayload: {} })).toBeNull();
+  it("returns null when there are no files", () => {
+    expect(
+      strategy.catalogKey({
+        remoteId: "a",
+        title: "t",
+        rawPayload: { files: [] },
+      }),
+    ).toBeNull();
+    expect(
+      strategy.catalogKey({ remoteId: "a", title: "t", rawPayload: {} }),
+    ).toBeNull();
   });
 
-  it('keys disk candidates on the book directory', () => {
+  it("keys disk candidates on the book directory", () => {
     expect(
       strategy.diskKey({
-        absolutePath: '/mnt/ab/Femi Kayode/Lightseekers (2021)/file.m4b',
-        relativePath: 'Femi Kayode/Lightseekers (2021)/file.m4b',
-        fileName: 'file.m4b',
+        absolutePath: "/mnt/ab/Femi Kayode/Lightseekers (2021)/file.m4b",
+        relativePath: "Femi Kayode/Lightseekers (2021)/file.m4b",
+        fileName: "file.m4b",
       }),
-    ).toBe('Femi Kayode/Lightseekers (2021)');
+    ).toBe("Femi Kayode/Lightseekers (2021)");
   });
 
-  it('derives a title from the book directory', () => {
+  it("derives a title from the book directory", () => {
     expect(
       strategy.titleFor({
-        absolutePath: '/mnt/ab/Femi Kayode/Lightseekers (2021)/file.m4b',
-        relativePath: 'Femi Kayode/Lightseekers (2021)/file.m4b',
-        fileName: 'file.m4b',
+        absolutePath: "/mnt/ab/Femi Kayode/Lightseekers (2021)/file.m4b",
+        relativePath: "Femi Kayode/Lightseekers (2021)/file.m4b",
+        fileName: "file.m4b",
       }),
-    ).toBe('Lightseekers (2021)');
+    ).toBe("Lightseekers (2021)");
   });
 });
 ```
@@ -523,12 +601,16 @@ Expected: FAIL, cannot find module `./audiobook-match.strategy`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
-import type { WarehouseMediaType } from '@bookorbit/types';
+import type { WarehouseMediaType } from "@bookorbit/types";
 
-import type { CatalogKeyRow, LocalCandidate, LocalMatchStrategy } from '../local-scan.types';
+import type {
+  CatalogKeyRow,
+  LocalCandidate,
+  LocalMatchStrategy,
+} from "../local-scan.types";
 
 export class AudiobookMatchStrategy implements LocalMatchStrategy {
-  readonly mediaType: WarehouseMediaType = 'audiobook';
+  readonly mediaType: WarehouseMediaType = "audiobook";
 
   constructor(private readonly remotePrefix: string) {}
 
@@ -538,29 +620,29 @@ export class AudiobookMatchStrategy implements LocalMatchStrategy {
 
     for (const file of files) {
       const storageKey = (file as { storage_key?: unknown }).storage_key;
-      if (typeof storageKey !== 'string') continue;
+      if (typeof storageKey !== "string") continue;
       if (!storageKey.startsWith(this.remotePrefix)) continue;
 
       const relative = storageKey.slice(this.remotePrefix.length);
-      const segments = relative.split('/');
+      const segments = relative.split("/");
       if (segments.length < 2) continue;
-      return segments.slice(0, segments.length - 1).join('/');
+      return segments.slice(0, segments.length - 1).join("/");
     }
 
     return null;
   }
 
   diskKey(candidate: LocalCandidate): string | null {
-    const relative = candidate.relativePath.replace(/^\/+/, '');
-    const segments = relative.split('/');
+    const relative = candidate.relativePath.replace(/^\/+/, "");
+    const segments = relative.split("/");
     if (segments.length < 2) return null;
-    return segments.slice(0, segments.length - 1).join('/');
+    return segments.slice(0, segments.length - 1).join("/");
   }
 
   titleFor(candidate: LocalCandidate): string {
     const key = this.diskKey(candidate);
     if (!key) return candidate.fileName;
-    const segments = key.split('/');
+    const segments = key.split("/");
     return segments[segments.length - 1] ?? candidate.fileName;
   }
 }
@@ -586,59 +668,71 @@ git commit -m "feat(local-scan): add audiobook storage key match strategy"
 Comic payloads carry no path and no hash, only `{id, title, language, seriesId, publisher, issueNumber}`. Matching is therefore a heuristic on title plus issue number. The population is small, 4,831 files against 4,824 catalogue rows, so the downside is a handful of duplicates rather than a systemic problem.
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/strategies/comic-match.strategy.ts`
 - Test: `server/src/modules/local-scan/strategies/comic-match.strategy.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LocalMatchStrategy`, `LocalCandidate`, `CatalogKeyRow` from Task 4.
 - Produces: `ComicMatchStrategy`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import { ComicMatchStrategy } from './comic-match.strategy';
+import { ComicMatchStrategy } from "./comic-match.strategy";
 
-describe('ComicMatchStrategy', () => {
+describe("ComicMatchStrategy", () => {
   const strategy = new ComicMatchStrategy();
 
-  it('keys catalogue rows on normalised title and issue', () => {
+  it("keys catalogue rows on normalised title and issue", () => {
     expect(
       strategy.catalogKey({
-        remoteId: 'abc',
-        title: 'Wolverines 13',
-        rawPayload: { title: 'Wolverines 13', issueNumber: '13' },
+        remoteId: "abc",
+        title: "Wolverines 13",
+        rawPayload: { title: "Wolverines 13", issueNumber: "13" },
       }),
-    ).toBe('wolverines|13');
+    ).toBe("wolverines|13");
   });
 
-  it('returns null when the issue number is missing', () => {
-    expect(strategy.catalogKey({ remoteId: 'a', title: 'Wolverines', rawPayload: { title: 'Wolverines' } })).toBeNull();
-  });
-
-  it('keys disk candidates parsed from the filename', () => {
+  it("returns null when the issue number is missing", () => {
     expect(
-      strategy.diskKey({
-        absolutePath: '/mnt/c/Wolverines 013.cbz',
-        relativePath: 'Wolverines 013.cbz',
-        fileName: 'Wolverines 013.cbz',
+      strategy.catalogKey({
+        remoteId: "a",
+        title: "Wolverines",
+        rawPayload: { title: "Wolverines" },
       }),
-    ).toBe('wolverines|13');
-  });
-
-  it('returns null when the filename carries no trailing issue number', () => {
-    expect(
-      strategy.diskKey({ absolutePath: '/mnt/c/Wolverines.cbz', relativePath: 'Wolverines.cbz', fileName: 'Wolverines.cbz' }),
     ).toBeNull();
   });
 
-  it('derives a title from the filename without the extension', () => {
+  it("keys disk candidates parsed from the filename", () => {
+    expect(
+      strategy.diskKey({
+        absolutePath: "/mnt/c/Wolverines 013.cbz",
+        relativePath: "Wolverines 013.cbz",
+        fileName: "Wolverines 013.cbz",
+      }),
+    ).toBe("wolverines|13");
+  });
+
+  it("returns null when the filename carries no trailing issue number", () => {
+    expect(
+      strategy.diskKey({
+        absolutePath: "/mnt/c/Wolverines.cbz",
+        relativePath: "Wolverines.cbz",
+        fileName: "Wolverines.cbz",
+      }),
+    ).toBeNull();
+  });
+
+  it("derives a title from the filename without the extension", () => {
     expect(
       strategy.titleFor({
-        absolutePath: '/mnt/c/Wolverines 013.cbz',
-        relativePath: 'Wolverines 013.cbz',
-        fileName: 'Wolverines 013.cbz',
+        absolutePath: "/mnt/c/Wolverines 013.cbz",
+        relativePath: "Wolverines 013.cbz",
+        fileName: "Wolverines 013.cbz",
       }),
-    ).toBe('Wolverines 013');
+    ).toBe("Wolverines 013");
   });
 });
 ```
@@ -651,14 +745,18 @@ Expected: FAIL, cannot find module `./comic-match.strategy`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
-import type { WarehouseMediaType } from '@bookorbit/types';
+import type { WarehouseMediaType } from "@bookorbit/types";
 
-import type { CatalogKeyRow, LocalCandidate, LocalMatchStrategy } from '../local-scan.types';
+import type {
+  CatalogKeyRow,
+  LocalCandidate,
+  LocalMatchStrategy,
+} from "../local-scan.types";
 
 const TRAILING_ISSUE = /^(.*?)[\s_-]+(\d{1,5})$/;
 
 function normaliseTitle(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function buildKey(title: string, issue: string): string {
@@ -666,27 +764,30 @@ function buildKey(title: string, issue: string): string {
 }
 
 export class ComicMatchStrategy implements LocalMatchStrategy {
-  readonly mediaType: WarehouseMediaType = 'comic';
+  readonly mediaType: WarehouseMediaType = "comic";
 
   catalogKey(row: CatalogKeyRow): string | null {
     const issue = row.rawPayload.issueNumber;
-    if (typeof issue !== 'string' || issue.length === 0) return null;
+    if (typeof issue !== "string" || issue.length === 0) return null;
 
-    const rawTitle = typeof row.rawPayload.title === 'string' ? row.rawPayload.title : row.title;
+    const rawTitle =
+      typeof row.rawPayload.title === "string"
+        ? row.rawPayload.title
+        : row.title;
     const stripped = TRAILING_ISSUE.exec(rawTitle.trim());
     const seriesTitle = stripped ? stripped[1] : rawTitle;
     return buildKey(seriesTitle, issue);
   }
 
   diskKey(candidate: LocalCandidate): string | null {
-    const base = candidate.fileName.replace(/\.[^.]+$/, '');
+    const base = candidate.fileName.replace(/\.[^.]+$/, "");
     const match = TRAILING_ISSUE.exec(base.trim());
     if (!match) return null;
     return buildKey(match[1], match[2]);
   }
 
   titleFor(candidate: LocalCandidate): string {
-    return candidate.fileName.replace(/\.[^.]+$/, '');
+    return candidate.fileName.replace(/\.[^.]+$/, "");
   }
 }
 ```
@@ -711,58 +812,72 @@ git commit -m "feat(local-scan): add comic title and issue match strategy"
 The ebook root alone holds 513,374 files and the audiobook root 971,388, so the walk streams with `fs.opendir` and never builds a full file list in memory.
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/local-scan.walker.ts`
 - Test: `server/src/modules/local-scan/local-scan.walker.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LocalCandidate` from Task 4.
 - Produces: `async function* walkFiles(root: string, options: { extensions: string[]; excludePatterns: string[] }): AsyncGenerator<LocalCandidate>`
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import * as fs from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import * as fs from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 
-import { walkFiles } from './local-scan.walker';
+import { walkFiles } from "./local-scan.walker";
 
-async function collect(root: string, extensions: string[], excludePatterns: string[] = []): Promise<string[]> {
+async function collect(
+  root: string,
+  extensions: string[],
+  excludePatterns: string[] = [],
+): Promise<string[]> {
   const found: string[] = [];
-  for await (const candidate of walkFiles(root, { extensions, excludePatterns })) {
+  for await (const candidate of walkFiles(root, {
+    extensions,
+    excludePatterns,
+  })) {
     found.push(candidate.relativePath);
   }
   return found.sort();
 }
 
-describe('walkFiles', () => {
+describe("walkFiles", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(join(tmpdir(), 'bookorbit-walker-'));
-    await fs.mkdir(join(root, 'Author', 'Book (1)'), { recursive: true });
-    await fs.mkdir(join(root, '.caltrash', 'b'), { recursive: true });
-    await fs.writeFile(join(root, 'Author', 'Book (1)', 'book.epub'), 'x');
-    await fs.writeFile(join(root, 'Author', 'Book (1)', 'cover.jpg'), 'x');
-    await fs.writeFile(join(root, '.caltrash', 'b', 'junk.epub'), 'x');
+    root = await fs.mkdtemp(join(tmpdir(), "bookorbit-walker-"));
+    await fs.mkdir(join(root, "Author", "Book (1)"), { recursive: true });
+    await fs.mkdir(join(root, ".caltrash", "b"), { recursive: true });
+    await fs.writeFile(join(root, "Author", "Book (1)", "book.epub"), "x");
+    await fs.writeFile(join(root, "Author", "Book (1)", "cover.jpg"), "x");
+    await fs.writeFile(join(root, ".caltrash", "b", "junk.epub"), "x");
   });
 
   afterEach(async () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('yields only files with the requested extensions', async () => {
-    await expect(collect(root, ['.epub'])).resolves.toEqual(['.caltrash/b/junk.epub', 'Author/Book (1)/book.epub']);
+  it("yields only files with the requested extensions", async () => {
+    await expect(collect(root, [".epub"])).resolves.toEqual([
+      ".caltrash/b/junk.epub",
+      "Author/Book (1)/book.epub",
+    ]);
   });
 
-  it('skips excluded directories', async () => {
-    await expect(collect(root, ['.epub'], ['.caltrash'])).resolves.toEqual(['Author/Book (1)/book.epub']);
+  it("skips excluded directories", async () => {
+    await expect(collect(root, [".epub"], [".caltrash"])).resolves.toEqual([
+      "Author/Book (1)/book.epub",
+    ]);
   });
 
-  it('matches extensions case insensitively', async () => {
-    await fs.writeFile(join(root, 'Author', 'Book (1)', 'other.EPUB'), 'x');
-    const found = await collect(root, ['.epub'], ['.caltrash']);
-    expect(found).toContain('Author/Book (1)/other.EPUB');
+  it("matches extensions case insensitively", async () => {
+    await fs.writeFile(join(root, "Author", "Book (1)", "other.EPUB"), "x");
+    const found = await collect(root, [".epub"], [".caltrash"]);
+    expect(found).toContain("Author/Book (1)/other.EPUB");
   });
 });
 ```
@@ -775,10 +890,10 @@ Expected: FAIL, cannot find module `./local-scan.walker`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
-import { opendir } from 'fs/promises';
-import { join, relative, sep } from 'path';
+import { opendir } from "fs/promises";
+import { join, relative, sep } from "path";
 
-import type { LocalCandidate } from './local-scan.types';
+import type { LocalCandidate } from "./local-scan.types";
 
 interface WalkOptions {
   extensions: string[];
@@ -786,11 +901,16 @@ interface WalkOptions {
 }
 
 function toPosix(value: string): string {
-  return sep === '/' ? value : value.split(sep).join('/');
+  return sep === "/" ? value : value.split(sep).join("/");
 }
 
-export async function* walkFiles(root: string, options: WalkOptions): AsyncGenerator<LocalCandidate> {
-  const extensions = options.extensions.map((extension) => extension.toLowerCase());
+export async function* walkFiles(
+  root: string,
+  options: WalkOptions,
+): AsyncGenerator<LocalCandidate> {
+  const extensions = options.extensions.map((extension) =>
+    extension.toLowerCase(),
+  );
   const excluded = new Set(options.excludePatterns);
   const pending: string[] = [root];
 
@@ -816,7 +936,8 @@ export async function* walkFiles(root: string, options: WalkOptions): AsyncGener
       if (!entry.isFile()) continue;
 
       const lowerName = entry.name.toLowerCase();
-      if (!extensions.some((extension) => lowerName.endsWith(extension))) continue;
+      if (!extensions.some((extension) => lowerName.endsWith(extension)))
+        continue;
 
       yield {
         absolutePath,
@@ -846,10 +967,12 @@ git commit -m "feat(local-scan): add streaming directory walker"
 ### Task 9: Repository
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/local-scan.repository.ts`
 - Test: `server/src/modules/local-scan/local-scan.repository.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CatalogKeyRow` from Task 4.
 - Produces: `LocalScanRepository` with:
   - `findEnabledRoots(): Promise<Array<{ id: number; mediaType: WarehouseMediaType; absolutePath: string; excludePatterns: string[] }>>`
@@ -860,7 +983,7 @@ git commit -m "feat(local-scan): add streaming directory walker"
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import { LocalScanRepository } from './local-scan.repository';
+import { LocalScanRepository } from "./local-scan.repository";
 
 function makeDb() {
   const onConflictDoNothing = vi.fn().mockResolvedValue({ rowCount: 2 });
@@ -869,20 +992,33 @@ function makeDb() {
   return { db: { insert } as never, insert, values, onConflictDoNothing };
 }
 
-describe('LocalScanRepository', () => {
-  it('inserts local rows with source local and ignores duplicates', async () => {
+describe("LocalScanRepository", () => {
+  it("inserts local rows with source local and ignores duplicates", async () => {
     const { db, values, onConflictDoNothing } = makeDb();
     const repository = new LocalScanRepository(db);
 
     await repository.insertLocalItems([
-      { mediaType: 'ebook', remoteId: 'local:aaa', title: 'Book', localPath: '/mnt/books/a/b.epub', format: 'epub', fileSizeBytes: 10 },
+      {
+        mediaType: "ebook",
+        remoteId: "local:aaa",
+        title: "Book",
+        localPath: "/mnt/books/a/b.epub",
+        format: "epub",
+        fileSizeBytes: 10,
+      },
     ]);
 
-    expect(values).toHaveBeenCalledWith([expect.objectContaining({ source: 'local', remoteId: 'local:aaa', localPath: '/mnt/books/a/b.epub' })]);
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        source: "local",
+        remoteId: "local:aaa",
+        localPath: "/mnt/books/a/b.epub",
+      }),
+    ]);
     expect(onConflictDoNothing).toHaveBeenCalled();
   });
 
-  it('does nothing when given an empty batch', async () => {
+  it("does nothing when given an empty batch", async () => {
     const { db, insert } = makeDb();
     const repository = new LocalScanRepository(db);
 
@@ -900,14 +1036,14 @@ Expected: FAIL, cannot find module `./local-scan.repository`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
-import { Inject, Injectable } from '@nestjs/common';
-import type { WarehouseMediaType } from '@bookorbit/types';
-import { and, asc, eq, gt } from 'drizzle-orm';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Inject, Injectable } from "@nestjs/common";
+import type { WarehouseMediaType } from "@bookorbit/types";
+import { and, asc, eq, gt } from "drizzle-orm";
+import { NodePgDatabase } from "drizzle-orm/node-postgres";
 
-import { DB } from '../../db';
-import * as schema from '../../db/schema';
-import type { CatalogKeyRow } from './local-scan.types';
+import { DB } from "../../db";
+import * as schema from "../../db/schema";
+import type { CatalogKeyRow } from "./local-scan.types";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -937,7 +1073,10 @@ export class LocalScanRepository {
       .orderBy(asc(schema.localScanRoots.id));
   }
 
-  async *streamCatalogKeyRows(mediaType: WarehouseMediaType, batchSize: number): AsyncGenerator<CatalogKeyRow[]> {
+  async *streamCatalogKeyRows(
+    mediaType: WarehouseMediaType,
+    batchSize: number,
+  ): AsyncGenerator<CatalogKeyRow[]> {
     let cursor = 0;
 
     for (;;) {
@@ -949,14 +1088,23 @@ export class LocalScanRepository {
           rawPayload: schema.warehouseCatalogItems.rawPayload,
         })
         .from(schema.warehouseCatalogItems)
-        .where(and(eq(schema.warehouseCatalogItems.mediaType, mediaType), gt(schema.warehouseCatalogItems.id, cursor)))
+        .where(
+          and(
+            eq(schema.warehouseCatalogItems.mediaType, mediaType),
+            gt(schema.warehouseCatalogItems.id, cursor),
+          ),
+        )
         .orderBy(asc(schema.warehouseCatalogItems.id))
         .limit(batchSize);
 
       if (batch.length === 0) return;
 
       cursor = batch[batch.length - 1].id;
-      yield batch.map(({ remoteId, title, rawPayload }) => ({ remoteId, title, rawPayload }));
+      yield batch.map(({ remoteId, title, rawPayload }) => ({
+        remoteId,
+        title,
+        rawPayload,
+      }));
     }
   }
 
@@ -965,18 +1113,29 @@ export class LocalScanRepository {
 
     await this.db
       .insert(schema.warehouseCatalogItems)
-      .values(rows.map((row) => ({ ...row, source: 'local' as const })))
-      .onConflictDoNothing({ target: [schema.warehouseCatalogItems.mediaType, schema.warehouseCatalogItems.remoteId] });
+      .values(rows.map((row) => ({ ...row, source: "local" as const })))
+      .onConflictDoNothing({
+        target: [
+          schema.warehouseCatalogItems.mediaType,
+          schema.warehouseCatalogItems.remoteId,
+        ],
+      });
 
     return rows.length;
   }
 
   async markScanStarted(rootId: number): Promise<void> {
-    await this.db.update(schema.localScanRoots).set({ lastScanStartedAt: new Date() }).where(eq(schema.localScanRoots.id, rootId));
+    await this.db
+      .update(schema.localScanRoots)
+      .set({ lastScanStartedAt: new Date() })
+      .where(eq(schema.localScanRoots.id, rootId));
   }
 
   async markScanFinished(rootId: number): Promise<void> {
-    await this.db.update(schema.localScanRoots).set({ lastScanFinishedAt: new Date() }).where(eq(schema.localScanRoots.id, rootId));
+    await this.db
+      .update(schema.localScanRoots)
+      .set({ lastScanFinishedAt: new Date() })
+      .where(eq(schema.localScanRoots.id, rootId));
   }
 }
 ```
@@ -1001,43 +1160,60 @@ git commit -m "feat(local-scan): add local scan repository"
 ### Task 10: Scan orchestration service
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/local-scan.service.ts`
 - Test: `server/src/modules/local-scan/local-scan.service.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LocalScanRepository` (Task 9), `walkFiles` (Task 8), the three strategies (Tasks 5 to 7), `LocalScanSummary` (Task 4).
 - Produces: `LocalScanService.scanRoot(rootId: number): Promise<LocalScanSummary>` and `LocalScanService.scanAll(): Promise<LocalScanSummary[]>`
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import * as fs from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import * as fs from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 
-import { LocalScanService } from './local-scan.service';
+import { LocalScanService } from "./local-scan.service";
 
-describe('LocalScanService', () => {
+describe("LocalScanService", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(join(tmpdir(), 'bookorbit-local-scan-'));
-    await fs.mkdir(join(root, 'Author', 'Known (1)'), { recursive: true });
-    await fs.mkdir(join(root, 'Author', 'Missing (2)'), { recursive: true });
-    await fs.writeFile(join(root, 'Author', 'Known (1)', 'a.epub'), 'x');
-    await fs.writeFile(join(root, 'Author', 'Missing (2)', 'b.epub'), 'x');
+    root = await fs.mkdtemp(join(tmpdir(), "bookorbit-local-scan-"));
+    await fs.mkdir(join(root, "Author", "Known (1)"), { recursive: true });
+    await fs.mkdir(join(root, "Author", "Missing (2)"), { recursive: true });
+    await fs.writeFile(join(root, "Author", "Known (1)", "a.epub"), "x");
+    await fs.writeFile(join(root, "Author", "Missing (2)", "b.epub"), "x");
   });
 
   afterEach(async () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('inserts only the books the catalogue does not already have', async () => {
+  it("inserts only the books the catalogue does not already have", async () => {
     const inserted: unknown[] = [];
     const repository = {
-      findEnabledRoots: vi.fn().mockResolvedValue([{ id: 7, mediaType: 'ebook', absolutePath: root, excludePatterns: [] }]),
+      findEnabledRoots: vi
+        .fn()
+        .mockResolvedValue([
+          {
+            id: 7,
+            mediaType: "ebook",
+            absolutePath: root,
+            excludePatterns: [],
+          },
+        ]),
       streamCatalogKeyRows: vi.fn().mockImplementation(async function* () {
-        yield [{ remoteId: 'r1', title: 'Known', rawPayload: { calibre_path: 'Author/Known (1)' } }];
+        yield [
+          {
+            remoteId: "r1",
+            title: "Known",
+            rawPayload: { calibre_path: "Author/Known (1)" },
+          },
+        ];
       }),
       insertLocalItems: vi.fn().mockImplementation(async (rows: unknown[]) => {
         inserted.push(...rows);
@@ -1053,21 +1229,36 @@ describe('LocalScanService', () => {
     expect(summary.inserted).toBe(1);
     expect(summary.matched).toBe(1);
     expect(inserted).toEqual([
-      expect.objectContaining({ mediaType: 'ebook', title: 'Missing', localPath: join(root, 'Author', 'Missing (2)', 'b.epub') }),
+      expect.objectContaining({
+        mediaType: "ebook",
+        title: "Missing",
+        localPath: join(root, "Author", "Missing (2)", "b.epub"),
+      }),
     ]);
   });
 
-  it('gives every local row a deterministic namespaced remote id', async () => {
+  it("gives every local row a deterministic namespaced remote id", async () => {
     const inserted: Array<{ remoteId: string }> = [];
     const repository = {
-      findEnabledRoots: vi.fn().mockResolvedValue([{ id: 7, mediaType: 'ebook', absolutePath: root, excludePatterns: [] }]),
+      findEnabledRoots: vi
+        .fn()
+        .mockResolvedValue([
+          {
+            id: 7,
+            mediaType: "ebook",
+            absolutePath: root,
+            excludePatterns: [],
+          },
+        ]),
       streamCatalogKeyRows: vi.fn().mockImplementation(async function* () {
         yield [];
       }),
-      insertLocalItems: vi.fn().mockImplementation(async (rows: Array<{ remoteId: string }>) => {
-        inserted.push(...rows);
-        return rows.length;
-      }),
+      insertLocalItems: vi
+        .fn()
+        .mockImplementation(async (rows: Array<{ remoteId: string }>) => {
+          inserted.push(...rows);
+          return rows.length;
+        }),
       markScanStarted: vi.fn().mockResolvedValue(undefined),
       markScanFinished: vi.fn().mockResolvedValue(undefined),
     };
@@ -1081,7 +1272,7 @@ describe('LocalScanService', () => {
     }
   });
 
-  it('throws NotFoundException for an unknown root', async () => {
+  it("throws NotFoundException for an unknown root", async () => {
     const repository = {
       findEnabledRoots: vi.fn().mockResolvedValue([]),
       streamCatalogKeyRows: vi.fn(),
@@ -1091,7 +1282,9 @@ describe('LocalScanService', () => {
     };
 
     const service = new LocalScanService(repository as never);
-    await expect(service.scanRoot(99)).rejects.toThrow('Scan root 99 not found or disabled');
+    await expect(service.scanRoot(99)).rejects.toThrow(
+      "Scan root 99 not found or disabled",
+    );
   });
 });
 ```
@@ -1104,29 +1297,33 @@ Expected: FAIL, cannot find module `./local-scan.service`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
-import { createHash } from 'crypto';
-import { stat } from 'fs/promises';
-import { extname } from 'path';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { WarehouseMediaType } from '@bookorbit/types';
+import { createHash } from "crypto";
+import { stat } from "fs/promises";
+import { extname } from "path";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import type { WarehouseMediaType } from "@bookorbit/types";
 
-import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
-import { LocalScanRepository, type NewLocalCatalogItem } from './local-scan.repository';
-import { AudiobookMatchStrategy } from './strategies/audiobook-match.strategy';
-import { ComicMatchStrategy } from './strategies/comic-match.strategy';
-import { EbookMatchStrategy } from './strategies/ebook-match.strategy';
-import type { LocalMatchStrategy, LocalScanSummary } from './local-scan.types';
-import { walkFiles } from './local-scan.walker';
+import { sanitizeLogValue } from "../../common/utils/log-sanitize.utils";
+import {
+  LocalScanRepository,
+  type NewLocalCatalogItem,
+} from "./local-scan.repository";
+import { AudiobookMatchStrategy } from "./strategies/audiobook-match.strategy";
+import { ComicMatchStrategy } from "./strategies/comic-match.strategy";
+import { EbookMatchStrategy } from "./strategies/ebook-match.strategy";
+import type { LocalMatchStrategy, LocalScanSummary } from "./local-scan.types";
+import { walkFiles } from "./local-scan.walker";
 
-const AUDIOBOOK_REMOTE_PREFIX = '/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/';
+const AUDIOBOOK_REMOTE_PREFIX =
+  "/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/";
 const CATALOG_BATCH_SIZE = 5000;
 const INSERT_BATCH_SIZE = 500;
-const DEFAULT_EXCLUDES = ['.caltrash', '.calnotes'];
+const DEFAULT_EXCLUDES = [".caltrash", ".calnotes"];
 
 const EXTENSIONS: Record<WarehouseMediaType, string[]> = {
-  ebook: ['.epub', '.mobi', '.azw3', '.azw', '.pdf', '.fb2'],
-  audiobook: ['.m4b', '.mp3', '.m4a', '.opus', '.ogg', '.flac'],
-  comic: ['.cbz', '.cbr', '.cb7'],
+  ebook: [".epub", ".mobi", ".azw3", ".azw", ".pdf", ".fb2"],
+  audiobook: [".m4b", ".mp3", ".m4a", ".opus", ".ogg", ".flac"],
+  comic: [".cbz", ".cbr", ".cb7"],
 };
 
 @Injectable()
@@ -1136,8 +1333,9 @@ export class LocalScanService {
   constructor(private readonly repository: LocalScanRepository) {}
 
   private strategyFor(mediaType: WarehouseMediaType): LocalMatchStrategy {
-    if (mediaType === 'ebook') return new EbookMatchStrategy();
-    if (mediaType === 'audiobook') return new AudiobookMatchStrategy(AUDIOBOOK_REMOTE_PREFIX);
+    if (mediaType === "ebook") return new EbookMatchStrategy();
+    if (mediaType === "audiobook")
+      return new AudiobookMatchStrategy(AUDIOBOOK_REMOTE_PREFIX);
     return new ComicMatchStrategy();
   }
 
@@ -1153,23 +1351,35 @@ export class LocalScanService {
   async scanRoot(rootId: number): Promise<LocalScanSummary> {
     const roots = await this.repository.findEnabledRoots();
     const root = roots.find((candidate) => candidate.id === rootId);
-    if (!root) throw new NotFoundException(`Scan root ${rootId} not found or disabled`);
+    if (!root)
+      throw new NotFoundException(`Scan root ${rootId} not found or disabled`);
 
     const startedAt = Date.now();
-    this.logger.log(`[local_scan.root] [start] rootId=${rootId} mediaType=${root.mediaType} - local scan started`);
+    this.logger.log(
+      `[local_scan.root] [start] rootId=${rootId} mediaType=${root.mediaType} - local scan started`,
+    );
     await this.repository.markScanStarted(rootId);
 
     const strategy = this.strategyFor(root.mediaType);
 
     const catalogKeys = new Set<string>();
-    for await (const batch of this.repository.streamCatalogKeyRows(root.mediaType, CATALOG_BATCH_SIZE)) {
+    for await (const batch of this.repository.streamCatalogKeyRows(
+      root.mediaType,
+      CATALOG_BATCH_SIZE,
+    )) {
       for (const row of batch) {
         const key = strategy.catalogKey(row);
         if (key) catalogKeys.add(key);
       }
     }
 
-    const summary: LocalScanSummary = { rootId, scanned: 0, matched: 0, inserted: 0, skipped: 0 };
+    const summary: LocalScanSummary = {
+      rootId,
+      scanned: 0,
+      matched: 0,
+      inserted: 0,
+      skipped: 0,
+    };
     const seen = new Set<string>();
     let pending: NewLocalCatalogItem[] = [];
 
@@ -1182,7 +1392,10 @@ export class LocalScanService {
     try {
       const excludePatterns = [...DEFAULT_EXCLUDES, ...root.excludePatterns];
 
-      for await (const candidate of walkFiles(root.absolutePath, { extensions: EXTENSIONS[root.mediaType], excludePatterns })) {
+      for await (const candidate of walkFiles(root.absolutePath, {
+        extensions: EXTENSIONS[root.mediaType],
+        excludePatterns,
+      })) {
         summary.scanned += 1;
 
         const key = strategy.diskKey(candidate);
@@ -1209,10 +1422,11 @@ export class LocalScanService {
 
         pending.push({
           mediaType: root.mediaType,
-          remoteId: `local:${createHash('sha256').update(candidate.absolutePath).digest('hex')}`,
+          remoteId: `local:${createHash("sha256").update(candidate.absolutePath).digest("hex")}`,
           title: strategy.titleFor(candidate),
           localPath: candidate.absolutePath,
-          format: extname(candidate.fileName).replace('.', '').toLowerCase() || null,
+          format:
+            extname(candidate.fileName).replace(".", "").toLowerCase() || null,
           fileSizeBytes,
         });
 
@@ -1224,7 +1438,7 @@ export class LocalScanService {
       const durationMs = Date.now() - startedAt;
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `[local_scan.root] [fail] rootId=${rootId} durationMs=${durationMs} errorClass=${error instanceof Error ? error.constructor.name : 'Unknown'} error="${sanitizeLogValue(message)}" - local scan failed`,
+        `[local_scan.root] [fail] rootId=${rootId} durationMs=${durationMs} errorClass=${error instanceof Error ? error.constructor.name : "Unknown"} error="${sanitizeLogValue(message)}" - local scan failed`,
       );
       throw error;
     }
@@ -1257,12 +1471,14 @@ git commit -m "feat(local-scan): add scan orchestration service"
 ### Task 11: Controller and module wiring
 
 **Files:**
+
 - Create: `server/src/modules/local-scan/local-scan.controller.ts`
 - Create: `server/src/modules/local-scan/local-scan.module.ts`
 - Create: `server/src/modules/local-scan/local-scan.controller.test.ts`
 - Modify: `server/src/app.module.ts`
 
 **Interfaces:**
+
 - Consumes: `LocalScanService` (Task 10), `LocalScanRepository` (Task 9).
 - Produces: `POST /api/v1/local-scan/roots/:id/scan` and `POST /api/v1/local-scan/scan`.
 
@@ -1271,19 +1487,39 @@ The permission gate is `Permission.ManageLibraries`, applied at class level. `se
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-import { LocalScanController } from './local-scan.controller';
+import { LocalScanController } from "./local-scan.controller";
 
-describe('LocalScanController', () => {
-  it('delegates a single root scan to the service', async () => {
-    const service = { scanRoot: vi.fn().mockResolvedValue({ rootId: 7, scanned: 1, matched: 0, inserted: 1, skipped: 0 }), scanAll: vi.fn() };
+describe("LocalScanController", () => {
+  it("delegates a single root scan to the service", async () => {
+    const service = {
+      scanRoot: vi
+        .fn()
+        .mockResolvedValue({
+          rootId: 7,
+          scanned: 1,
+          matched: 0,
+          inserted: 1,
+          skipped: 0,
+        }),
+      scanAll: vi.fn(),
+    };
     const controller = new LocalScanController(service as never);
 
-    await expect(controller.scanRoot(7)).resolves.toEqual({ rootId: 7, scanned: 1, matched: 0, inserted: 1, skipped: 0 });
+    await expect(controller.scanRoot(7)).resolves.toEqual({
+      rootId: 7,
+      scanned: 1,
+      matched: 0,
+      inserted: 1,
+      skipped: 0,
+    });
     expect(service.scanRoot).toHaveBeenCalledWith(7);
   });
 
-  it('delegates a full scan to the service', async () => {
-    const service = { scanRoot: vi.fn(), scanAll: vi.fn().mockResolvedValue([]) };
+  it("delegates a full scan to the service", async () => {
+    const service = {
+      scanRoot: vi.fn(),
+      scanAll: vi.fn().mockResolvedValue([]),
+    };
     const controller = new LocalScanController(service as never);
 
     await expect(controller.scanAll()).resolves.toEqual([]);
@@ -1302,25 +1538,25 @@ Expected: FAIL, cannot find module `./local-scan.controller`.
 `local-scan.controller.ts`:
 
 ```typescript
-import { Controller, Param, ParseIntPipe, Post } from '@nestjs/common';
-import { Permission } from '@bookorbit/types';
+import { Controller, Param, ParseIntPipe, Post } from "@nestjs/common";
+import { Permission } from "@bookorbit/types";
 
-import { RequirePermission } from '../../common/decorators/require-permission.decorator';
-import { LocalScanService } from './local-scan.service';
-import type { LocalScanSummary } from './local-scan.types';
+import { RequirePermission } from "../../common/decorators/require-permission.decorator";
+import { LocalScanService } from "./local-scan.service";
+import type { LocalScanSummary } from "./local-scan.types";
 
-@Controller('local-scan')
+@Controller("local-scan")
 @RequirePermission(Permission.ManageLibraries)
 export class LocalScanController {
   constructor(private readonly localScanService: LocalScanService) {}
 
-  @Post('scan')
+  @Post("scan")
   scanAll(): Promise<LocalScanSummary[]> {
     return this.localScanService.scanAll();
   }
 
-  @Post('roots/:id/scan')
-  scanRoot(@Param('id', ParseIntPipe) id: number): Promise<LocalScanSummary> {
+  @Post("roots/:id/scan")
+  scanRoot(@Param("id", ParseIntPipe) id: number): Promise<LocalScanSummary> {
     return this.localScanService.scanRoot(id);
   }
 }
@@ -1329,11 +1565,11 @@ export class LocalScanController {
 `local-scan.module.ts`:
 
 ```typescript
-import { Module } from '@nestjs/common';
+import { Module } from "@nestjs/common";
 
-import { LocalScanController } from './local-scan.controller';
-import { LocalScanRepository } from './local-scan.repository';
-import { LocalScanService } from './local-scan.service';
+import { LocalScanController } from "./local-scan.controller";
+import { LocalScanRepository } from "./local-scan.repository";
+import { LocalScanService } from "./local-scan.service";
 
 @Module({
   controllers: [LocalScanController],
@@ -1365,10 +1601,11 @@ git commit -m "feat(local-scan): expose admin scan endpoints"
 
 ---
 
-### Task 12: Seed the four production roots
+### Task 12: Seed the production roots
 
 **Files:**
-- No source changes. This task is operational.
+
+- No source changes. This task is operational and CANNOT be executed in the development environment, because it needs the migrations applied and the server running. Do not dispatch an implementer for it. It runs against CT139 after Plan 1 is deployed, and is recorded here so the verification numbers are not lost.
 
 - [ ] **Step 1: Insert the roots**
 
@@ -1386,11 +1623,11 @@ on conflict do nothing;
 
 Trigger `POST /api/v1/local-scan/scan` and compare the reported counts against the measurements taken on 2026-08-10:
 
-| Media | Expected inserted |
-| --- | --- |
-| ebook | about 7,108 |
-| audiobook | about 58,102 |
-| comic | about 7 |
+| Media     | Expected inserted |
+| --------- | ----------------- |
+| ebook     | about 7,108       |
+| audiobook | about 58,102      |
+| comic     | about 7           |
 
 A materially different number means a match strategy is wrong. Investigate before accepting the result. In particular, an inserted count close to the full disk count means the catalogue key returned null for most rows and nothing matched.
 
