@@ -12,6 +12,20 @@ type Db = NodePgDatabase<typeof schema>;
 /** Arbitrary namespace so local scan advisory locks cannot collide with another feature's. */
 const LOCAL_SCAN_LOCK_NAMESPACE = 8_140_231;
 
+export interface LocalEnrichmentValues {
+  title?: string;
+  sortTitle?: string | null;
+  authors?: string[];
+  series?: string | null;
+  seriesIndex?: number | null;
+  publisher?: string | null;
+  language?: string | null;
+  tags?: string[];
+  publishedYear?: number | null;
+  identifiers?: Record<string, string>;
+  hasCover?: boolean;
+}
+
 export interface NewLocalCatalogItem {
   mediaType: WarehouseMediaType;
   remoteId: string;
@@ -151,6 +165,36 @@ export class LocalScanRepository {
         lastScanSummary: { ...summary },
       })
       .where(eq(schema.localScanRoots.id, rootId));
+  }
+
+  /** Local rows that still carry only a directory-derived title, walked by id so a long
+   *  enrichment run holds one page at a time rather than the whole set. */
+  async *streamLocalItemsNeedingEnrichment(batchSize: number): AsyncGenerator<Array<{ id: number; localPath: string | null }>> {
+    let cursor = 0;
+
+    for (;;) {
+      const batch = await this.db
+        .select({ id: schema.warehouseCatalogItems.id, localPath: schema.warehouseCatalogItems.localPath })
+        .from(schema.warehouseCatalogItems)
+        .where(
+          and(
+            eq(schema.warehouseCatalogItems.source, 'local'),
+            gt(schema.warehouseCatalogItems.id, cursor),
+            sql`jsonb_array_length(${schema.warehouseCatalogItems.authors}) = 0`,
+          ),
+        )
+        .orderBy(asc(schema.warehouseCatalogItems.id))
+        .limit(batchSize);
+
+      if (batch.length === 0) return;
+
+      cursor = batch[batch.length - 1].id;
+      yield batch;
+    }
+  }
+
+  async applyEnrichment(id: number, values: LocalEnrichmentValues): Promise<void> {
+    await this.db.update(schema.warehouseCatalogItems).set(values).where(eq(schema.warehouseCatalogItems.id, id));
   }
 
   findRootStatuses() {

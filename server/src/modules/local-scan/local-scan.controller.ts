@@ -2,12 +2,16 @@ import { Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Post } from
 import { Permission } from '@bookorbit/types';
 
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { LocalEnrichService } from './local-enrich.service';
 import { LocalScanService } from './local-scan.service';
 
 @Controller('local-scan')
 @RequirePermission(Permission.ManageLibraries)
 export class LocalScanController {
-  constructor(private readonly localScanService: LocalScanService) {}
+  constructor(
+    private readonly localScanService: LocalScanService,
+    private readonly localEnrichService: LocalEnrichService,
+  ) {}
 
   @Get('roots')
   getStatuses() {
@@ -21,6 +25,15 @@ export class LocalScanController {
   @HttpCode(HttpStatus.ACCEPTED)
   scanAll(): { started: true } {
     this.localScanService.runAllInBackground();
+    return { started: true };
+  }
+
+  // Reads the metadata.opf sidecar Calibre writes beside every book, so the catalogue gets
+  // real authors, series, publisher and identifiers without a single provider call.
+  @Post('enrich')
+  @HttpCode(HttpStatus.ACCEPTED)
+  enrich(): { started: true } {
+    this.localEnrichService.runInBackground();
     return { started: true };
   }
 
