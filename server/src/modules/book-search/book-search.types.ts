@@ -28,6 +28,7 @@ export interface BookSearchQuery {
   q: string;
   page: number;
   size: number;
+  userId: number;
   mediaTypes?: string[];
   libraryIds?: number[];
 }
