@@ -80,6 +80,9 @@ import { catalogAuthorCanonicalName, catalogAuthorRefs } from './catalog-link-re
 import { normalizeWarehouseRequestStatus } from './warehouse-request.mapper';
 
 type Db = NodePgDatabase<typeof schema>;
+
+/** Caps how many ANDed ILIKE clauses one query can build. */
+const MAX_SEARCH_WORDS = 8;
 type WarehouseConnectionStatus = 'untested' | 'ok' | 'error';
 type SyncCounts = { fetchedCount: number; savedCount: number };
 type SyncTimings = Record<string, number>;
@@ -1879,7 +1882,6 @@ export class WarehouseRepository {
       return [];
     }
 
-    const pattern = `%${term}%`;
     const contentFilterClauses = buildCatalogContentFilterClauses(contentFilters);
 
     return this.db
@@ -1896,7 +1898,7 @@ export class WarehouseRepository {
         and(
           eq(schema.warehouseUserItems.userId, userId),
           mediaTypes ? inArray(schema.warehouseUserItems.mediaType, mediaTypes) : undefined,
-          buildCatalogSearchWhere(pattern),
+          buildCatalogSearchWhere(term),
           ...contentFilterClauses,
         ),
       )
@@ -1915,7 +1917,6 @@ export class WarehouseRepository {
       return [];
     }
 
-    const pattern = `%${term}%`;
     const contentFilterClauses = buildCatalogContentFilterClauses(contentFilters);
 
     return this.db
@@ -1924,7 +1925,7 @@ export class WarehouseRepository {
       .where(
         and(
           mediaTypes ? inArray(schema.warehouseCatalogItems.mediaType, mediaTypes) : undefined,
-          buildCatalogSearchWhere(pattern),
+          buildCatalogSearchWhere(term),
           ...contentFilterClauses,
         ),
       )
@@ -1950,7 +1951,7 @@ export class WarehouseRepository {
       query.mediaType ? eq(schema.warehouseCatalogItems.mediaType, query.mediaType) : undefined,
       mediaTypes ? inArray(schema.warehouseCatalogItems.mediaType, mediaTypes) : undefined,
       smartScopeWhere,
-      q ? buildCatalogSearchWhere(`%${q}%`) : undefined,
+      q ? buildCatalogSearchWhere(q) : undefined,
       ...contentFilterClauses,
     );
     const orderBy = buildCatalogUserItemsOrder(query.sort);
@@ -2099,7 +2100,7 @@ export class WarehouseRepository {
       query.mediaType ? eq(schema.warehouseCatalogItems.mediaType, query.mediaType) : undefined,
       mediaTypes ? inArray(schema.warehouseCatalogItems.mediaType, mediaTypes) : undefined,
       smartScopeWhere,
-      q ? buildCatalogSearchWhere(`%${q}%`) : undefined,
+      q ? buildCatalogSearchWhere(q) : undefined,
       ...contentFilterClauses,
     );
     const orderBy = buildCatalogUserItemsOrder(query.sort);
@@ -4996,7 +4997,8 @@ function clampNumber(value: number | undefined, fallback: number, min: number, m
   return Math.min(Math.max(Math.trunc(value as number), min), max);
 }
 
-function buildCatalogSearchWhere(pattern: string): SQL {
+/** Matches one term against every searchable field of a catalogue row. */
+function catalogTermMatches(pattern: string): SQL {
   return (
     or(
       ilike(schema.warehouseCatalogItems.title, pattern),
@@ -5009,6 +5011,28 @@ function buildCatalogSearchWhere(pattern: string): SQL {
       ilike(sql<string>`coalesce(${schema.warehouseCatalogItems.publisher}, '')`, pattern),
     ) ?? sql`false`
   );
+}
+
+/**
+ * Every word in the query must appear somewhere in the row, rather than the whole query
+ * having to appear as one contiguous substring.
+ *
+ * Searching "The Will of Many" used to return nothing when the title was "The Will of the
+ * Many", because a single ILIKE %...% cannot bridge the missing word. Matching per word also
+ * lets a query span fields, so "islington will many" finds the book by author plus title.
+ * A quoted query is treated as one phrase, which keeps exact matching available.
+ */
+export function buildCatalogSearchWhere(term: string): SQL {
+  const trimmed = term.trim();
+  if (!trimmed) return sql`true`;
+
+  const quoted = /^"(.+)"$/.exec(trimmed);
+  if (quoted) return catalogTermMatches(`%${quoted[1]}%`);
+
+  const words = trimmed.split(/\s+/).filter(Boolean).slice(0, MAX_SEARCH_WORDS);
+  if (words.length <= 1) return catalogTermMatches(`%${trimmed}%`);
+
+  return and(...words.map((word) => catalogTermMatches(`%${word}%`))) ?? sql`false`;
 }
 
 function buildCatalogContentFilterClauses(contentFilters?: ContentFilterRules): SQL[] {

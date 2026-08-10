@@ -67,3 +67,71 @@ describe('AudiobookMatchStrategy', () => {
     ).toBe('Lightseekers (2021)');
   });
 });
+
+describe('AudiobookMatchStrategy fallback matching', () => {
+  const strategy = new AudiobookMatchStrategy(PREFIX);
+
+  it('matches the same book filed under a series prefixed directory upstream', () => {
+    // The real case: the warehouse had "Hierarchy 1 - The Will of the Many (2023)" while the
+    // disk had "The Will of the Many (2023)", so the path keys disagreed and the book was
+    // inserted a second time as local.
+    const fromCatalog = strategy.fallbackCatalogKey({
+      remoteId: 'r1',
+      title: 'The Will of the Many',
+      rawPayload: { files: [{ storage_key: `${PREFIX}James Islington/Hierarchy 1 - The Will of the Many (2023)/a.m4b` }] },
+    });
+    const fromDisk = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/James Islington/The Will of the Many (2023)/a.m4b',
+      relativePath: 'James Islington/The Will of the Many (2023)/a.m4b',
+      fileName: 'a.m4b',
+    });
+
+    expect(fromCatalog).not.toBeNull();
+    expect(fromCatalog).toBe(fromDisk);
+  });
+
+  it('does not collapse different books by the same author', () => {
+    const one = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/James Islington/The Will of the Many (2023)/a.m4b',
+      relativePath: 'James Islington/The Will of the Many (2023)/a.m4b',
+      fileName: 'a.m4b',
+    });
+    const two = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/James Islington/The Shadow of What Was Lost (2014)/a.m4b',
+      relativePath: 'James Islington/The Shadow of What Was Lost (2014)/a.m4b',
+      fileName: 'a.m4b',
+    });
+
+    expect(one).not.toBe(two);
+  });
+
+  it('does not collapse the same title by different authors', () => {
+    const one = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/Author One/Shared Title (2020)/a.m4b',
+      relativePath: 'Author One/Shared Title (2020)/a.m4b',
+      fileName: 'a.m4b',
+    });
+    const two = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/Author Two/Shared Title (2020)/a.m4b',
+      relativePath: 'Author Two/Shared Title (2020)/a.m4b',
+      fileName: 'a.m4b',
+    });
+
+    expect(one).not.toBe(two);
+  });
+
+  it('ignores punctuation and case differences', () => {
+    const one = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/A B/The Wind-Up Bird Chronicle (1997)/a.m4b',
+      relativePath: 'A B/The Wind-Up Bird Chronicle (1997)/a.m4b',
+      fileName: 'a.m4b',
+    });
+    const two = strategy.fallbackDiskKey({
+      absolutePath: '/mnt/ab/A B/the wind up bird chronicle/a.m4b',
+      relativePath: 'A B/the wind up bird chronicle/a.m4b',
+      fileName: 'a.m4b',
+    });
+
+    expect(one).toBe(two);
+  });
+});

@@ -17,6 +17,16 @@ export interface LocalMatchStrategy {
   catalogKey(row: CatalogKeyRow): string | null;
   diskKey(candidate: LocalCandidate): string | null;
   titleFor(candidate: LocalCandidate): string;
+  /**
+   * A looser identity used only when the primary key finds no match.
+   *
+   * The same audiobook can sit in differently named directories on each side. The warehouse
+   * had "James Islington/Hierarchy 1 - The Will of the Many (2023)" while the disk had
+   * "James Islington/The Will of the Many (2023)", so a path key alone reported a book that
+   * was already catalogued as missing. Returning null disables the fallback.
+   */
+  fallbackCatalogKey?(row: CatalogKeyRow): string | null;
+  fallbackDiskKey?(candidate: LocalCandidate): string | null;
 }
 
 export interface LocalScanSummary {
@@ -29,6 +39,8 @@ export interface LocalScanSummary {
   unkeyed: number;
   /** Sibling files resolving to a book already handled in this run. Expected and harmless. */
   deduped: number;
+  /** Matched only by the looser author plus title key, not by path. */
+  matchedByFallback: number;
   /** Rows dropped because a warehouse sync landed the same book mid-walk. */
   reconciled: number;
   unreadableDirs: number;
