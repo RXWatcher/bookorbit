@@ -292,12 +292,47 @@ function getLibraryBookItemSortValue(item: LibraryBookItem, field: BookQuery['so
   }
 }
 
-function sortLibraryBookItems(items: LibraryBookItem[], sort: BookQuery['sort']): LibraryBookItem[] {
-  if (sort.length === 0) return items;
+/** Mirrors the ranking the catalogue query applies, so a merged page keeps the same order. */
+const RELEVANCE_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'of', 'or', 'to', 'in', 'on', 'for', 'is', 'it', 'at', 'by', 'with']);
+
+function relevanceWords(term: string): string[] {
+  const words = term.trim().split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((word) => !RELEVANCE_STOPWORDS.has(word.toLowerCase()));
+  return meaningful.length > 0 ? meaningful : words;
+}
+
+/** Lower is better, matching buildCatalogRelevanceOrder in the warehouse repository. */
+function libraryBookRelevance(item: LibraryBookItem, term: string): number {
+  const query = term
+    .trim()
+    .replace(/^"(.+)"$/, '$1')
+    .toLowerCase();
+  if (!query) return 4;
+
+  const title = (item.title ?? '').toLowerCase();
+  if (title === query) return 0;
+  if (title.includes(query)) return 1;
+
+  const words = relevanceWords(query);
+  if (words.length > 0 && words.every((word) => title.includes(word.toLowerCase()))) return 2;
+
+  const authors = (item.authors ?? []).join(' ').toLowerCase();
+  if (authors.includes(query)) return 3;
+
+  return 4;
+}
+
+function sortLibraryBookItems(items: LibraryBookItem[], sort: BookQuery['sort'], searchTerm?: string): LibraryBookItem[] {
+  const term = searchTerm?.trim();
+  if (sort.length === 0 && !term) return items;
 
   return items
     .map((item, index) => ({ item, index }))
     .sort((a, b) => {
+      if (term) {
+        const relevance = libraryBookRelevance(a.item, term) - libraryBookRelevance(b.item, term);
+        if (relevance !== 0) return relevance;
+      }
       for (const spec of sort) {
         const av = getLibraryBookItemSortValue(a.item, spec.field);
         const bv = getLibraryBookItemSortValue(b.item, spec.field);
@@ -1316,7 +1351,7 @@ export class BookService {
     ]);
 
     const items = [localPage.items, ...sourcePages.map((sourcePage) => sourcePage?.items ?? [])].flat();
-    const sortedItems = sortLibraryBookItems(items, effectiveSort);
+    const sortedItems = sortLibraryBookItems(items, effectiveSort, effectiveQuery.q);
     return {
       items: sortedItems.slice(page * size, page * size + size),
       total: localPage.total + sourcePages.reduce((sum, sourcePage) => sum + (sourcePage?.total ?? 0), 0),
