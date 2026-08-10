@@ -15,10 +15,10 @@ function patterns(term: string): string[] {
 }
 
 describe('buildCatalogSearchWhere', () => {
-  it('matches each word separately, so a missing filler word does not break the search', () => {
+  it('matches each meaningful word separately, so a missing filler word does not break the search', () => {
     // The reported failure: searching "The Will of Many" found nothing when the catalogue
     // title was "The Will of the Many", because one ILIKE cannot bridge the missing word.
-    expect(patterns('The Will of Many')).toEqual(['%The%', '%Will%', '%of%', '%Many%']);
+    expect(patterns('The Will of Many')).toEqual(['%Will%', '%Many%']);
   });
 
   it('ands the words together rather than oring them', () => {
@@ -55,5 +55,20 @@ describe('buildCatalogSearchWhere', () => {
 
     expect(sql).toContain('title');
     expect(sql).toContain('exists');
+  });
+});
+
+describe('search word selection', () => {
+  it('drops filler words so a title search does not match every book containing "the"', () => {
+    // "The Will of the Many" must narrow to the words that carry meaning.
+    expect(patterns('The Will of the Many')).toEqual(['%Will%', '%Many%']);
+  });
+
+  it('keeps filler words when the query is nothing but filler', () => {
+    expect(patterns('the')).toEqual(['%the%']);
+  });
+
+  it('still matches a book whose title omits a filler word', () => {
+    expect(patterns('The Will of Many')).toEqual(['%Will%', '%Many%']);
   });
 });

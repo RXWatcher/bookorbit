@@ -177,6 +177,14 @@ function renderSql(condition: SQL | undefined) {
   return dialect.sqlToQuery(condition);
 }
 
+/** Order by can receive a relevance expression first when the query carries a search term,
+ *  so assertions look across every argument rather than only the first. */
+function renderOrderArgs(args: unknown[] | undefined): { sql: string } | undefined {
+  if (!args) return undefined;
+  const parts = args.map((arg) => renderSql(arg)?.sql ?? '').filter(Boolean);
+  return parts.length > 0 ? { sql: parts.join(' , ') } : undefined;
+}
+
 describe('WarehouseRepository', () => {
   let repo: WarehouseRepository;
   let db: ReturnType<typeof makeDb>;
@@ -557,7 +565,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('from "tags"');
       expect(renderedWhere?.params).toEqual(expect.arrayContaining([' Dune ', 7]));
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title")');
     });
 
@@ -575,7 +583,7 @@ describe('WarehouseRepository', () => {
         order: 'asc',
       });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."series_index"');
       expect(renderedOrder?.sql).toContain('asc');
     });
@@ -637,7 +645,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."media_type" = $');
       expect(renderedWhere?.params).toEqual(expect.arrayContaining([-3001, 'ebook']));
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_user_items"."added_at"');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."synced_at"');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."created_at") desc');
@@ -681,7 +689,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('from "tags"');
       expect(renderedWhere?.params).toEqual(expect.arrayContaining([42, 'reading', 'rereading', 0, 100, 7]));
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_state"."updated_at" desc');
     });
 
@@ -2910,7 +2918,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_requests"."media_type"');
       expect(renderedWhere?.sql).toContain('"warehouse_requests"."status"');
       expect(renderedWhere?.params).toEqual([42, 'ebook', 'pending']);
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_requests"."created_at" desc');
       expect(listChain.limit).toHaveBeenCalledWith(5);
       expect(listChain.offset).toHaveBeenCalledWith(5);
@@ -3109,7 +3117,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_user_items"."media_type"');
       expect(renderedWhere?.params).toEqual([42, 'audiobook']);
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_items"."updated_at" desc');
       expect(listChain.limit).toHaveBeenCalledWith(100);
     });
@@ -3199,7 +3207,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_user_items"."user_id"');
       expect(renderedWhere?.params).toEqual([42]);
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_items"."updated_at" desc');
       expect(listChain.limit).toHaveBeenCalledWith(100);
     });
@@ -3271,7 +3279,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."media_type" in ($1)');
       expect(renderedWhere?.params).toEqual(['ebook']);
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."upstream_created_at"');
       expect(renderedOrder?.sql).toContain('desc nulls last');
       expect(listChain.limit).toHaveBeenCalledWith(100);
@@ -3306,7 +3314,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).not.toContain('warehouse_user_state');
       expect(renderedWhere?.params).toEqual([42]);
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('random()');
       expect(listChain.limit).toHaveBeenCalledWith(100);
     });
@@ -3381,7 +3389,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."media_type" in ($1)');
       expect(renderedWhere?.params).toEqual(['ebook']);
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('random()');
       expect(listChain.limit).toHaveBeenCalledWith(100);
     });
@@ -3656,7 +3664,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."narrators"');
       expect(renderedWhere?.params).toEqual(expect.arrayContaining([42, '%Dune%', 'Teresa Burrell', '%arrakis%']));
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title")');
       expect(listChain.limit).toHaveBeenCalledWith(100);
       expect(listChain.offset).toHaveBeenCalledWith(100);
@@ -3694,7 +3702,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."title" ilike');
       expect(renderedWhere?.params).toEqual(expect.arrayContaining([42, 'ebook', '%arrakis%']));
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") desc');
       expect(listChain.limit).toHaveBeenCalledWith(50);
       expect(listChain.offset).toHaveBeenCalledWith(0);
@@ -3738,7 +3746,7 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.sql).toContain('"warehouse_catalog_items"."title" ilike');
       expect(renderedWhere?.params).toEqual(expect.arrayContaining(['ebook', '%arrakis%']));
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_user_items"."added_at"');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."synced_at"');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."created_at") desc');
@@ -3863,7 +3871,7 @@ describe('WarehouseRepository', () => {
 
       expect(listChain.leftJoin).toHaveBeenCalledWith(schema.warehouseUserState, expect.anything());
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_state"."rating" desc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -3895,7 +3903,7 @@ describe('WarehouseRepository', () => {
 
       expect(listChain.leftJoin).toHaveBeenCalledWith(schema.warehouseUserState, expect.anything());
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_state"."progress_percent" desc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -3927,7 +3935,7 @@ describe('WarehouseRepository', () => {
 
       expect(listChain.leftJoin).toHaveBeenCalledWith(schema.warehouseUserState, expect.anything());
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_state"."updated_at" desc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -3959,7 +3967,7 @@ describe('WarehouseRepository', () => {
 
       expect(listChain.leftJoin).toHaveBeenCalledWith(schema.warehouseUserState, expect.anything());
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_state"."finished_at" desc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -3991,7 +3999,7 @@ describe('WarehouseRepository', () => {
 
       expect(listChain.leftJoin).toHaveBeenCalledWith(schema.warehouseUserState, expect.anything());
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_user_state"."read_status" desc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -4021,7 +4029,7 @@ describe('WarehouseRepository', () => {
         }),
       ).resolves.toEqual({ rows, total: 1, page: 0, limit: 50 });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('raw_payload');
       expect(renderedOrder?.sql).toContain('publishedYear');
       expect(renderedOrder?.sql).toContain('published_date');
@@ -4054,7 +4062,7 @@ describe('WarehouseRepository', () => {
         }),
       ).resolves.toEqual({ rows, total: 1, page: 0, limit: 50 });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('raw_payload');
       expect(renderedOrder?.sql).toContain('pageCount');
       expect(renderedOrder?.sql).toContain('duration_seconds');
@@ -4088,7 +4096,7 @@ describe('WarehouseRepository', () => {
         }),
       ).resolves.toEqual({ rows, total: 1, page: 0, limit: 50 });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."series_index" asc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -4118,7 +4126,7 @@ describe('WarehouseRepository', () => {
         }),
       ).resolves.toEqual({ rows, total: 1, page: 0, limit: 50 });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."updated_at" desc nulls last');
       expect(renderedOrder?.sql).toContain('coalesce("warehouse_catalog_items"."sort_title", "warehouse_catalog_items"."title") asc');
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."remote_id" asc');
@@ -4148,7 +4156,7 @@ describe('WarehouseRepository', () => {
         }),
       ).resolves.toEqual({ rows, total: 1, page: 0, limit: 50 });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('raw_payload');
       expect(renderedOrder?.sql).toContain('sizeBytes');
       expect(renderedOrder?.sql).toContain('size_bytes');
@@ -4182,7 +4190,7 @@ describe('WarehouseRepository', () => {
         }),
       ).resolves.toEqual({ rows, total: 1, page: 0, limit: 50 });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('floor((');
       expect(renderedOrder?.sql).toContain('jsonb_array_length');
       expect(renderedOrder?.sql).toContain('has_cover');
@@ -5162,7 +5170,9 @@ describe('WarehouseRepository', () => {
         '%epub%',
         true,
       ]);
-      expect(listChain.orderBy).toHaveBeenCalledWith(expect.anything());
+      // A search term adds a leading relevance expression, so the sort is no longer the
+      // only ordering argument.
+      expect(listChain.orderBy).toHaveBeenCalledWith(expect.anything(), expect.anything());
       expect(listChain.limit).toHaveBeenCalledWith(100);
       expect(listChain.offset).toHaveBeenCalledWith(0);
       expect(countChain.from).toHaveBeenCalledWith(schema.warehouseCatalogItems);
@@ -5255,8 +5265,10 @@ describe('WarehouseRepository', () => {
         '%m4b%',
         true,
       ]);
-      expect(listChain.orderBy).toHaveBeenCalledWith(expect.anything());
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      // A search term adds a leading relevance expression, so the sort is no longer the
+      // only ordering argument.
+      expect(listChain.orderBy).toHaveBeenCalledWith(expect.anything(), expect.anything());
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."narrators"->>0');
       expect(listChain.limit).toHaveBeenCalledWith(100);
       expect(listChain.offset).toHaveBeenCalledWith(0);
@@ -5293,7 +5305,7 @@ describe('WarehouseRepository', () => {
 
       await repo.listAudiobookCatalog({ sort: 'duration', order: 'asc' });
 
-      const renderedOrder = renderSql(listChain.orderBy.mock.calls[0]?.[0]);
+      const renderedOrder = renderOrderArgs(listChain.orderBy.mock.calls[0]);
       expect(renderedOrder?.sql).toContain('"warehouse_catalog_items"."duration_seconds"');
     });
 

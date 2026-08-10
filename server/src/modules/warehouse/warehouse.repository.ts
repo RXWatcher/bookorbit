@@ -83,6 +83,11 @@ type Db = NodePgDatabase<typeof schema>;
 
 /** Caps how many ANDed ILIKE clauses one query can build. */
 const MAX_SEARCH_WORDS = 8;
+
+/** The order builders return either one expression or several. */
+function toOrderArray(order: unknown): SQL[] {
+  return (Array.isArray(order) ? order : [order]) as SQL[];
+}
 type WarehouseConnectionStatus = 'untested' | 'ok' | 'error';
 type SyncCounts = { fetchedCount: number; savedCount: number };
 type SyncTimings = Record<string, number>;
@@ -1954,7 +1959,12 @@ export class WarehouseRepository {
       q ? buildCatalogSearchWhere(q) : undefined,
       ...contentFilterClauses,
     );
-    const orderBy = buildCatalogUserItemsOrder(query.sort);
+    // A search should surface what was searched for, so relevance leads and the requested
+    // sort breaks ties.
+    const relevance = q ? buildCatalogRelevanceOrder(q) : undefined;
+    const orderBy = relevance
+      ? [relevance, ...toOrderArray(buildCatalogUserItemsOrder(query.sort))]
+      : toOrderArray(buildCatalogUserItemsOrder(query.sort));
 
     const selectFields = {
       ...getTableColumns(schema.warehouseCatalogItems),
@@ -1991,7 +2001,7 @@ export class WarehouseRepository {
             ),
           )
           .where(where)
-          .orderBy(orderBy)
+          .orderBy(...orderBy)
           .limit(limit)
           .offset(page * limit)
       : this.db
@@ -2020,7 +2030,7 @@ export class WarehouseRepository {
             ),
           )
           .where(where)
-          .orderBy(orderBy)
+          .orderBy(...orderBy)
           .limit(limit)
           .offset(page * limit);
 
@@ -2103,7 +2113,12 @@ export class WarehouseRepository {
       q ? buildCatalogSearchWhere(q) : undefined,
       ...contentFilterClauses,
     );
-    const orderBy = buildCatalogUserItemsOrder(query.sort);
+    // A search should surface what was searched for, so relevance leads and the requested
+    // sort breaks ties.
+    const relevance = q ? buildCatalogRelevanceOrder(q) : undefined;
+    const orderBy = relevance
+      ? [relevance, ...toOrderArray(buildCatalogUserItemsOrder(query.sort))]
+      : toOrderArray(buildCatalogUserItemsOrder(query.sort));
     const primaryField = (query.sort?.[0] ?? { field: 'title' as const }).field;
     const bucketExpr = buildCatalogJumpBucketExpr(primaryField);
 
@@ -2280,7 +2295,11 @@ export class WarehouseRepository {
   async listEbookCatalog(query: WarehouseEbookCatalogQuery): Promise<CatalogListPage> {
     const { page, limit } = clampPageLimit(query.page, query.limit);
     const where = buildEbookCatalogWhere(query);
-    const orderBy = buildEbookCatalogOrder(query.sort, query.order);
+    const searchTerm = query.q?.trim();
+    const searchRelevance = searchTerm ? buildCatalogRelevanceOrder(searchTerm) : undefined;
+    const orderBy = searchRelevance
+      ? [searchRelevance, ...toOrderArray(buildEbookCatalogOrder(query.sort, query.order))]
+      : toOrderArray(buildEbookCatalogOrder(query.sort, query.order));
 
     // The page and its count are independent, so they run together rather than in series.
     const [rows, totalRows] = await Promise.all([
@@ -2288,7 +2307,7 @@ export class WarehouseRepository {
         .select(catalogListColumns)
         .from(schema.warehouseCatalogItems)
         .where(where)
-        .orderBy(orderBy)
+        .orderBy(...orderBy)
         .limit(limit)
         .offset((page - 1) * limit),
       this.db
@@ -2308,7 +2327,11 @@ export class WarehouseRepository {
   async listComicCatalog(query: WarehouseComicCatalogQuery): Promise<CatalogListPage> {
     const { page, limit } = clampPageLimit(query.page, query.limit);
     const where = buildComicCatalogWhere(query);
-    const orderBy = buildEbookCatalogOrder(query.sort, query.order);
+    const searchTerm = query.q?.trim();
+    const searchRelevance = searchTerm ? buildCatalogRelevanceOrder(searchTerm) : undefined;
+    const orderBy = searchRelevance
+      ? [searchRelevance, ...toOrderArray(buildEbookCatalogOrder(query.sort, query.order))]
+      : toOrderArray(buildEbookCatalogOrder(query.sort, query.order));
 
     // The page and its count are independent, so they run together rather than in series.
     const [rows, totalRows] = await Promise.all([
@@ -2316,7 +2339,7 @@ export class WarehouseRepository {
         .select(catalogListColumns)
         .from(schema.warehouseCatalogItems)
         .where(where)
-        .orderBy(orderBy)
+        .orderBy(...orderBy)
         .limit(limit)
         .offset((page - 1) * limit),
       this.db
@@ -2336,7 +2359,11 @@ export class WarehouseRepository {
   async listAudiobookCatalog(query: WarehouseAudiobookCatalogQuery): Promise<CatalogListPage> {
     const { page, limit } = clampPageLimit(query.page, query.limit);
     const where = buildAudiobookCatalogWhere(query);
-    const orderBy = buildAudiobookCatalogOrder(query.sort, query.order);
+    const searchTerm = query.q?.trim();
+    const searchRelevance = searchTerm ? buildCatalogRelevanceOrder(searchTerm) : undefined;
+    const orderBy = searchRelevance
+      ? [searchRelevance, ...toOrderArray(buildAudiobookCatalogOrder(query.sort, query.order))]
+      : toOrderArray(buildAudiobookCatalogOrder(query.sort, query.order));
 
     // The page and its count are independent, so they run together rather than in series.
     const [rows, totalRows] = await Promise.all([
@@ -2344,7 +2371,7 @@ export class WarehouseRepository {
         .select(catalogListColumns)
         .from(schema.warehouseCatalogItems)
         .where(where)
-        .orderBy(orderBy)
+        .orderBy(...orderBy)
         .limit(limit)
         .offset((page - 1) * limit),
       this.db
@@ -5014,12 +5041,25 @@ function catalogTermMatches(pattern: string): SQL {
 }
 
 /**
- * Every word in the query must appear somewhere in the row, rather than the whole query
- * having to appear as one contiguous substring.
+ * Words that carry no signal on their own. A query made only of these keeps them, so
+ * searching "the" still does something, but "The Will of the Many" narrows to "will" and
+ * "many" instead of matching every book containing "the".
+ */
+const SEARCH_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'of', 'or', 'to', 'in', 'on', 'for', 'is', 'it', 'at', 'by', 'with']);
+
+function searchWords(term: string): string[] {
+  const words = term.split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((word) => !SEARCH_STOPWORDS.has(word.toLowerCase()));
+  return (meaningful.length > 0 ? meaningful : words).slice(0, MAX_SEARCH_WORDS);
+}
+
+/**
+ * Every meaningful word in the query must appear somewhere in the row, rather than the whole
+ * query having to appear as one contiguous substring.
  *
  * Searching "The Will of Many" used to return nothing when the title was "The Will of the
  * Many", because a single ILIKE %...% cannot bridge the missing word. Matching per word also
- * lets a query span fields, so "islington will many" finds the book by author plus title.
+ * lets a query span fields, so "islington many" finds the book by author plus title.
  * A quoted query is treated as one phrase, which keeps exact matching available.
  */
 export function buildCatalogSearchWhere(term: string): SQL {
@@ -5029,10 +5069,33 @@ export function buildCatalogSearchWhere(term: string): SQL {
   const quoted = /^"(.+)"$/.exec(trimmed);
   if (quoted) return catalogTermMatches(`%${quoted[1]}%`);
 
-  const words = trimmed.split(/\s+/).filter(Boolean).slice(0, MAX_SEARCH_WORDS);
-  if (words.length <= 1) return catalogTermMatches(`%${trimmed}%`);
+  const words = searchWords(trimmed);
+  if (words.length <= 1) return catalogTermMatches(`%${words[0] ?? trimmed}%`);
 
   return and(...words.map((word) => catalogTermMatches(`%${word}%`))) ?? sql`false`;
+}
+
+/**
+ * Ranks a row against the query so the thing being searched for comes first.
+ *
+ * Without this, results are ordered by title, so searching an exact title could bury it
+ * under unrelated books that happened to share its words.
+ */
+export function buildCatalogRelevanceOrder(term: string): SQL | undefined {
+  const trimmed = term.trim().replace(/^"(.+)"$/, '$1');
+  if (!trimmed) return undefined;
+
+  const whole = `%${trimmed}%`;
+  const words = searchWords(trimmed);
+  const allWordsInTitle = and(...words.map((word) => ilike(schema.warehouseCatalogItems.title, `%${word}%`)));
+
+  return sql`case
+    when lower(${schema.warehouseCatalogItems.title}) = lower(${trimmed}) then 0
+    when ${schema.warehouseCatalogItems.title} ilike ${whole} then 1
+    when ${allWordsInTitle ?? sql`false`} then 2
+    when ${catalogAuthorNameMatches(whole)} then 3
+    else 4
+  end`;
 }
 
 function buildCatalogContentFilterClauses(contentFilters?: ContentFilterRules): SQL[] {
