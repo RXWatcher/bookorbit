@@ -29,6 +29,7 @@ import {
 } from './warehouse';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { FILE_ROLES } from '../../modules/scanner/lib/classify';
+import { localScanRoots } from './local-scan';
 
 describe('Database Schema Logic', () => {
   beforeAll(() => {
@@ -346,6 +347,13 @@ describe('Database Schema Logic', () => {
       expect(checkNames).toContain('koreader_catalog_device_progress_percentage_range_chk');
       expect(koreaderCatalogDeviceProgress.device.default).toBe('KOReader');
       expect(koreaderCatalogDeviceProgress.updatedAt.onUpdateFn?.()).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('localScanRoots', () => {
+    it('is unique per media type and path', () => {
+      expect(localScanRoots.absolutePath.notNull).toBe(true);
+      expect(localScanRoots.enabled.default).toBe(true);
     });
   });
 });
