@@ -289,6 +289,32 @@ export class DashboardService {
       `[dashboard.scroller_batch] [start] userId=${user.id} shelfCount=${dto.items.length} concurrency=${SCROLLER_QUERY_CONCURRENCY} - scroller batch started`,
     );
 
+    // The batch path below selects numeric book ids and hydrates them from the
+    // books table, so it can only ever see filesystem libraries. Where content
+    // is source backed the shelves have no such ids, and this endpoint returned
+    // empty shelves while the single shelf route returned the same content
+    // fine. Delegate to that route instead, which merges both sources, and keep
+    // the shared hydration for installs that really are filesystem only.
+    const librariesForUser = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    if (sourceBackedMediaTypesForLibraryIds(librariesForUser.map((library) => library.id)).length > 0) {
+      const merged = await mapWithConcurrency(dto.items, SCROLLER_QUERY_CONCURRENCY, async (item) => {
+        try {
+          return { id: item.id, books: await this.getScroller(item.type, user, item.limit, item.smartScopeId), failed: false };
+        } catch (error) {
+          const errorClass = error instanceof Error ? error.constructor.name : typeof error;
+          const message = sanitizeLogValue(error instanceof Error ? error.message : error);
+          this.logger.warn(
+            `[dashboard.scroller_query] [fail] userId=${user.id} type=${item.type} smartScopeId=${item.smartScopeId ?? 0} errorClass=${errorClass} error="${message}" - scroller selection failed`,
+          );
+          return { id: item.id, books: [] as BookCard[], failed: true };
+        }
+      });
+      this.logger.debug(
+        `[dashboard.scroller_batch] [end] userId=${user.id} shelfCount=${merged.length} sourceBacked=true durationMs=${Date.now() - startedAt} - scroller batch completed`,
+      );
+      return { items: merged };
+    }
+
     const accessibleLibraryIds = await this.libraryService.findAccessibleLibraryIds(user);
     const selections = await mapWithConcurrency(dto.items, SCROLLER_QUERY_CONCURRENCY, async (item) => {
       const selectionStartedAt = Date.now();

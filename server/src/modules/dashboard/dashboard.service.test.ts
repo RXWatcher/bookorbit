@@ -900,9 +900,42 @@ describe('DashboardService', () => {
     ]);
   });
 
+  it('serves source-backed shelves through the batch endpoint too', async () => {
+    // The batch path selects numeric book ids out of the books table, so on a
+    // source-backed install it returned empty shelves while the single shelf
+    // route returned the same content fine. The dashboard only ever calls the
+    // batch route, so every shelf on the page was blank.
+    const { service, warehouseRepo, libraryService } = makeService();
+    const user = makeUser({ id: 8 });
+    libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+    warehouseRepo.listRecentCatalogItems.mockResolvedValue([
+      {
+        id: 101,
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Dune',
+        authors: ['Frank Herbert'],
+        format: 'epub',
+        hasCover: true,
+        rawPayload: {},
+        syncedAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+
+    const result = await service.getScrollers({ items: [{ id: 'recent', type: 'recently-added', limit: 20 }] }, user);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].failed).toBe(false);
+    expect(result.items[0].books.map((book) => book.title)).toEqual(['Dune']);
+  });
+
   it('batches shelf selection and hydrates overlapping books once', async () => {
     const { service, dashboardRepo, bookReadService, libraryService } = makeService();
     const user = makeUser({ id: 8 });
+    // Filesystem only, so the batch keeps its shared hydration path.
+    libraryService.findAll.mockResolvedValue([{ id: 10 }]);
     libraryService.findAccessibleLibraryIds.mockResolvedValue([10]);
     dashboardRepo.findRecentlyAddedBookIds.mockResolvedValue([9, 3]);
     dashboardRepo.findWantToReadBookIds.mockResolvedValue([3, 7]);
