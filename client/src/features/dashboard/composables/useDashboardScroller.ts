@@ -2,6 +2,7 @@ import { onMounted, ref } from 'vue'
 
 import {
   DASHBOARD_SCROLLER_BATCH_MAX,
+  type DashboardCatalogAdditionsData,
   type DashboardScrollerBatchRequest,
   type DashboardScrollerBatchResponse,
   type DashboardScrollerBatchResult,
@@ -83,7 +84,11 @@ async function loadDedicated(url: string, type: ScrollerType, limit: number, sma
   if (type === 'smart-scope' && smartScopeId) params.set('smartScopeId', String(smartScopeId))
   const res = await api(`${url}?${params}`)
   if (!res.ok) throw new Error('Dashboard scroller request failed')
-  return res.json()
+  // These two routes answer with an { items } envelope rather than a bare
+  // array. Assigning the envelope straight to the shelf left every card
+  // undefined, which is what blanked the dashboard.
+  const payload = (await res.json()) as DashboardCatalogAdditionsData | DashboardScrollerItem[]
+  return Array.isArray(payload) ? payload : (payload?.items ?? [])
 }
 
 export function useDashboardScroller(type: ScrollerType, limit = 20, smartScopeId?: number) {

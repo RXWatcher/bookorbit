@@ -87,7 +87,9 @@ const emit = defineEmits<{
 const authorLine = computed(() => props.book.authors.join(', ') || null)
 const authorQuery = computed(() => props.book.authors[0] ?? null)
 
-const readableFiles = computed(() => props.book.files.filter((f) => f.format && READER_OPENABLE_FORMATS.has(f.format)))
+// A card arriving without files must not take the whole shelf, and with it the
+// dashboard, down with a render-time throw.
+const readableFiles = computed(() => (props.book.files ?? []).filter((f) => f.format && READER_OPENABLE_FORMATS.has(f.format)))
 const primaryFile = computed(() => readableFiles.value.find((f) => f.role === 'primary') ?? readableFiles.value[0] ?? null)
 const mediaProfile = computed(() => getBookMediaProfile(readableFiles.value))
 const isAudiobook = computed(() => mediaProfile.value.primaryMediaKind === 'audiobook')

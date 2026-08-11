@@ -1,10 +1,10 @@
 import { onMounted, ref } from 'vue'
 
-import type { DashboardCatalogItem } from '@bookorbit/types'
+import type { DashboardScrollerItem } from '@bookorbit/types'
 import { fetchDashboardCatalogAdditions } from '../api/dashboard-catalog.api'
 
 export function useDashboardCatalogAdditions(limit = 20) {
-  const items = ref<DashboardCatalogItem[]>([])
+  const items = ref<DashboardScrollerItem[]>([])
   const loading = ref(true)
   const error = ref(false)
 

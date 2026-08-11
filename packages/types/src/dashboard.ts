@@ -86,7 +86,9 @@ export interface DashboardCatalogItem {
 }
 
 export interface DashboardCatalogAdditionsData {
-  items: DashboardCatalogItem[];
+  // Cards, not catalog items: these two shelves render through the same
+  // component as every other shelf, which needs a BookCard.
+  items: DashboardScrollerItem[];
 }
 
 export type DashboardScrollerItem = BookCard;

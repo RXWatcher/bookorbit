@@ -6,14 +6,12 @@ import {
   CLOUD_EBOOK_LIBRARY_ID,
   type BookCard,
   type DashboardCatalogAdditionsData,
-  type DashboardCatalogItem,
   type DashboardScrollerBatchResponse,
   type DashboardScrollerItem,
   type LibraryBookItem,
   type WarehouseMediaType,
 } from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
-import type { WarehouseCatalogItemRow } from '../../db/schema';
 import { mapWithConcurrency } from '../../common/utils/batch.utils';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { BookReadService } from '../book/book-read.service';
@@ -21,7 +19,6 @@ import { assembleBookCards } from '../book/utils/assemble-book-cards';
 import { SmartScopeService } from '../smart-scope/smart-scope.service';
 import { LibraryService } from '../library/library.service';
 import { WarehouseRepository } from '../warehouse/warehouse.repository';
-import { catalogAuthorRefs, catalogSeriesRef } from '../warehouse/catalog-link-refs';
 import { mapWarehouseCatalogItemToBookCard } from '../warehouse/warehouse-book-card.mapper';
 import type { ContinueReadingRow, UpNextInSeriesRow } from './dashboard.repository';
 import { DashboardRepository } from './dashboard.repository';
@@ -64,7 +61,7 @@ export class DashboardService {
       user.isSuperuser ? undefined : user.contentFilters,
       sourceBackedMediaTypes,
     );
-    return { items: rows.map(mapCatalogDashboardItem) };
+    return { items: rows.map(mapWarehouseCatalogItemToBookCard) };
   }
 
   async getCatalogDiscovery(user: RequestUser, limit: number): Promise<DashboardCatalogAdditionsData> {
@@ -76,7 +73,7 @@ export class DashboardService {
       user.isSuperuser ? undefined : user.contentFilters,
       sourceBackedMediaTypes,
     );
-    return { items: rows.map(mapCatalogDashboardItem) };
+    return { items: rows.map(mapWarehouseCatalogItemToBookCard) };
   }
 
   async getScroller(type: ScrollerType, user: RequestUser, limit: number, smartScopeId?: number): Promise<DashboardScrollerItem[]> {
@@ -404,27 +401,6 @@ function mergeContinueReadingItems(
     .map(({ item }) => item);
 }
 
-function mapCatalogDashboardItem(row: WarehouseCatalogItemRow): DashboardCatalogItem {
-  const authorRefs = catalogAuthorRefs(row.authors);
-  const seriesRef = catalogSeriesRef(row.series);
-  return {
-    type: 'catalog-item',
-    mediaType: row.mediaType,
-    remoteId: row.remoteId,
-    title: row.title,
-    subtitle: row.subtitle ?? null,
-    seriesName: row.series ?? null,
-    seriesRef,
-    seriesIndex: row.seriesIndex ?? null,
-    authors: authorRefs.map((author) => author.name),
-    authorRefs,
-    narrators: safeStringArray(row.narrators),
-    libraryName: dashboardCatalogLibraryName(row.mediaType),
-    formats: row.format ? [row.format] : [],
-    hasCover: row.hasCover,
-  };
-}
-
 function compareDashboardScrollerItemsByAddedAt(a: DashboardScrollerItem, b: DashboardScrollerItem): number {
   return getDashboardScrollerItemTime(b) - getDashboardScrollerItemTime(a);
 }
@@ -460,14 +436,4 @@ function sourceBackedMediaTypesForLibraryIds(libraryIds: number[]): WarehouseMed
   if (libraryIds.includes(CLOUD_AUDIO_LIBRARY_ID)) mediaTypes.push('audiobook');
   if (libraryIds.includes(CLOUD_COMIC_LIBRARY_ID)) mediaTypes.push('comic');
   return mediaTypes;
-}
-
-function dashboardCatalogLibraryName(mediaType: WarehouseCatalogItemRow['mediaType']): string {
-  if (mediaType === 'audiobook') return 'Audiobooks';
-  if (mediaType === 'comic') return 'Comics';
-  return 'Books';
-}
-
-function safeStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }

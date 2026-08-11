@@ -5,9 +5,6 @@ import { DashboardService } from './dashboard.service';
 import { ScrollerType } from './dto/scroller-type.enum';
 import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 
-const expectedCatalogAuthorRef = (name: string) => ({ id: expect.any(Number), name });
-const expectedCatalogSeriesRef = (name: string) => ({ id: expect.any(Number), name });
-
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
     id: 42,
@@ -161,26 +158,20 @@ describe('DashboardService', () => {
     expect(warehouseRepo.listRecentUserCatalogItems).toHaveBeenCalledWith(7, 50, EMPTY_CONTENT_FILTER_RULES, ['audiobook']);
     expect(warehouseRepo.listRecentCatalogItems).not.toHaveBeenCalled();
     expect(libraryService.findAccessibleLibraryIds).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      items: [
-        {
-          type: 'catalog-item',
-          mediaType: 'audiobook',
-          remoteId: 'audio-1',
-          title: 'Dune Audio',
-          subtitle: 'Collector Edition',
-          seriesName: 'Dune',
-          seriesRef: expectedCatalogSeriesRef('Dune'),
-          seriesIndex: null,
-          authors: ['Frank Herbert'],
-          authorRefs: [expectedCatalogAuthorRef('Frank Herbert')],
-          narrators: ['Simon Vance'],
-          libraryName: 'Audiobooks',
-          formats: ['m4b'],
-          hasCover: true,
-        },
-      ],
+    // Cards, because this shelf renders through the same component as every
+    // other one. Handing it the catalog projection left it without files and
+    // threw during render, taking the whole dashboard blank.
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      title: 'Dune Audio',
+      subtitle: 'Collector Edition',
+      authors: ['Frank Herbert'],
+      seriesName: 'Dune',
+      hasCover: true,
+      durationSeconds: 3600,
+      catalogSource: { mediaType: 'audiobook', remoteId: 'audio-1' },
     });
+    expect(result.items[0].files).toEqual([expect.objectContaining({ format: 'm4b', role: 'primary' })]);
     expect(JSON.stringify(result)).not.toContain('catalog-source');
     expect(result.items[0]).not.toHaveProperty('rawPayload');
     expect(result.items[0]).not.toHaveProperty('upstreamUpdatedAt');
@@ -222,22 +213,16 @@ describe('DashboardService', () => {
     const result = await service.getCatalogAdditions(user, 20);
 
     expect(warehouseRepo.listRecentUserCatalogItems).toHaveBeenCalledWith(7, 20, EMPTY_CONTENT_FILTER_RULES, ['comic']);
-    expect(result.items[0]).toEqual({
-      type: 'catalog-item',
-      mediaType: 'comic',
-      remoteId: 'comic-1',
+    expect(result.items[0]).toMatchObject({
       title: 'Saga #1',
       subtitle: null,
       seriesName: 'Saga',
-      seriesRef: expectedCatalogSeriesRef('Saga'),
       seriesIndex: 1,
       authors: ['Brian K. Vaughan'],
-      authorRefs: [expectedCatalogAuthorRef('Brian K. Vaughan')],
-      narrators: [],
-      libraryName: 'Comics',
-      formats: ['cbz'],
       hasCover: true,
+      catalogSource: { mediaType: 'comic', remoteId: 'comic-1' },
     });
+    expect(result.items[0].files).toEqual([expect.objectContaining({ format: 'cbz', role: 'primary' })]);
     expect(JSON.stringify(result)).not.toMatch(/\/media\/|ceph:\/\/|storage_path|media_path/i);
   });
 
@@ -278,22 +263,15 @@ describe('DashboardService', () => {
     expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
     expect(warehouseRepo.listRandomCatalogItems).toHaveBeenCalledWith(50, EMPTY_CONTENT_FILTER_RULES, ['ebook']);
     expect(warehouseRepo.listRandomUserCatalogItems).not.toHaveBeenCalled();
-    expect(result.items[0]).toEqual({
-      type: 'catalog-item',
-      mediaType: 'ebook',
-      remoteId: 'ebook-1',
+    expect(result.items[0]).toMatchObject({
       title: 'Dune',
       subtitle: null,
       seriesName: 'Dune',
-      seriesRef: expectedCatalogSeriesRef('Dune'),
-      seriesIndex: null,
       authors: ['Frank Herbert'],
-      authorRefs: [expectedCatalogAuthorRef('Frank Herbert')],
-      narrators: [],
-      libraryName: 'Books',
-      formats: ['epub'],
       hasCover: false,
+      catalogSource: { mediaType: 'ebook', remoteId: 'ebook-1' },
     });
+    expect(result.items[0].files).toEqual([expect.objectContaining({ format: 'epub', role: 'primary' })]);
     expect(JSON.stringify(result)).not.toContain('catalog-source');
   });
 
