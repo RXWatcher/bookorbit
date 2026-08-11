@@ -8,6 +8,7 @@ import { useAppInfo } from '@/features/settings/composables/useAppInfo'
 import { SUPPORTED_FORMATS, SUPPORTED_FORMATS_ACCEPT, useBookUpload, type FileUploadStatus } from '../composables/useBookUpload'
 import { emitLibraryUploadCompleted } from '../composables/useLibraryUploadEvents'
 import { useLibraries } from '../composables/useLibraries'
+import { libraryRouteForId } from '../lib/library-route'
 import { api } from '@/lib/api'
 import { formatBytes } from '@/lib/formatting'
 const props = defineProps<{
@@ -97,7 +98,7 @@ function handleClose() {
 
 function goToLibrary() {
   if (selectedLibraryId.value) {
-    router.push({ name: 'library', params: { id: selectedLibraryId.value } })
+    router.push(libraryRouteForId(selectedLibraryId.value))
   }
   handleClose()
 }

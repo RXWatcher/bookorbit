@@ -56,6 +56,10 @@ const sections = computed<Section[]>(() => {
     result.push({ label: 'Integrations', routeName: 'settings-integrations' })
   }
 
+  if (su || perms.includes('manage_app_settings')) {
+    result.push({ label: 'Book Warehouse', routeName: 'settings-warehouse' })
+  }
+
   if (su || perms.includes('manage_users') || perms.includes('view_user_activity') || perms.includes('manage_app_settings')) {
     result.push({ label: t('settings.common.nav.admin'), routeName: 'settings-admin' })
   }

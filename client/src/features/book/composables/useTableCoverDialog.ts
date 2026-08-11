@@ -1,11 +1,13 @@
 import { ref } from 'vue'
 import type { BookCard } from '@bookorbit/types'
+import { isSourceBackedBook } from '@/features/book/lib/source-backed-book'
 
 export function useTableCoverDialog(isSelectionMode: () => boolean, emitUpdateBook: (updated: BookCard) => void, getBooks: () => BookCard[]) {
   const coverDialogBook = ref<BookCard | null>(null)
 
   function handleCoverClick(book: BookCard): void {
     if (isSelectionMode()) return
+    if (isSourceBackedBook(book)) return
     coverDialogBook.value = book
   }
 

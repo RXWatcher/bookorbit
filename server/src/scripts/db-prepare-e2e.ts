@@ -72,7 +72,11 @@ async function resetE2EDatabase(targetClient: Client): Promise<void> {
   await installPostgresExtensions(targetClient);
   await targetClient.query('CREATE SCHEMA IF NOT EXISTS drizzle');
   await targetClient.query('CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)');
+  await targetClient.query(
+    'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_warehouse_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)',
+  );
   await targetClient.query('DELETE FROM drizzle.__drizzle_migrations');
+  await targetClient.query('DELETE FROM drizzle.__drizzle_warehouse_migrations');
 }
 
 async function run(): Promise<void> {

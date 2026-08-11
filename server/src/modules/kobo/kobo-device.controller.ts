@@ -14,6 +14,7 @@ import { KoboDownloadService } from './services/kobo-download.service';
 import { KoboProxyService } from './services/kobo-proxy.service';
 import type { KoboAnalyticsBody } from './kobo-analytics.types';
 import { KoboBookIdentityService } from './services/kobo-book-identity.service';
+import { decodeKoboCatalogEbookId } from './kobo-catalog-id';
 import { KoboSyncHistoryService } from './services/kobo-sync-history.service';
 
 @Controller('kobo/:deviceToken')
@@ -75,6 +76,12 @@ export class KoboDeviceController {
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
+    const catalogItemId = decodeKoboCatalogEbookId(bookId);
+    if (catalogItemId !== null) {
+      await this.downloadService.streamCatalogEbook(user.id, catalogItemId, reply, req.headers.range as string | undefined);
+      return;
+    }
+
     const id = await this.bookIdentityService.resolveBookIdByEntitlementId(user.id, bookId);
     if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
     const startedAt = Date.now();
@@ -161,6 +168,12 @@ export class KoboDeviceController {
     req: FastifyRequest,
     reply: FastifyReply,
   ) {
+    const catalogItemId = decodeKoboCatalogEbookId(bookId);
+    if (catalogItemId !== null) {
+      await this.thumbnailService.serveCatalogThumbnail(user.id, catalogItemId, ifNoneMatch, reply);
+      return;
+    }
+
     const id = await this.bookIdentityService.resolveBookIdByCoverImageId(user.id, bookId);
     if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
     await this.thumbnailService.serveThumbnail(user.id, id, ifNoneMatch, reply);

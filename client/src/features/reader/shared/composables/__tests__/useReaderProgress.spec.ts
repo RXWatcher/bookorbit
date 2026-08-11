@@ -274,4 +274,26 @@ describe('useReaderProgress', () => {
 
     vi.useRealTimers()
   })
+
+  it('loads and saves through custom catalog progress adapters', async () => {
+    const loadProgress = vi.fn<() => Promise<{ percentage?: number | null; cfi?: string | null; pageNumber?: number | null }>>().mockResolvedValue({
+      percentage: 37,
+      cfi: null,
+      pageNumber: null,
+    })
+    const saveProgress = vi
+      .fn<(payload: { cfi: string | null; pageNumber: number | null; percentage: number }) => Promise<void>>()
+      .mockResolvedValue()
+    const progress = useReaderProgress(0, 0, elapsedMinutes, 0, { loadProgress, saveProgress })
+
+    await progress.load()
+    expect(progress.percentage.value).toBe(37)
+
+    progress.cfi.value = 'epubcfi(/6/8)'
+    progress.percentage.value = 42
+    await progress.save()
+
+    expect(apiMock).not.toHaveBeenCalled()
+    expect(saveProgress).toHaveBeenCalledWith({ cfi: 'epubcfi(/6/8)', pageNumber: null, percentage: 42 })
+  })
 })

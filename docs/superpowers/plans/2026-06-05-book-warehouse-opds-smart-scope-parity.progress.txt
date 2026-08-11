@@ -1,0 +1,16 @@
+Feature: OPDS source-backed Smart Scope parity
+Status: Complete
+Date: 2026-06-05
+
+Summary:
+- OPDS `/api/v1/opds/catalog?smartScopeId=...` now merges filesystem Smart Scope matches with current-user-owned Ebook Library rows using the existing source-backed Smart Scope query path.
+- Cloud-only OPDS users can receive Ebook Library Smart Scope matches even when they have no filesystem library access.
+- Non-empty content filters keep OPDS Smart Scope feeds local-only, matching the existing OPDS source-backed catalog guard.
+
+Verification:
+- `pnpm --filter server exec vitest run src/modules/opds/__tests__/opds-book.service.test.ts --testNamePattern "smartScope|Smart Scope|source-backed"`
+- `pnpm --filter server exec vitest run src/modules/opds/__tests__/opds-book.service.test.ts src/modules/opds/opds.controller.test.ts`
+- `pnpm run typecheck:server`
+- `pnpm --filter server lint:check`
+- `pnpm run test:server`
+- `git diff --check`

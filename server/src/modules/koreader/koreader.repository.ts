@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { WarehouseUserReadStatus } from '@bookorbit/types';
 import { and, desc, eq, inArray, notExists, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
@@ -561,6 +562,155 @@ export class KoreaderRepository {
       });
   }
 
+  async recordCatalogDocumentHash(userId: number, remoteId: string, documentHash: string): Promise<void> {
+    const normalizedHash = normalizeDocumentHash(documentHash);
+    if (!normalizedHash) return;
+
+    const [item] = await this.db
+      .select({ catalogItemId: schema.warehouseCatalogItems.id })
+      .from(schema.warehouseCatalogItems)
+      .where(and(eq(schema.warehouseCatalogItems.mediaType, 'ebook'), eq(schema.warehouseCatalogItems.remoteId, remoteId)))
+      .limit(1);
+
+    if (!item) return;
+
+    await this.db
+      .insert(schema.koreaderCatalogDocuments)
+      .values({ userId, catalogItemId: item.catalogItemId, documentHash: normalizedHash })
+      .onConflictDoUpdate({
+        target: [schema.koreaderCatalogDocuments.userId, schema.koreaderCatalogDocuments.documentHash],
+        set: { catalogItemId: item.catalogItemId, updatedAt: new Date() },
+      });
+  }
+
+  async resolveCatalogDocumentByHash(
+    userId: number,
+    documentHash: string,
+  ): Promise<{ catalogDocumentId: number; catalogItemId: number; remoteId: string } | null> {
+    const normalizedHash = normalizeDocumentHash(documentHash);
+    if (!normalizedHash) return null;
+
+    const [row] = await this.db
+      .select({
+        catalogDocumentId: schema.koreaderCatalogDocuments.id,
+        catalogItemId: schema.warehouseCatalogItems.id,
+        remoteId: schema.warehouseCatalogItems.remoteId,
+      })
+      .from(schema.koreaderCatalogDocuments)
+      .innerJoin(schema.warehouseCatalogItems, eq(schema.koreaderCatalogDocuments.catalogItemId, schema.warehouseCatalogItems.id))
+      .where(
+        and(
+          eq(schema.koreaderCatalogDocuments.userId, userId),
+          eq(schema.koreaderCatalogDocuments.documentHash, normalizedHash),
+          eq(schema.warehouseCatalogItems.mediaType, 'ebook'),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async upsertCatalogDeviceProgress(data: {
+    catalogDocumentId: number;
+    userId: number;
+    device: string;
+    deviceId: string;
+    percentage: number;
+    progress: string | null;
+    chapterIndex: number | null;
+    syncTimestamp: number | null;
+    updatedAt?: Date;
+  }): Promise<void> {
+    const updatedAt = data.updatedAt ?? new Date();
+    await this.db
+      .insert(schema.koreaderCatalogDeviceProgress)
+      .values({
+        catalogDocumentId: data.catalogDocumentId,
+        userId: data.userId,
+        device: data.device,
+        deviceId: data.deviceId,
+        percentage: data.percentage,
+        progress: data.progress,
+        chapterIndex: data.chapterIndex,
+        syncTimestamp: data.syncTimestamp,
+        updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.koreaderCatalogDeviceProgress.catalogDocumentId,
+          schema.koreaderCatalogDeviceProgress.userId,
+          schema.koreaderCatalogDeviceProgress.device,
+          schema.koreaderCatalogDeviceProgress.deviceId,
+        ],
+        set: {
+          percentage: data.percentage,
+          progress: data.progress,
+          chapterIndex: data.chapterIndex,
+          syncTimestamp: data.syncTimestamp,
+          updatedAt,
+        },
+      });
+  }
+
+  async upsertCatalogReadingProgress(userId: number, remoteId: string, percentage: number, syncedAt?: Date): Promise<void> {
+    const progressPercent = clampNumber(percentage, 0, 100);
+    const readStatus: WarehouseUserReadStatus = progressPercent >= 99 ? 'read' : progressPercent > 0 ? 'reading' : 'unread';
+    const finishedAt = readStatus === 'read' ? (syncedAt ?? new Date()) : null;
+    const values = syncedAt
+      ? { userId, mediaType: 'ebook' as const, remoteId, progressPercent, readStatus, finishedAt, updatedAt: syncedAt }
+      : { userId, mediaType: 'ebook' as const, remoteId, progressPercent, readStatus, finishedAt };
+    const set = syncedAt
+      ? {
+          progressPercent,
+          readStatus,
+          finishedAt: readStatus === 'read' ? sql`coalesce(${schema.warehouseUserState.finishedAt}, ${finishedAt})` : finishedAt,
+          updatedAt: syncedAt,
+        }
+      : {
+          progressPercent,
+          readStatus,
+          finishedAt: readStatus === 'read' ? sql`coalesce(${schema.warehouseUserState.finishedAt}, ${finishedAt})` : finishedAt,
+          updatedAt: new Date(),
+        };
+
+    await this.db
+      .insert(schema.warehouseUserState)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [schema.warehouseUserState.userId, schema.warehouseUserState.mediaType, schema.warehouseUserState.remoteId],
+        set,
+      });
+  }
+
+  async getLatestCatalogDeviceProgress(catalogDocumentId: number, userId: number) {
+    const [row] = await this.db
+      .select()
+      .from(schema.koreaderCatalogDeviceProgress)
+      .where(
+        and(eq(schema.koreaderCatalogDeviceProgress.catalogDocumentId, catalogDocumentId), eq(schema.koreaderCatalogDeviceProgress.userId, userId)),
+      )
+      .orderBy(desc(schema.koreaderCatalogDeviceProgress.updatedAt))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async getCatalogReadingProgress(userId: number, remoteId: string) {
+    const [row] = await this.db
+      .select({ progressPercent: schema.warehouseUserState.progressPercent, updatedAt: schema.warehouseUserState.updatedAt })
+      .from(schema.warehouseUserState)
+      .where(
+        and(
+          eq(schema.warehouseUserState.userId, userId),
+          eq(schema.warehouseUserState.mediaType, 'ebook'),
+          eq(schema.warehouseUserState.remoteId, remoteId),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
   async getAllDeviceProgress(bookFileId: number, userId: number) {
     return this.db
       .select()
@@ -825,4 +975,14 @@ export class KoreaderRepository {
       .limit(1);
     return row?.id ?? null;
   }
+}
+
+function normalizeDocumentHash(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9a-f]{32}$/.test(normalized) ? normalized : null;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
 }

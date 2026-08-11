@@ -1,0 +1,13 @@
+Feature: Native catalog audiobook resume position
+Status: Complete
+Date: 2026-06-03
+
+Summary:
+- Catalog audiobook detail playback now seeks to saved catalog `positionSeconds` when audio metadata loads.
+- Resume is read-only: it does not save user state, mutate read status, or emit integration wording.
+- Saved positions beyond the known duration clamp to the last playable second instead of seeking past the end.
+
+Verification:
+- `pnpm --filter client exec vitest run src/features/warehouse/views/__tests__/CatalogItemDetailView.spec.ts`
+- `pnpm run verify`
+- `pnpm run build:client`

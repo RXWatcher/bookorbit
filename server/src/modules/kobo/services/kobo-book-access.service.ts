@@ -58,4 +58,18 @@ export class KoboBookAccessService {
       }
     }
   }
+
+  async resolveCatalogEbookRemoteId(_userId: number, catalogItemId: number): Promise<string> {
+    const [row] = await this.db
+      .select({ remoteId: schema.warehouseCatalogItems.remoteId })
+      .from(schema.warehouseCatalogItems)
+      .where(and(eq(schema.warehouseCatalogItems.id, catalogItemId), eq(schema.warehouseCatalogItems.mediaType, 'ebook')))
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundException('Book not found');
+    }
+
+    return row.remoteId;
+  }
 }

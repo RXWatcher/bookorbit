@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref } from 'vue'
-import type { BookCard, BooksPage } from '@bookorbit/types'
+import type { AuthorBooksPage, AuthorLibraryItem, BookCard } from '@bookorbit/types'
 
 vi.mock('../api/author', () => ({
   fetchAuthorBooks: vi.fn<typeof import('../api/author').fetchAuthorBooks>(),
@@ -15,8 +15,12 @@ function makeBook(id: number): BookCard {
   return { id, title: `Book ${id}` } as BookCard
 }
 
-function makePage(items: BookCard[], total = items.length): BooksPage {
+function makePage(items: AuthorLibraryItem[], total = items.length): AuthorBooksPage {
   return { items, total, page: 0, size: 50 }
+}
+
+function localBookIds(items: AuthorLibraryItem[]): number[] {
+  return items.filter((item): item is BookCard => !('type' in item && item.type === 'catalog-item')).map((item) => item.id)
 }
 
 describe('useAuthorBooks', () => {
@@ -58,10 +62,10 @@ describe('useAuthorBooks', () => {
 
   it('skips fetch when already loading', async () => {
     const authorId = ref(1)
-    let resolveFirst!: (v: BooksPage) => void
+    let resolveFirst!: (v: AuthorBooksPage) => void
     mockFetchAuthorBooks.mockImplementation(
       () =>
-        new Promise<BooksPage>((resolve) => {
+        new Promise<AuthorBooksPage>((resolve) => {
           resolveFirst = resolve
         }),
     )
@@ -115,7 +119,7 @@ describe('useAuthorBooks', () => {
     await load(true)
 
     expect(items.value).toHaveLength(1)
-    expect(items.value[0]!.id).toBe(99)
+    expect(localBookIds(items.value)).toEqual([99])
     expect(total.value).toBe(1)
   })
 
@@ -130,8 +134,7 @@ describe('useAuthorBooks', () => {
     await load(false)
 
     expect(items.value).toHaveLength(2)
-    expect(items.value[0]!.id).toBe(1)
-    expect(items.value[1]!.id).toBe(2)
+    expect(localBookIds(items.value)).toEqual([1, 2])
   })
 
   it('increments page number after each load', async () => {
@@ -270,10 +273,10 @@ describe('useAuthorBooks', () => {
     await load(true)
     expect(items.value).toHaveLength(1)
 
-    let resolve!: (v: BooksPage) => void
+    let resolve!: (v: AuthorBooksPage) => void
     mockFetchAuthorBooks.mockImplementation(
       () =>
-        new Promise<BooksPage>((r) => {
+        new Promise<AuthorBooksPage>((r) => {
           resolve = r
         }),
     )
@@ -284,6 +287,6 @@ describe('useAuthorBooks', () => {
     resolve(makePage([makeBook(99)]))
     await pending
     expect(items.value).toHaveLength(1)
-    expect(items.value[0]!.id).toBe(99)
+    expect(localBookIds(items.value)).toEqual([99])
   })
 })

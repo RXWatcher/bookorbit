@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 
 import { OpdsService } from '../opds.service';
 import type { OpdsBookEntry } from '../opds-book.service';
+import { CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 
 function makeService() {
   return new OpdsService();
@@ -30,6 +31,35 @@ function sampleBook(overrides?: Partial<OpdsBookEntry>): OpdsBookEntry {
   };
 }
 
+function sampleCatalogEbook(overrides?: Partial<OpdsBookEntry>): OpdsBookEntry {
+  return {
+    id: 'book 1/with slash',
+    kind: 'catalog-ebook',
+    title: 'The Long Way Home',
+    folderPath: '',
+    addedAt: new Date('2026-06-01'),
+    updatedAt: new Date('2026-06-02'),
+    description: null,
+    seriesName: 'Wayfarers',
+    seriesIndex: null,
+    language: 'en',
+    publisher: 'Small Press',
+    isbn13: '9780000000001',
+    hasCover: true,
+    authors: ['Ada Writer'],
+    files: [
+      {
+        id: 'book 1/with slash',
+        format: 'epub',
+        href: `${BASE}/catalog-ebooks/book%201%2Fwith%20slash/download`,
+      },
+    ],
+    coverHref: `${BASE}/catalog-ebooks/book%201%2Fwith%20slash/cover`,
+    thumbnailHref: `${BASE}/catalog-ebooks/book%201%2Fwith%20slash/thumbnail`,
+    ...overrides,
+  };
+}
+
 describe('OpdsService', () => {
   describe('generateRootNavigation', () => {
     it('produces valid OPDS navigation XML', () => {
@@ -38,7 +68,10 @@ describe('OpdsService', () => {
 
       expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
       expect(xml).toContain('<feed xmlns="http://www.w3.org/2005/Atom"');
-      expect(xml).toContain('<title>bookorbit OPDS Catalog</title>');
+      expect(xml).toContain('<title>bookorbit OPDS Library</title>');
+      expect(xml).toContain('Browse the full library');
+      expect(xml).not.toContain('OPDS Catalog');
+      expect(xml).not.toContain('full catalog');
       expect(xml).toContain('<id>urn:bookorbit:root</id>');
     });
 
@@ -83,6 +116,14 @@ describe('OpdsService', () => {
       expect(xml).toContain('42 books');
       expect(xml).toContain(`${BASE}/catalog?libraryId=1`);
       expect(xml).toContain('<title>Non-Fiction</title>');
+    });
+
+    it('uses the friendly Ebook Library route query value for source-backed navigation', () => {
+      const service = makeService();
+      const xml = service.generateLibrariesNavigation([{ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', bookCount: 3 }]);
+
+      expect(xml).toContain(`${BASE}/catalog?libraryId=ebooks`);
+      expect(xml).not.toContain(`${BASE}/catalog?libraryId=${CLOUD_EBOOK_LIBRARY_ID}`);
     });
 
     it('handles empty libraries list', () => {
@@ -332,6 +373,29 @@ describe('OpdsService', () => {
       expect(xml).toContain('fileId=10');
       expect(xml).toContain('fileId=11');
     });
+
+    it('renders catalog ebook entries with OPDS-authenticated native media links', () => {
+      const service = makeService();
+      const book = sampleCatalogEbook();
+      const xml = service.generateAcquisitionFeed(
+        'Catalog Ebooks',
+        'urn:bookorbit:catalog-ebooks',
+        [book],
+        1,
+        1,
+        50,
+        `${BASE}/catalog-ebooks?page=1&size=50`,
+        'test-token',
+      );
+
+      expect(xml).toContain('<id>urn:bookorbit:catalog:ebook:book%201%2Fwith%20slash</id>');
+      expect(xml).toContain(`${BASE}/catalog-ebooks/book%201%2Fwith%20slash/download`);
+      expect(xml).toContain(`${BASE}/catalog-ebooks/book%201%2Fwith%20slash/cover`);
+      expect(xml).toContain(`${BASE}/catalog-ebooks/book%201%2Fwith%20slash/thumbnail`);
+      expect(xml).toContain('application/epub+zip');
+      expect(xml).not.toMatch(/book warehouse|warehouse|third-party|upstream|provider|source|vendor/i);
+      expect(xml).not.toContain('/api/v1/catalog/ebooks');
+    });
   });
 
   describe('generateOpenSearchDescription', () => {
@@ -341,8 +405,10 @@ describe('OpdsService', () => {
 
       expect(xml).toContain('<OpenSearchDescription');
       expect(xml).toContain('<ShortName>bookorbit OPDS</ShortName>');
+      expect(xml).toContain('<Description>Search your bookorbit library</Description>');
       expect(xml).toContain('{searchTerms}');
       expect(xml).toContain(`${BASE}/catalog?q={searchTerms}`);
+      expect(xml).not.toContain('book catalog');
     });
   });
 

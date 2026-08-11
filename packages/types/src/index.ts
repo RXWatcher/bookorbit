@@ -15,6 +15,7 @@ export * from "./book";
 export * from "./book-duplicates";
 export * from "./book-move";
 export * from "./book-selection";
+export * from "./warehouse";
 export * from "./audiobook";
 export * from "./upload";
 export * from "./collection";

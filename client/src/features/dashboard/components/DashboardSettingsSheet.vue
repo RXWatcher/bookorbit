@@ -60,6 +60,8 @@ const ALL_TYPES: ScrollerType[] = [
   'up-next-in-series',
   'recently-added',
   'random',
+  'catalog-additions',
+  'catalog-discovery',
   'smart-scope',
 ]
 

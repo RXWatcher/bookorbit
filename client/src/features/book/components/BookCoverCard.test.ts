@@ -134,7 +134,7 @@ function makeFile(overrides: Partial<{ id: number; format: string; role: string;
 }
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -164,8 +164,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     narrators: [],
     customMetadata: [],
     tags: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function mountCard(

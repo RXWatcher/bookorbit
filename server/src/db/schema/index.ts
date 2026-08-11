@@ -35,3 +35,6 @@ export * from './readwise';
 export * from './storygraph';
 export * from './shared-reading-insights';
 export * from './user-preferences';
+export * from './warehouse';
+export * from './local-scan';
+export * from './search-index';

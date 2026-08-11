@@ -26,23 +26,43 @@ import {
   VolumeX,
   X,
 } from '@lucide/vue'
-import type { AudiobookChapter, BookDetail, BookDetailFile } from '@bookorbit/types'
+import type { AudiobookChapter, BookDetail, BookDetailFile, WarehouseAudiobookDetail } from '@bookorbit/types'
 import { api } from '@/lib/api'
 import BookCoverPlaceholder from '@/features/book/components/BookCoverPlaceholder.vue'
 import { bookCoverPalette } from '@/features/book/lib/book-cover'
 import { useAudioProgress } from './composables/useAudioProgress'
-import { useAudioQueue } from './composables/useAudioQueue'
+import { useAudioQueue, type AudioFile } from './composables/useAudioQueue'
 import { useAudioSettings } from './composables/useAudioSettings'
 import { useAudioBookmarks, type AudioBookmark } from './composables/useAudioBookmarks'
 import { useReadingSession } from '../shared/composables/useReadingSession'
 import { useFullscreen } from '../shared/composables/useFullscreen'
+import {
+  catalogSourceAudiobookCoverUrl,
+  catalogSourceAudiobookStreamUrl,
+  fetchCatalogSourceAudiobook,
+  fetchCatalogSourceUserState,
+  patchCatalogSourceUserState,
+  saveCatalogSourceReadingSession,
+} from '@/features/warehouse/api/catalog-source.api'
 
 const { t } = useI18n()
 
-const props = defineProps<{ bookId: number; fileId: number; peekMode?: boolean }>()
+const props = defineProps<{
+  bookId: number
+  fileId: number
+  peekMode?: boolean
+  catalogMediaType?: 'audiobook'
+  catalogRemoteId?: string
+  catalogFormat?: string
+}>()
+type AudioFileId = number | string
+type AudioReaderFile = AudioFile & Omit<Partial<BookDetailFile>, 'id' | 'format' | 'durationSeconds'>
 const route = useRoute()
 const router = useRouter()
 const trackingEnabled = computed(() => !props.peekMode)
+const isCatalogAudiobook = computed(
+  () => props.catalogMediaType === 'audiobook' && typeof props.catalogRemoteId === 'string' && props.catalogRemoteId.length > 0,
+)
 
 const detail = ref<BookDetail | null>(null)
 const loading = ref(true)
@@ -67,15 +87,128 @@ watch(showChapters, (val) => {
 
 // ── Audio files ───────────────────────────────────────────────────────────────
 
-const audioFiles = computed<BookDetailFile[]>(() => {
+function requireCatalogRemoteId(): string {
+  if (!props.catalogRemoteId) throw new Error('Missing catalog audiobook id')
+  return props.catalogRemoteId
+}
+
+function clampCatalogPosition(seconds: number, durationSeconds: number | null | undefined): number {
+  if (!durationSeconds || durationSeconds <= 0) return Math.max(0, seconds)
+  return Math.max(0, Math.min(seconds, Math.max(0, durationSeconds - 1)))
+}
+
+function mapCatalogAudiobookDetail(item: WarehouseAudiobookDetail): BookDetail {
+  return {
+    id: 0,
+    libraryId: 0,
+    libraryName: 'Audiobooks',
+    status: 'catalog',
+    folderPath: item.remoteId,
+    addedAt: item.syncedAt,
+    updatedAt: item.syncedAt,
+    title: item.title,
+    subtitle: item.subtitle,
+    description: null,
+    isbn10: null,
+    isbn13: null,
+    publisher: item.publisher,
+    publishedDate: null,
+    publishedYear: null,
+    language: item.language,
+    pageCount: null,
+    seriesName: item.series,
+    seriesIndex: null,
+    rating: null,
+    communityRatings: [],
+    coverSource: item.hasCover ? 'custom' : null,
+    hardcoverEditionId: null,
+    providerIds: {},
+    authors: item.authors.map((name, index) => ({ id: -(index + 1), name, sortName: null })),
+    genres: [],
+    tags: [],
+    files: [],
+    lastWrittenAt: null,
+    metadataScore: null,
+    personalNote: null,
+    personalNoteUpdatedAt: null,
+    readStatus: null,
+    audioMetadata: {
+      narrators: item.narrators.map((name, index) => ({ id: -(index + 1), name, sortName: null, displayOrder: index })),
+      durationSeconds: item.durationSeconds,
+      abridged: false,
+      chapters: item.chapters.map((chapter) => ({
+        title: chapter.title,
+        startMs: Math.max(0, chapter.startSeconds * 1000),
+      })),
+    },
+    formatPriority: [],
+    comicMetadata: null,
+    customMetadata: [],
+    lockedFields: [],
+    collections: [],
+  }
+}
+
+async function loadCatalogAudioProgress() {
+  const remoteId = requireCatalogRemoteId()
+  const state = await fetchCatalogSourceUserState('audiobook', remoteId)
+  const durationSeconds = detail.value?.audioMetadata?.durationSeconds ?? null
+  const positionSeconds =
+    typeof state.positionSeconds === 'number'
+      ? state.positionSeconds
+      : durationSeconds && typeof state.progressPercent === 'number'
+        ? (durationSeconds * state.progressPercent) / 100
+        : 0
+  return {
+    currentFileId: remoteId,
+    positionSeconds: clampCatalogPosition(positionSeconds, durationSeconds),
+  }
+}
+
+async function saveCatalogAudioProgress(payload: { percentage: number; currentFileId: number | string; positionSeconds: number }) {
+  await patchCatalogSourceUserState('audiobook', requireCatalogRemoteId(), {
+    progressPercent: payload.percentage,
+    positionSeconds: payload.positionSeconds,
+  })
+}
+
+async function saveCatalogAudioSession(payload: Parameters<typeof saveCatalogSourceReadingSession>[2], options: { useBeacon: boolean }) {
+  const remoteId = requireCatalogRemoteId()
+  await saveCatalogSourceReadingSession('audiobook', remoteId, payload, options)
+  await patchCatalogSourceUserState('audiobook', remoteId, {
+    progressPercent: payload.endProgress,
+  })
+}
+
+const audioFiles = computed<AudioReaderFile[]>(() => {
   if (!detail.value) return []
+  if (isCatalogAudiobook.value) {
+    const remoteId = requireCatalogRemoteId()
+    const durationSeconds = detail.value.audioMetadata?.durationSeconds ?? null
+    return [
+      {
+        id: remoteId,
+        format: props.catalogFormat ?? detail.value.files[0]?.format ?? 'mp3',
+        durationSeconds,
+        src: catalogSourceAudiobookStreamUrl(remoteId),
+      },
+    ]
+  }
   const AUDIO_EXTS = new Set(['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac'])
   return detail.value.files.filter((f) => f.format && AUDIO_EXTS.has(f.format.toLowerCase()))
 })
 
 // ── Progress ──────────────────────────────────────────────────────────────────
 
-const progress = useAudioProgress(props.bookId, { trackingEnabled })
+const progress = useAudioProgress(props.bookId, {
+  trackingEnabled,
+  ...(isCatalogAudiobook.value
+    ? {
+        loadProgress: loadCatalogAudioProgress,
+        saveProgress: saveCatalogAudioProgress,
+      }
+    : {}),
+})
 
 // ── Queue (created lazily after files load) ───────────────────────────────────
 
@@ -85,7 +218,7 @@ const isPlaying = ref(false)
 const currentPosition = ref(0)
 const currentFileIndex = ref(0)
 
-function onFileEnd(fileId: number) {
+function onFileEnd(fileId: AudioFileId) {
   if (!queue) return
   const endedIdx = audioFiles.value.findIndex((f) => f.id === fileId)
   const nextIdx = (endedIdx >= 0 ? endedIdx : queue.currentIndex.value) + 1
@@ -99,12 +232,13 @@ function onFileEnd(fileId: number) {
   }
 }
 
-function initQueue(startFileId: number, startPosition: number) {
+function initQueue(startFileId: AudioFileId, startPosition: number) {
   queue = useAudioQueue(
     audioFiles.value.map((f) => ({
       id: f.id,
       format: f.format,
       durationSeconds: f.durationSeconds,
+      ...(f.src ? { src: f.src } : {}),
     })),
     onFileEnd,
   )
@@ -149,7 +283,10 @@ const audioBookmarks = useAudioBookmarks(props.bookId)
 
 // ── Reading session ───────────────────────────────────────────────────────────
 
-const session = useReadingSession(props.fileId, () => ({ percentage: progressPct.value }), { trackingEnabled })
+const session = useReadingSession(props.fileId, () => ({ percentage: progressPct.value }), {
+  trackingEnabled,
+  ...(isCatalogAudiobook.value ? { saveSession: saveCatalogAudioSession } : {}),
+})
 
 // ── Ticker (updates position every 500ms while playing) ──────────────────────
 
@@ -243,6 +380,11 @@ const displayTitle = computed(() => {
 
 const coverSeed = computed(() => detail.value?.title ?? detail.value?.folderPath.split('/').pop() ?? String(props.bookId))
 const coverPalette = computed(() => bookCoverPalette(coverSeed.value))
+const coverImageUrl = computed(() => {
+  if (!detail.value?.coverSource) return null
+  if (isCatalogAudiobook.value) return catalogSourceAudiobookCoverUrl(requireCatalogRemoteId())
+  return `/api/v1/books/${props.bookId}/cover`
+})
 
 // ── Media Session ─────────────────────────────────────────────────────────────
 
@@ -709,22 +851,30 @@ onMounted(async () => {
   document.addEventListener('keydown', handleKey)
 
   try {
-    const [detailRes] = await Promise.all([
-      api(`/api/v1/books/${props.bookId}`).then((r) => r.json() as Promise<BookDetail>),
-      progress.load(),
-      settings.init(),
-    ])
-    if (!mounted) return
-    detail.value = detailRes
-    if (detailRes.audioMetadata?.chapters) {
-      detailRes.audioMetadata.chapters.sort((a, b) => a.startMs - b.startMs)
+    if (isCatalogAudiobook.value) {
+      const [catalogDetail] = await Promise.all([fetchCatalogSourceAudiobook(requireCatalogRemoteId()), settings.init()])
+      if (!catalogDetail) throw new Error('Audiobook not found')
+      if (!mounted) return
+      detail.value = mapCatalogAudiobookDetail(catalogDetail)
+      await progress.load()
+    } else {
+      const [detailRes] = await Promise.all([
+        api(`/api/v1/books/${props.bookId}`).then((r) => r.json() as Promise<BookDetail>),
+        progress.load(),
+        settings.init(),
+      ])
+      if (!mounted) return
+      detail.value = detailRes
+    }
+    if (detail.value.audioMetadata?.chapters) {
+      detail.value.audioMetadata.chapters.sort((a, b) => a.startMs - b.startMs)
     }
 
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: displayTitle.value,
-        artist: detailRes.authors.map((a: { name: string }) => a.name).join(', '),
-        artwork: detailRes.coverSource ? [{ src: `/api/v1/books/${props.bookId}/cover`, sizes: '512x512', type: 'image/jpeg' }] : [],
+        artist: detail.value.authors.map((a: { name: string }) => a.name).join(', '),
+        artwork: coverImageUrl.value ? [{ src: coverImageUrl.value, sizes: '512x512', type: 'image/jpeg' }] : [],
       })
       navigator.mediaSession.setActionHandler('play', togglePlay)
       navigator.mediaSession.setActionHandler('pause', togglePlay)
@@ -748,7 +898,7 @@ onMounted(async () => {
     return
   }
 
-  let startFileId = props.fileId
+  let startFileId: AudioFileId = props.fileId
   let startPosition = 0
 
   if (progress.loaded.value && progress.resumeFileId.value !== null) {
@@ -769,9 +919,9 @@ onMounted(async () => {
     <!-- Blurred cover backdrop -->
     <div class="absolute inset-0">
       <div
-        v-if="detail?.coverSource"
+        v-if="coverImageUrl"
         class="absolute inset-0 scale-110"
-        :style="{ backgroundImage: `url(/api/v1/books/${props.bookId}/cover)`, backgroundSize: 'cover', backgroundPosition: 'center' }"
+        :style="{ backgroundImage: `url(${coverImageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }"
       />
       <div v-else class="absolute inset-0" :style="{ background: coverPalette.gradient }" />
       <div class="absolute inset-0 backdrop-blur-3xl bg-black/60" />
@@ -846,14 +996,14 @@ onMounted(async () => {
               class="absolute -inset-4 rounded-2xl blur-3xl pointer-events-none transition-opacity duration-700"
               :class="isPlaying ? 'opacity-50' : 'opacity-15'"
               :style="
-                detail.coverSource
-                  ? { backgroundImage: `url(/api/v1/books/${props.bookId}/cover)`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                coverImageUrl
+                  ? { backgroundImage: `url(${coverImageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
                   : { background: coverPalette.gradient }
               "
             />
             <!-- Cover -->
             <div class="absolute inset-0 rounded-2xl overflow-hidden ring-1 ring-white/10 shadow-2xl">
-              <img v-if="detail.coverSource" :src="`/api/v1/books/${props.bookId}/cover`" class="w-full h-full object-cover" :alt="displayTitle" />
+              <img v-if="coverImageUrl" :src="coverImageUrl" class="w-full h-full object-cover" :alt="displayTitle" />
               <BookCoverPlaceholder
                 v-else
                 :title="detail.title"

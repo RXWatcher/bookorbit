@@ -1,0 +1,167 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1780441770800,
+      "tag": "0032_add_warehouse_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780457629340,
+      "tag": "0033_add_warehouse_catalog_duration",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1780488876663,
+      "tag": "0034_add_warehouse_user_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1780521343986,
+      "tag": "0035_kobo_catalog_snapshot_books",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1780523156824,
+      "tag": "0036_koreader_catalog_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1780545302466,
+      "tag": "0037_collection_catalog_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780550837989,
+      "tag": "0038_add_warehouse_bookmarks",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1780561802783,
+      "tag": "0039_add_warehouse_annotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780572934252,
+      "tag": "0040_add_warehouse_user_state_finished_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1780575600000,
+      "tag": "0041_add_warehouse_catalog_series_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1780667172156,
+      "tag": "0042_add_email_send_log_catalog_ref",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1780700100000,
+      "tag": "0043_add_warehouse_comic_media_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1780700200000,
+      "tag": "0044_add_warehouse_reading_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1782421105748,
+      "tag": "0045_index_warehouse_catalog_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1782421105749,
+      "tag": "0046_backfill_warehouse_catalog_series",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1783180800000,
+      "tag": "0047_add_warehouse_library_icons",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786100000000,
+      "tag": "0048_add_catalog_item_file_size",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786101000000,
+      "tag": "0049_add_catalog_metadata_score",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786102000000,
+      "tag": "0050_add_catalog_published_year",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786103000000,
+      "tag": "0051_add_catalog_item_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786104000000,
+      "tag": "0052_add_local_scan_roots",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786105000000,
+      "tag": "0053_add_local_scan_run_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1786106000000,
+      "tag": "0054_add_search_index_events",
+      "breakpoints": true
+    }
+  ]
+}

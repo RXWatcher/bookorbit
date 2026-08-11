@@ -31,6 +31,7 @@ import { KoboReadingStateService } from './services/kobo-reading-state.service';
 import { KoboProxyService } from './services/kobo-proxy.service';
 import { KOBO_STORE_RESOURCES } from './kobo-store-resources';
 import { KoboBookIdentityService } from './services/kobo-book-identity.service';
+import { decodeKoboCatalogEbookId } from './kobo-catalog-id';
 import { KoboSyncHistoryService } from './services/kobo-sync-history.service';
 
 function readHeaderValue(value: string | string[] | undefined): string | undefined {
@@ -194,6 +195,14 @@ export class KoboSyncController {
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
+    const catalogItemId = decodeKoboCatalogEbookId(bookId);
+    if (catalogItemId !== null) {
+      const baseUrl = buildBaseUrl(req);
+      const metadata = await this.syncService.getBookMetadata(user.id, bookId as never, device.deviceToken, baseUrl);
+      reply.send(metadata);
+      return;
+    }
+
     const id = await this.bookIdentityService.resolveBookIdByEntitlementId(user.id, bookId);
     if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
     const baseUrl = buildBaseUrl(req);
@@ -210,6 +219,13 @@ export class KoboSyncController {
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
+    const catalogItemId = decodeKoboCatalogEbookId(bookId);
+    if (catalogItemId !== null) {
+      await this.syncService.removeBookFromSync(user.id, device.deviceId, bookId as never);
+      reply.status(HttpStatus.OK).send();
+      return;
+    }
+
     const id = await this.bookIdentityService.resolveBookIdByEntitlementId(user.id, bookId);
     if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
     await this.syncService.removeBookFromSync(user.id, device.deviceId, id);
@@ -224,6 +240,13 @@ export class KoboSyncController {
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
+    const catalogItemId = decodeKoboCatalogEbookId(bookId);
+    if (catalogItemId !== null) {
+      const state = await this.readingStateService.getCatalogRawState(user.id, catalogItemId, bookId);
+      reply.send(state ? [state] : []);
+      return;
+    }
+
     const id = await this.bookIdentityService.resolveBookIdByEntitlementId(user.id, bookId);
     if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
     const state = await this.readingStateService.getRawState(user.id, id);
@@ -240,6 +263,23 @@ export class KoboSyncController {
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
+    const catalogItemId = decodeKoboCatalogEbookId(bookId);
+    if (catalogItemId !== null) {
+      const settings = await this.settingsService.getSettings(user.id);
+      const states = body.ReadingStates as Record<string, unknown>[] | undefined;
+      const statePayload = states?.[0] ?? body;
+      const result = await this.readingStateService.upsertCatalogState(
+        user.id,
+        catalogItemId,
+        statePayload,
+        settings.readingThreshold,
+        settings.finishedThreshold,
+        bookId,
+      );
+      reply.send(result);
+      return;
+    }
+
     const id = await this.bookIdentityService.resolveBookIdByEntitlementId(user.id, bookId);
     if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
     const startedAt = Date.now();

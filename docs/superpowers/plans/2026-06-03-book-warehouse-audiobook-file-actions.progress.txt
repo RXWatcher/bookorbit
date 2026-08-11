@@ -1,0 +1,14 @@
+Feature: Native catalog audiobook file actions
+Status: Complete
+Date: 2026-06-03
+
+Completed:
+- Added component coverage for audiobook detail pages with cached file metadata and native per-file download links.
+- Updated catalog item detail pages to render audiobook files with filename, format, duration, and Download actions.
+- Reused the existing encoded catalog audiobook file download helper so the UI stays on native BookOrbit routes.
+
+Verification:
+- pnpm --filter client exec vitest run src/features/warehouse/views/__tests__/CatalogItemDetailView.spec.ts
+
+Notes:
+- This exposes already user-scoped audiobook file download routes in the native detail UI; persistent listening progress remains a separate feature.

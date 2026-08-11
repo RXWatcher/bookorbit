@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useDisplaySettings } from '@/composables/useDisplaySettings'
 import { useScrollRestoreOnActivate } from '@/features/book/composables/useScrollRestoreOnActivate'
 import { useLibraries } from '@/features/library/composables/useLibraries'
+import { libraryRouteQueryValueForId, parseLibraryFilterRouteId } from '@/features/library/lib/library-route'
 import { storage } from '@/services/storage'
 import SeriesCard from '../components/SeriesCard.vue'
 import SeriesFilters from '../components/SeriesFilters.vue'
@@ -21,7 +22,7 @@ const route = useRoute()
 const mainRef = ref<HTMLElement | null>(null)
 useScrollRestoreOnActivate(mainRef)
 const { viewMode } = useDisplaySettings()
-const { libraries, fetchLibraries } = useLibraries()
+const { libraries, fetchLibraries } = useLibraries({ includeSourceBacked: true })
 const { items, total, loading, error, hasMore, q, sort, order, libraryId, completionStatus, load } = useSeriesList()
 
 const SERIES_CARD_WIDTH_STORAGE_KEY = 'bookorbit:seriesCardWidth'
@@ -76,8 +77,8 @@ function parseOrder(value: unknown): SortDirection {
 }
 
 function parseLibraryId(value: unknown): number | null {
-  const raw = typeof value === 'string' ? Number(value) : NaN
-  return Number.isInteger(raw) && raw > 0 ? raw : null
+  if (Array.isArray(value)) return null
+  return parseLibraryFilterRouteId(value)
 }
 
 function parseCompletionStatus(value: unknown): CompletionStatus | null {
@@ -96,7 +97,7 @@ function syncRouteQuery() {
       q: q.value.trim() || undefined,
       sort: sort.value !== 'name' ? sort.value : undefined,
       order: order.value !== 'asc' ? order.value : undefined,
-      libraryId: libraryId.value ? String(libraryId.value) : undefined,
+      libraryId: libraryRouteQueryValueForId(libraryId.value),
       completionStatus: completionStatus.value ?? undefined,
     },
   })

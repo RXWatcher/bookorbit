@@ -1,3 +1,4 @@
+import type { WarehouseCatalogAuthorRef, WarehouseCatalogSeriesRef, WarehouseMediaType, WarehouseUserReadStatus } from "./warehouse";
 import type { BookCard } from "./book";
 
 export const SCROLLER_TYPE = {
@@ -8,6 +9,8 @@ export const SCROLLER_TYPE = {
   UP_NEXT_IN_SERIES: "up-next-in-series",
   RANDOM: "random",
   SMART_SCOPE: "smart-scope",
+  CATALOG_ADDITIONS: "catalog-additions",
+  CATALOG_DISCOVERY: "catalog-discovery",
 } as const;
 
 export type ScrollerType = (typeof SCROLLER_TYPE)[keyof typeof SCROLLER_TYPE];
@@ -44,6 +47,43 @@ export interface ScrollerConfig {
   limit: number;
   smartScopeId?: number;
 }
+
+export interface DashboardCatalogItem {
+  type: "catalog-item";
+  mediaType: WarehouseMediaType;
+  remoteId: string;
+  title: string;
+  subtitle: string | null;
+  seriesName: string | null;
+  seriesRef?: WarehouseCatalogSeriesRef | null;
+  seriesIndex?: number | null;
+  authors: string[];
+  authorRefs?: WarehouseCatalogAuthorRef[];
+  narrators: string[];
+  libraryName: string;
+  formats: string[];
+  language?: string | null;
+  publisher?: string | null;
+  publishedYear?: number | null;
+  pageCount?: number | null;
+  fileSizeBytes?: number | null;
+  metadataScore?: number | null;
+  rating?: number | null;
+  readingProgress?: number | null;
+  readStatus?: WarehouseUserReadStatus | null;
+  lastReadAt?: string | null;
+  finishedAt?: string | null;
+  durationSeconds?: number | null;
+  hasCover: boolean;
+  addedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface DashboardCatalogAdditionsData {
+  items: DashboardCatalogItem[];
+}
+
+export type DashboardScrollerItem = BookCard;
 
 export const WIDGET_TYPE = {
   READING_STREAK: "reading-streak",
@@ -82,6 +122,7 @@ export interface ReadingGoalWidgetData {
 }
 
 export interface CurrentlyReadingBook {
+  type?: "local-book";
   bookId: number;
   title: string | null;
   authors: string[];
@@ -89,10 +130,32 @@ export interface CurrentlyReadingBook {
   hasCover: boolean;
   fileId: number | null;
   fileFormat: string | null;
+  lastActivityAt?: string | null;
 }
 
+export interface CurrentlyReadingCatalogItem {
+  type: "catalog-item";
+  mediaType: WarehouseMediaType;
+  remoteId: string;
+  title: string;
+  subtitle: string | null;
+  authors: string[];
+  authorRefs?: WarehouseCatalogAuthorRef[];
+  narrators: string[];
+  seriesName: string | null;
+  seriesRef?: WarehouseCatalogSeriesRef | null;
+  libraryName: string;
+  fileFormat: string | null;
+  progress: number;
+  positionSeconds: number | null;
+  hasCover: boolean;
+  lastActivityAt?: string | null;
+}
+
+export type CurrentlyReadingItem = CurrentlyReadingBook | CurrentlyReadingCatalogItem;
+
 export interface CurrentlyReadingWidgetData {
-  books: CurrentlyReadingBook[];
+  books: CurrentlyReadingItem[];
 }
 
 export interface ReadingStreakWidgetData {
@@ -109,7 +172,8 @@ export interface LibraryOverviewWidgetData {
   booksAddedThisYear: number;
 }
 
-export interface HighlightOfTheDayWidgetData {
+export interface LocalHighlightOfTheDayWidgetData {
+  type?: "local-book";
   text: string;
   note: string | null;
   bookTitle: string | null;
@@ -118,6 +182,22 @@ export interface HighlightOfTheDayWidgetData {
   chapterTitle: string | null;
   createdAt: string;
 }
+
+export interface CatalogHighlightOfTheDayWidgetData {
+  type: "catalog-item";
+  text: string;
+  note: string | null;
+  bookTitle: string | null;
+  bookId: null;
+  mediaType: WarehouseMediaType;
+  remoteId: string;
+  libraryName: string;
+  hasCover: boolean;
+  chapterTitle: string | null;
+  createdAt: string;
+}
+
+export type HighlightOfTheDayWidgetData = LocalHighlightOfTheDayWidgetData | CatalogHighlightOfTheDayWidgetData;
 
 export type ChallengeType = "short-read" | "genre-explorer" | "finish-oldest" | "streak-builder" | "new-author" | "page-milestone";
 
@@ -142,7 +222,11 @@ export interface YearProjectionWidgetData {
 }
 
 export interface NeglectedGem {
+  type?: "book" | "catalog-item";
   bookId: number;
+  mediaType?: WarehouseMediaType;
+  remoteId?: string;
+  libraryName?: string;
   title: string | null;
   hasCover: boolean;
   rating: number;
@@ -170,7 +254,10 @@ export interface ReadingDnaWidgetData {
 }
 
 export interface LongWaitWidgetData {
+  type?: "book" | "catalog-item";
   bookId: number;
+  mediaType?: WarehouseMediaType;
+  remoteId?: string;
   title: string | null;
   hasCover: boolean;
   addedAt: string;

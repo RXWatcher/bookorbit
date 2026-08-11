@@ -16,8 +16,8 @@ import BookTableActionsCell from './BookTableActionsCell.vue'
 import BookTableProgressCell from './BookTableProgressCell.vue'
 import BookTableMetadataScoreCell from './BookTableMetadataScoreCell.vue'
 import BookTableLockableCell from './BookTableLockableCell.vue'
-import BookTableBooleanCell from './BookTableBooleanCell.vue'
 import type { CellType } from '@/features/book/composables/tableColumnSchema'
+import { sourceBackedBookCoverUrl } from '@/features/book/lib/source-backed-book'
 
 type NavigationDirection = 'next' | 'prev' | 'rowUp' | 'rowDown'
 type BookActionType = 'quick-view' | 'add-to-collection' | 'delete'
@@ -83,6 +83,7 @@ const lockStateClass = computed(() => {
 const primaryFile = computed(() => props.book.files.find((file) => file.role === 'primary') ?? props.book.files[0] ?? null)
 const isAudiobook = computed(() => primaryFile.value?.format != null && FORMAT_TO_GROUP[primaryFile.value.format] === 'audio')
 const isComic = computed(() => primaryFile.value?.format != null && FORMAT_TO_GROUP[primaryFile.value.format] === 'cbx')
+const sourceCoverSrc = computed(() => sourceBackedBookCoverUrl(props.book, 'thumbnail'))
 </script>
 
 <template>
@@ -106,6 +107,7 @@ const isComic = computed(() => primaryFile.value?.format != null && FORMAT_TO_GR
     :has-cover="book.hasCover"
     :is-audio="isAudiobook"
     :is-comic="isComic"
+    :source-src="sourceCoverSrc"
     @cover-click="emit('coverClick')"
   />
 

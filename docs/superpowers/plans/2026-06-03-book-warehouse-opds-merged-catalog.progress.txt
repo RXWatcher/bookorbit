@@ -1,0 +1,3 @@
+[2026-06-03 16:52] Feature: OPDS merged catalog ebook feeds
+Status: Complete
+Notes: OPDS All Books/search and Recent now merge current-user-owned synced catalog ebooks into native acquisition feeds when catalog access is enabled and filters are not local-only, while library/collection/smart-scope feeds keep the local book query path.

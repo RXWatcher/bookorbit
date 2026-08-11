@@ -46,8 +46,31 @@ export const FORMAT_TO_GROUP: Record<string, ReaderFormatGroup> = {
   flac: "audio",
 };
 
+export const READER_FORMAT_ALIASES: Record<string, string> = {
+  "audio/aac": "m4a",
+  "audio/flac": "flac",
+  "audio/m4a": "m4a",
+  "audio/m4b": "m4b",
+  "audio/mp3": "mp3",
+  "audio/mp4": "m4a",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "audio/opus": "opus",
+  "audio/x-flac": "flac",
+  "audio/x-m4a": "m4a",
+  "audio/x-m4b": "m4b",
+  "application/ogg": "ogg",
+};
+
+export function normalizeReaderFormat(format: string | null | undefined): string | null {
+  const normalized = format?.trim().toLowerCase();
+  if (!normalized) return null;
+  const aliased = READER_FORMAT_ALIASES[normalized] ?? normalized;
+  return READER_OPENABLE_FORMATS.has(aliased) ? aliased : null;
+}
+
 export function getFormatGroup(format: string): ReaderFormatGroup {
-  return FORMAT_TO_GROUP[format.toLowerCase()] ?? "epub";
+  return FORMAT_TO_GROUP[normalizeReaderFormat(format) ?? format.toLowerCase()] ?? "epub";
 }
 
 export interface EpubReaderSettings {

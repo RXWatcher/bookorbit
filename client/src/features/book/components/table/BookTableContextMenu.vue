@@ -10,6 +10,7 @@ import { useRefreshingBooks } from '@/features/book/composables/useRefreshingBoo
 import { detectChangedColumns, mergeBookCardWithDetail } from '@/features/book/lib/book-card-mapper'
 import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import type { BookCard } from '@bookorbit/types'
+import { bookDetailRoute, isSourceBackedBook } from '@/features/book/lib/source-backed-book'
 
 type BookActionType = 'quick-view' | 'add-to-collection' | 'move-to-library' | 'delete'
 
@@ -38,6 +39,7 @@ const anyRefreshing = computed(() => {
   if (!props.book) return refreshing.value
   return refreshing.value || isRefreshing(props.book.id)
 })
+const canUseLocalBookActions = computed(() => (props.book ? !isSourceBackedBook(props.book) : false))
 
 const adjustedX = computed(() => {
   if (!props.position) return 0
@@ -82,13 +84,18 @@ function handleScroll(): void {
 
 function emitAction(type: BookActionType): void {
   if (!props.book) return
+  if (type === 'quick-view' && !canUseLocalBookActions.value) {
+    router.push(bookDetailRoute(props.book))
+    closeMenu()
+    return
+  }
   emit('action', props.book, type)
   closeMenu()
 }
 
 function openBookDetails(): void {
   if (!props.book) return
-  router.push({ name: 'book-detail', params: { bookId: props.book.id } })
+  router.push(bookDetailRoute(props.book))
   closeMenu()
 }
 
@@ -159,7 +166,7 @@ onBeforeUnmount(() => {
         {{ t('book.table.actions.bookDetails') }}
       </button>
       <button
-        v-if="hasPermission('library_edit_metadata')"
+        v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
         @click="openEditMetadata"
       >
@@ -167,7 +174,7 @@ onBeforeUnmount(() => {
         {{ t('book.table.actions.editMetadata') }}
       </button>
       <button
-        v-if="hasPermission('library_edit_metadata')"
+        v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
         :disabled="anyRefreshing"
         @click="refreshMetadata"
@@ -175,12 +182,16 @@ onBeforeUnmount(() => {
         <RefreshCw :size="14" :class="{ 'animate-spin': anyRefreshing }" />
         {{ t('book.table.actions.refreshMetadata') }}
       </button>
-      <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent" @click="emitAction('add-to-collection')">
+      <button
+        v-if="canUseLocalBookActions"
+        class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+        @click="emitAction('add-to-collection')"
+      >
         <FolderPlus :size="14" />
         {{ t('book.table.actions.addToCollection') }}
       </button>
       <button
-        v-if="hasPermission('library_edit_metadata')"
+        v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
         @click="emitAction('move-to-library')"
       >
@@ -188,7 +199,7 @@ onBeforeUnmount(() => {
         {{ t('book.move.action') }}
       </button>
       <button
-        v-if="hasPermission('email_send')"
+        v-if="canUseLocalBookActions && hasPermission('email_send')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
         @click="openSendDialog"
       >
@@ -196,7 +207,7 @@ onBeforeUnmount(() => {
         {{ t('book.table.actions.sendToDevice') }}
       </button>
       <button
-        v-if="hasPermission('library_delete_books')"
+        v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-accent"
         @click="emitAction('delete')"
       >
@@ -207,7 +218,7 @@ onBeforeUnmount(() => {
   </Teleport>
 
   <SendBookDialog
-    v-if="book && showSendDialog"
+    v-if="book && showSendDialog && canUseLocalBookActions"
     :selection-payload="{ bookIds: [book.id] }"
     :selected-count="1"
     :open="showSendDialog"

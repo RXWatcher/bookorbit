@@ -441,6 +441,8 @@ describe('Bulk file rename (e2e)', { timeout: SUITE_TIMEOUT_MS }, () => {
       const result = await executeBulkRename(ctx, lib.libraryId);
       const done = getDoneEvent(result.events);
       expect(done!.processed).toBe(0);
+      expect(done!.succeeded).toBe(0);
+      expect(done!.skipped).toBe(2);
       expect(done!.failed).toBe(0);
       const finalBooks = await findAllBooksInLibrary(ctx, lib.libraryId);
       const atNewPath = finalBooks.filter((b) => b.relPath === 'Duplicate Title.epub');

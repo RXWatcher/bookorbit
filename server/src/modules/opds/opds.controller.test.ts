@@ -9,8 +9,11 @@ vi.mock('fs/promises', () => ({
 
 import { createReadStream } from 'fs';
 import { readdir, stat } from 'fs/promises';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
+import { BadGatewayException, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Readable } from 'stream';
 import type { MockedFunction } from 'vitest';
+import { CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 
 import { OpdsController } from './opds.controller';
 
@@ -39,8 +42,12 @@ function makeController() {
       { name: 'Dune', bookCount: 2 },
     ]),
     getBooksPage: vi.fn().mockResolvedValue({ entries: [{ id: 1 }], total: 1 }),
+    getLibraryBooksPage: vi.fn().mockResolvedValue({ entries: [{ id: 'remote-1' }], total: 1 }),
     getRecentBooksPage: vi.fn().mockResolvedValue({ entries: [{ id: 2 }], total: 1 }),
+    getBooksAndCatalogEbooksPage: vi.fn().mockResolvedValue({ entries: [{ id: 1 }, { id: 'remote-1' }], total: 2 }),
+    getRecentBooksAndCatalogEbooksPage: vi.fn().mockResolvedValue({ entries: [{ id: 2 }, { id: 'remote-2' }], total: 2 }),
     getRandomBooks: vi.fn().mockResolvedValue([{ id: 3 }]),
+    getCatalogEbookPage: vi.fn().mockResolvedValue({ entries: [{ id: 'remote-1' }], total: 1 }),
     validateBookAccess: vi.fn().mockResolvedValue(undefined),
     getBookFiles: vi.fn().mockResolvedValue({
       absolutePath: '/books/library/book.epub',
@@ -49,17 +56,36 @@ function makeController() {
       authorName: 'Author Name',
     }),
   } as never;
+  const warehouseCatalogService = {
+    isCatalogEnabled: vi.fn().mockResolvedValue(true),
+    downloadEbook: vi.fn().mockResolvedValue({
+      body: Buffer.from('epub bytes'),
+      contentType: 'application/epub+zip',
+      contentLength: 10,
+      fileName: 'private-warehouse.example-secret.epub',
+    }),
+    getEbookCover: vi.fn().mockResolvedValue({
+      body: Readable.from(Buffer.from('cover bytes')),
+      contentType: 'image/jpeg',
+      contentLength: 11,
+    }),
+  } as never;
   const config = {
     get: vi.fn().mockReturnValue('/books'),
+  } as never;
+  const koreaderService = {
+    recordCatalogDocumentHash: vi.fn().mockResolvedValue(undefined),
   } as never;
   const bookService = {
     resolveDownloadFilename: vi.fn().mockResolvedValue('BadTitle - Author.epub'),
   } as never;
 
   return {
-    controller: new OpdsController(opdsService, opdsBookService, config, bookService),
+    controller: new OpdsController(opdsService, opdsBookService, config, warehouseCatalogService, koreaderService, bookService),
     opdsService,
     opdsBookService,
+    warehouseCatalogService,
+    koreaderService,
     bookService,
   };
 }
@@ -204,6 +230,129 @@ describe('OpdsController', () => {
     );
   });
 
+  it('catalog merges user-owned catalog ebooks when filters are not local-only', async () => {
+    const { controller, opdsBookService, opdsService } = makeController();
+    const user = { userId: 5, isSuperuser: false, sortOrder: 'title_asc', coverToken: 'tok' } as never;
+
+    await controller.catalog(user, 2, 25, undefined, undefined, undefined, 'Ada Writer', 'Wayfarers', 'long way', makeReply());
+
+    expect(opdsBookService.getBooksAndCatalogEbooksPage).toHaveBeenCalledWith(
+      5,
+      'title_asc',
+      2,
+      25,
+      {
+        author: 'Ada Writer',
+        series: 'Wayfarers',
+        q: 'long way',
+      },
+      false,
+      undefined,
+    );
+    expect(opdsBookService.getBooksPage).not.toHaveBeenCalled();
+    expect(opdsService.generateAcquisitionFeed).toHaveBeenCalledWith(
+      'Search: long way',
+      'urn:bookorbit:catalog:author:Ada%20Writer:q:long%20way:series:Wayfarers',
+      [{ id: 1 }, { id: 'remote-1' }],
+      2,
+      2,
+      25,
+      expect.stringContaining('/api/v1/opds/catalog?'),
+      'tok',
+    );
+  });
+
+  it('catalog merges source-backed collection items into collection feeds', async () => {
+    const { controller, opdsBookService } = makeController();
+    const user = { userId: 5, isSuperuser: false, sortOrder: 'title_asc', coverToken: 'tok' } as never;
+
+    await controller.catalog(user, 1, 25, undefined, '11', undefined, undefined, undefined, 'favorites', makeReply());
+
+    expect(opdsBookService.getBooksAndCatalogEbooksPage).toHaveBeenCalledWith(
+      5,
+      'title_asc',
+      1,
+      25,
+      {
+        collectionId: 11,
+        q: 'favorites',
+      },
+      false,
+      undefined,
+    );
+    expect(opdsBookService.getBooksPage).not.toHaveBeenCalled();
+  });
+
+  it('catalog keeps local-only filters on the local book query', async () => {
+    const { controller, opdsBookService } = makeController();
+    const user = { userId: 5, isSuperuser: false, sortOrder: 'recent', coverToken: 'tok' } as never;
+
+    await controller.catalog(user, 1, 50, '1', undefined, undefined, undefined, undefined, 'dune', makeReply());
+
+    expect(opdsBookService.getBooksPage).toHaveBeenCalledOnce();
+    expect(opdsBookService.getBooksAndCatalogEbooksPage).not.toHaveBeenCalled();
+  });
+
+  it('catalog treats Ebook Library id as a normal library-scoped acquisition feed', async () => {
+    const { controller, opdsBookService, opdsService } = makeController();
+    const user = { userId: 5, isSuperuser: false, sortOrder: 'title_asc', coverToken: 'tok' } as never;
+
+    await controller.catalog(user, 1, 50, String(CLOUD_EBOOK_LIBRARY_ID), undefined, undefined, undefined, undefined, undefined, makeReply());
+
+    expect(opdsBookService.getLibraryBooksPage).toHaveBeenCalledWith(5, 'title_asc', CLOUD_EBOOK_LIBRARY_ID, 1, 50, undefined, false, undefined);
+    expect(opdsBookService.getBooksPage).not.toHaveBeenCalled();
+    expect(opdsBookService.getBooksAndCatalogEbooksPage).not.toHaveBeenCalled();
+    expect(opdsService.generateAcquisitionFeed).toHaveBeenCalledWith(
+      'Catalog',
+      'urn:bookorbit:catalog:libraryId:ebooks',
+      [{ id: 'remote-1' }],
+      1,
+      1,
+      50,
+      '/api/v1/opds/catalog?libraryId=ebooks&page=1&size=50',
+      'tok',
+    );
+  });
+
+  it('catalog accepts the friendly Ebook Library query alias as a normal library-scoped feed', async () => {
+    const { controller, opdsBookService, opdsService } = makeController();
+    const user = { userId: 5, isSuperuser: false, sortOrder: 'title_asc', coverToken: 'tok' } as never;
+
+    await controller.catalog(user, 1, 50, 'ebooks', undefined, undefined, undefined, undefined, undefined, makeReply());
+
+    expect(opdsBookService.getLibraryBooksPage).toHaveBeenCalledWith(5, 'title_asc', CLOUD_EBOOK_LIBRARY_ID, 1, 50, undefined, false, undefined);
+    expect(opdsBookService.getBooksPage).not.toHaveBeenCalled();
+    expect(opdsBookService.getBooksAndCatalogEbooksPage).not.toHaveBeenCalled();
+    expect(opdsService.generateAcquisitionFeed).toHaveBeenCalledWith(
+      'Catalog',
+      'urn:bookorbit:catalog:libraryId:ebooks',
+      [{ id: 'remote-1' }],
+      1,
+      1,
+      50,
+      '/api/v1/opds/catalog?libraryId=ebooks&page=1&size=50',
+      'tok',
+    );
+  });
+
+  it('catalog forwards normal filters into Ebook Library scoped feeds', async () => {
+    const { controller, opdsBookService } = makeController();
+    const user = { userId: 5, isSuperuser: false, sortOrder: 'title_asc', coverToken: 'tok' } as never;
+
+    await controller.catalog(user, 1, 50, String(CLOUD_EBOOK_LIBRARY_ID), undefined, undefined, 'Ada Writer', 'Wayfarers', 'long way', makeReply());
+
+    expect(opdsBookService.getLibraryBooksPage).toHaveBeenCalledWith(
+      5,
+      'title_asc',
+      CLOUD_EBOOK_LIBRARY_ID,
+      1,
+      50,
+      { author: 'Ada Writer', series: 'Wayfarers', q: 'long way' },
+      false,
+      undefined,
+    );
+  });
+
   it('rejects invalid catalog filter ids and deep pagination windows', async () => {
     const { controller } = makeController();
     const user = { userId: 7, isSuperuser: false, sortOrder: 'recent', coverToken: 'token' } as never;
@@ -224,7 +373,7 @@ describe('OpdsController', () => {
     await controller.recent(user, 0, 1000, makeReply());
     await controller.surprise(user, makeReply());
 
-    expect(opdsBookService.getRecentBooksPage).toHaveBeenCalledWith(12, 1, 100, false, undefined);
+    expect(opdsBookService.getRecentBooksAndCatalogEbooksPage).toHaveBeenCalledWith(12, 1, 100, false, undefined);
     expect(opdsBookService.getRandomBooks).toHaveBeenCalledWith(12, 25, false, undefined);
     expect(opdsService.generateAcquisitionFeed).toHaveBeenCalledWith(
       'Random Books',
@@ -234,6 +383,57 @@ describe('OpdsController', () => {
       1,
       25,
       '/api/v1/opds/surprise',
+      'cover-token',
+    );
+  });
+
+  it('recent falls back to local books when catalog access is disabled', async () => {
+    const { controller, opdsBookService, warehouseCatalogService } = makeController();
+    const user = { userId: 12, isSuperuser: false, coverToken: 'cover-token' } as never;
+
+    warehouseCatalogService.isCatalogEnabled.mockResolvedValue(false);
+    await controller.recent(user, 1, 50, makeReply());
+
+    expect(opdsBookService.getRecentBooksPage).toHaveBeenCalledWith(12, 1, 50, false, undefined);
+    expect(opdsBookService.getRecentBooksAndCatalogEbooksPage).not.toHaveBeenCalled();
+  });
+
+  it('renders user-owned catalog ebook acquisition feed through OPDS', async () => {
+    const { controller, opdsBookService, opdsService } = makeController();
+    const contentFilters = { includeTagIds: [7], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+    const user = { userId: 12, isSuperuser: false, coverToken: 'cover-token', contentFilters } as never;
+
+    await controller.catalogEbooks(user, 0, 1000, 'wayfarer', makeReply());
+
+    expect(opdsBookService.getCatalogEbookPage).toHaveBeenCalledWith(12, 1, 100, { q: 'wayfarer' }, 'recent', contentFilters);
+    expect(opdsService.generateAcquisitionFeed).toHaveBeenCalledWith(
+      'Books',
+      'urn:bookorbit:catalog-ebooks:q:wayfarer',
+      [{ id: 'remote-1' }],
+      1,
+      1,
+      100,
+      '/api/v1/opds/catalog-ebooks?q=wayfarer&page=1&size=100',
+      'cover-token',
+    );
+  });
+
+  it('renders an empty catalog ebook feed when catalog access is disabled', async () => {
+    const { controller, opdsBookService, opdsService, warehouseCatalogService } = makeController();
+    const user = { userId: 12, isSuperuser: true, coverToken: 'cover-token' } as never;
+
+    warehouseCatalogService.isCatalogEnabled.mockResolvedValue(false);
+    await controller.catalogEbooks(user, 1, 50, undefined, makeReply());
+
+    expect(opdsBookService.getCatalogEbookPage).not.toHaveBeenCalled();
+    expect(opdsService.generateAcquisitionFeed).toHaveBeenCalledWith(
+      'Books',
+      'urn:bookorbit:catalog-ebooks',
+      [],
+      0,
+      1,
+      50,
+      '/api/v1/opds/catalog-ebooks?page=1&size=50',
       'cover-token',
     );
   });
@@ -349,6 +549,95 @@ describe('OpdsController', () => {
     expect(reply.header).toHaveBeenCalledWith('Content-Length', 12345);
     expect(reply.type).toHaveBeenCalledWith('application/epub+zip');
     expect(reply.send).toHaveBeenCalledWith(stream);
+  });
+
+  it('proxies catalog ebook downloads and covers through OPDS authentication', async () => {
+    const { controller, warehouseCatalogService, koreaderService } = makeController();
+    const reply = makeReply();
+    const user = { userId: 12 } as never;
+
+    await controller.downloadCatalogEbook('book 1/with slash', user, reply);
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledWith({ id: 12 }, 'book 1/with slash');
+    expect(koreaderService.recordCatalogDocumentHash).toHaveBeenCalledWith(
+      12,
+      'book 1/with slash',
+      createHash('md5').update(Buffer.from('epub bytes')).digest('hex'),
+    );
+    expect(reply.header).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="ebook-download.epub"');
+    expect(reply.type).toHaveBeenCalledWith('application/epub+zip');
+    expect(reply.header).not.toHaveBeenCalledWith('Content-Disposition', expect.stringMatching(/warehouse|secret|private/i));
+
+    const coverReply = makeReply();
+    await controller.catalogEbookCover('book 1/with slash', user, 'thumbnail', coverReply);
+    expect(warehouseCatalogService.getEbookCover).toHaveBeenCalledWith({ id: 12 }, 'book 1/with slash', 'thumbnail');
+    expect(coverReply.type).toHaveBeenCalledWith('image/jpeg');
+  });
+
+  it('uses native library media copy for unsafe catalog ebook metadata', async () => {
+    const { controller, warehouseCatalogService } = makeController();
+    warehouseCatalogService.downloadEbook.mockResolvedValueOnce({
+      body: Buffer.from('partial'),
+      contentType: 'application/epub+zip',
+      contentLength: 7,
+      status: 206,
+      contentRange: null,
+      acceptRanges: 'bytes',
+      fileName: null,
+    });
+
+    const result = controller.downloadCatalogEbook('book 1/with slash', { userId: 12 } as never, makeReply(), 'bytes=0-6');
+
+    await expect(result).rejects.toThrow(BadGatewayException);
+    await expect(result).rejects.toThrow('Library media is temporarily unavailable.');
+  });
+
+  it('does not record KOReader document hashes for partial catalog ebook downloads', async () => {
+    const { controller, warehouseCatalogService, koreaderService } = makeController();
+    const reply = makeReply();
+    const body = Buffer.from('partial');
+    warehouseCatalogService.downloadEbook.mockResolvedValueOnce({
+      body,
+      contentType: 'application/epub+zip',
+      contentLength: body.length,
+      status: 206,
+      contentRange: 'bytes 0-6/100',
+      acceptRanges: 'bytes',
+      fileName: 'private-title.epub',
+    });
+
+    await controller.downloadCatalogEbook('book 1/with slash', { userId: 12 } as never, reply, 'bytes=0-6');
+
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledWith({ id: 12 }, 'book 1/with slash', 'bytes=0-6');
+    expect(koreaderService.recordCatalogDocumentHash).not.toHaveBeenCalled();
+    expect(reply.status).toHaveBeenCalledWith(206);
+    expect(reply.header).toHaveBeenCalledWith('Content-Range', 'bytes 0-6/100');
+  });
+
+  it('records KOReader document hashes after streamed catalog ebook downloads complete', async () => {
+    const { controller, warehouseCatalogService, koreaderService } = makeController();
+    const reply = makeReply();
+    const chunks = [Buffer.from('streamed '), Buffer.from('ebook bytes')];
+    warehouseCatalogService.downloadEbook.mockResolvedValueOnce({
+      body: Readable.from(chunks),
+      contentType: 'application/epub+zip',
+      contentLength: Buffer.concat(chunks).length,
+      status: 200,
+      fileName: 'private-title.epub',
+    });
+
+    await controller.downloadCatalogEbook('book 1/with slash', { userId: 12 } as never, reply);
+
+    expect(koreaderService.recordCatalogDocumentHash).not.toHaveBeenCalled();
+
+    const sentBody = (reply as unknown as { send: ReturnType<typeof vi.fn> }).send.mock.calls[0]?.[0] as Readable;
+    const received: Buffer[] = [];
+    for await (const chunk of sentBody) {
+      received.push(Buffer.from(chunk));
+    }
+
+    const bytes = Buffer.concat(chunks);
+    expect(Buffer.concat(received)).toEqual(bytes);
+    expect(koreaderService.recordCatalogDocumentHash).toHaveBeenCalledWith(12, 'book 1/with slash', createHash('md5').update(bytes).digest('hex'));
   });
 
   it('throws NotFoundException when requested download file is unavailable', async () => {

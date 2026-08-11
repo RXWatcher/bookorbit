@@ -1,0 +1,54 @@
+import type { ContentFilterRulesWithNames } from '@bookorbit/types';
+
+export type BookSearchSource = 'catalog' | 'native';
+
+export interface BookSearchDocument {
+  id: string;
+  source: BookSearchSource;
+  mediaType: string;
+  title: string;
+  sortTitle: string | null;
+  authors: string[];
+  narrators: string[];
+  series: string | null;
+  seriesIndex: number | null;
+  publisher: string | null;
+  language: string | null;
+  tags: string[];
+  genres: string[];
+  identifiers: string[];
+  format: string | null;
+  publishedYear: number | null;
+  hasCover: boolean;
+  durationSeconds: number | null;
+  fileSizeBytes: number | null;
+  libraryId: number | null;
+  addedAt: number | null;
+}
+
+export interface BookSearchQuery {
+  q: string;
+  page: number;
+  size: number;
+  userId: number;
+  /** Libraries the user is allowed to see. Required so a caller cannot forget the access check. */
+  accessibleLibraryIds: number[];
+  /** Catalogue media types the caller may see. Undefined leaves the catalogue unrestricted;
+   *  an empty array restricts the result to native books. */
+  mediaTypes?: string[];
+  libraryIds?: number[];
+  contentFilters?: ContentFilterRulesWithNames;
+}
+
+export interface BookSearchPage {
+  ids: string[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface BookSearchProvider {
+  readonly name: 'meilisearch' | 'sql';
+  isAvailable(): Promise<boolean>;
+  search(query: BookSearchQuery): Promise<BookSearchPage>;
+}

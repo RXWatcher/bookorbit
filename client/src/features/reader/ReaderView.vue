@@ -12,9 +12,9 @@ import { useReaderSettings } from './shared/composables/useReaderSettings'
 import { useCustomFonts } from './epub/composables/useCustomFonts'
 import { useVisibility } from './shared/composables/useVisibility'
 import { useWakeLock } from './shared/composables/useWakeLock'
+import { useBookmarks, type Bookmark } from './epub/composables/useBookmarks'
+import { useAnnotations, type Annotation } from './epub/composables/useAnnotations'
 import { useFullscreen } from './shared/composables/useFullscreen'
-import { useBookmarks } from './epub/composables/useBookmarks'
-import { useAnnotations } from './epub/composables/useAnnotations'
 import { useReaderAnnotationActions } from './epub/composables/useReaderAnnotationActions'
 import { useToc } from './epub/composables/useToc'
 import { useSearch, type FoliateView } from './epub/composables/useSearch'
@@ -36,18 +36,35 @@ import CbzReaderView from './cbz/CbzReaderView.vue'
 import AudiobookReaderView from './audiobook/AudiobookReaderView.vue'
 import type { ReaderState } from './epub/composables/useReaderState'
 import type { FoliateLocationContext, FoliateRenderer } from './epub/composables/useFoliate'
-import type { EpubReaderSettings } from '@bookorbit/types'
+import type { EpubReaderSettings, WarehouseCatalogAnnotation, WarehouseCatalogBookmark, WarehouseMediaType } from '@bookorbit/types'
 import { findMatchingCfiRange } from './epub/utils'
-import { getFormatGroup } from '@bookorbit/types'
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, getFormatGroup } from '@bookorbit/types'
+import { parseLibraryRouteId } from '@/features/library/lib/library-route'
+import {
+  catalogSourceEbookDownloadUrl,
+  createCatalogSourceAnnotation,
+  createCatalogSourceBookmark,
+  deleteCatalogSourceAnnotation,
+  deleteCatalogSourceBookmark,
+  fetchCatalogSourceAnnotations,
+  fetchCatalogSourceBookmarks,
+  fetchCatalogSourceUserState,
+  patchCatalogSourceUserState,
+  saveCatalogSourceReadingSession,
+  updateCatalogSourceAnnotation,
+} from '@/features/warehouse/api/catalog-source.api'
 
 const PdfV4ReaderView = defineAsyncComponent(() => import('./pdf-v4/PdfV4ReaderView.vue'))
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const bookId = Number(route.params.bookId)
-const fileId = Number(route.params.fileId)
 const fileFormat = (route.query.format as string) || 'epub'
+const catalogMediaType = resolveCatalogMediaType()
+const catalogRemoteId = firstRouteText(route.params.remoteId)
+const hasCatalogSource = catalogMediaType !== null && catalogRemoteId !== null
+const bookId = hasCatalogSource ? 0 : Number(route.params.bookId)
+const fileId = hasCatalogSource ? 0 : Number(route.params.fileId)
 const isAudioFormat = getFormatGroup(fileFormat) === 'audio'
 const isPdfFormat = fileFormat === 'pdf'
 const isComicFormat = fileFormat === 'cbz' || fileFormat === 'cbr' || fileFormat === 'cb7'
@@ -66,7 +83,54 @@ const sectionFractions = ref<number[]>([])
 const sidebarLocationMetaByCfi = ref<Record<string, { chapterTitle: string | null; percentage: number | null }>>({})
 let sidebarLocationResolveSeq = 0
 
-const bookSettings = useReaderSettings(fileId, fileFormat)
+const catalogSettingsStorageKey = computed(() =>
+  hasCatalogSource && catalogMediaType && catalogRemoteId
+    ? `reader:catalog:${catalogMediaType}:${catalogRemoteId}:${isComicFormat ? 'cbz' : fileFormat}`
+    : undefined,
+)
+const catalogReaderRouteName = computed<'reader' | 'catalog-reader' | 'library-reader'>(() => {
+  if (route.name === 'library-reader') return 'library-reader'
+  if (route.name === 'catalog-reader') return 'catalog-reader'
+  return 'reader'
+})
+const catalogProgressAdapters = computed((): { loadProgress?: typeof loadCatalogProgress; saveProgress?: typeof saveCatalogProgress } => {
+  if (!catalogMediaType || !catalogRemoteId) return {}
+  return {
+    loadProgress: loadCatalogProgress,
+    saveProgress: saveCatalogProgress,
+  }
+})
+const catalogSessionAdapters = computed((): { saveSession?: typeof saveCatalogSession } => {
+  if (!catalogMediaType || !catalogRemoteId) return {}
+  return {
+    saveSession: saveCatalogSession,
+  }
+})
+const pdfDocumentUrl = computed(() =>
+  catalogMediaType === 'ebook' && catalogRemoteId && isPdfFormat ? catalogSourceEbookDownloadUrl(catalogRemoteId) : undefined,
+)
+const cbzCatalogSource = computed(() =>
+  catalogMediaType && catalogRemoteId && isComicFormat
+    ? {
+        mediaType: catalogMediaType === 'comic' ? ('comic' as const) : ('ebook' as const),
+        remoteId: catalogRemoteId,
+        format: fileFormat,
+      }
+    : undefined,
+)
+const audioCatalogMediaType = computed(() => (catalogMediaType === 'audiobook' && catalogRemoteId ? 'audiobook' : undefined))
+const audioCatalogRemoteId = computed(() => (catalogMediaType === 'audiobook' ? (catalogRemoteId ?? undefined) : undefined))
+
+const bookSettings = useReaderSettings(
+  fileId,
+  fileFormat,
+  catalogSettingsStorageKey.value
+    ? {
+        bookStorageKey: catalogSettingsStorageKey.value,
+        syncBookPreferences: false,
+      }
+    : undefined,
+)
 // False when overrideBookFormatting is off and the book has no per-book delta.
 // Prevents injecting any CSS so the book renders with its own embedded styles.
 const shouldApplyStyles = ref(true)
@@ -102,10 +166,16 @@ const { onActivity, elapsedMinutes } = useReadingSession(
     cfi: progress.cfi.value,
     pageNumber: progress.pageNumber.value,
   }),
-  { trackingEnabled },
+  {
+    trackingEnabled,
+    ...catalogSessionAdapters.value,
+  },
 )
 
-const progress = useReaderProgress(bookId, fileId, elapsedMinutes, 0, { trackingEnabled })
+const progress = useReaderProgress(bookId, fileId, elapsedMinutes, 0, {
+  trackingEnabled,
+  ...catalogProgressAdapters.value,
+})
 const { cfi, chapterTitle, sectionIndex, totalSections, fraction, locationTotal, footerMode, cycleFooterMode, updateHeadsFeet } = progress
 
 const visibility = useVisibility()
@@ -114,8 +184,28 @@ const { toggleFullscreen } = useFullscreen()
 
 useWakeLock()
 
-const bookmarks = useBookmarks()
-const annotations = useAnnotations()
+const catalogBookmarkStore =
+  catalogMediaType && catalogRemoteId
+    ? {
+        load: async () => (await fetchCatalogSourceBookmarks(catalogMediaType, catalogRemoteId)).filter((item) => item.cfi).map(toReaderBookmark),
+        create: async (bookmark: { cfi: string; title: string }) =>
+          toReaderBookmark(await createCatalogSourceBookmark(catalogMediaType, catalogRemoteId, bookmark)),
+        remove: (bookmarkId: number) => deleteCatalogSourceBookmark(catalogMediaType, catalogRemoteId, bookmarkId),
+      }
+    : undefined
+const catalogAnnotationStore =
+  catalogMediaType && catalogRemoteId
+    ? {
+        load: async () => (await fetchCatalogSourceAnnotations(catalogMediaType, catalogRemoteId)).map(toReaderAnnotation),
+        create: async (data: { cfi: string; text: string; color: string; style: string; note?: string | null; chapterTitle?: string | null }) =>
+          toReaderAnnotation(await createCatalogSourceAnnotation(catalogMediaType, catalogRemoteId, data)),
+        update: async (annotationId: number, data: { note?: string | null; color?: string; style?: string }) =>
+          toReaderAnnotation(await updateCatalogSourceAnnotation(catalogMediaType, catalogRemoteId, annotationId, data)),
+        remove: (annotationId: number) => deleteCatalogSourceAnnotation(catalogMediaType, catalogRemoteId, annotationId),
+      }
+    : undefined
+const bookmarks = useBookmarks(catalogBookmarkStore)
+const annotations = useAnnotations(catalogAnnotationStore)
 
 const toc = useToc()
 const { chapters, expandedHrefs, activeHref, setChapters, toggleExpand } = toc
@@ -162,7 +252,7 @@ function toggleHelpModal() {
 async function startTrackedReading() {
   const query = { ...route.query }
   delete query.mode
-  await router.replace({ name: 'reader', params: route.params, query })
+  await router.replace({ name: catalogReaderRouteName.value, params: route.params, query })
   await nextTick()
   await progress.save()
   onActivity()
@@ -236,6 +326,7 @@ const {
   loading,
   error,
   open,
+  openFromUrl,
   goTo,
   goToFraction,
   goToSection,
@@ -253,6 +344,87 @@ const {
   bookLanguage,
   isFixedLayout,
 } = useFoliate(() => containerRef.value, onRelocateHandler, onApplyStylesHandler, onMiddleTapHandler)
+
+function firstRouteText(value: unknown): string | null {
+  if (Array.isArray(value)) return firstRouteText(value[0])
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const trimmed = String(value).trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeLegacyCatalogMediaType(value: unknown): WarehouseMediaType | null {
+  const raw = firstRouteText(value)?.toLowerCase()
+  if (!raw) return null
+  if (raw === 'ebook' || raw === 'ebooks') return 'ebook'
+  if (raw === 'audiobook' || raw === 'audiobooks' || raw === 'audio') return 'audiobook'
+  if (raw === 'comic' || raw === 'comics') return 'comic'
+  return null
+}
+
+function resolveCatalogMediaType(): WarehouseMediaType | null {
+  if (route.name === 'catalog-reader') return normalizeLegacyCatalogMediaType(route.params.mediaType)
+  if (route.name !== 'library-reader') return null
+
+  const libraryId = parseLibraryRouteId(route.params.id)
+  if (libraryId === CLOUD_EBOOK_LIBRARY_ID) return 'ebook'
+  if (libraryId === CLOUD_AUDIO_LIBRARY_ID) return 'audiobook'
+  if (libraryId === CLOUD_COMIC_LIBRARY_ID) return 'comic'
+  return null
+}
+
+async function loadCatalogProgress() {
+  if (!catalogMediaType || !catalogRemoteId) return { percentage: 0 }
+  const state = await fetchCatalogSourceUserState(catalogMediaType, catalogRemoteId)
+  return {
+    cfi: null,
+    pageNumber: null,
+    percentage: state.progressPercent ?? 0,
+  }
+}
+
+async function saveCatalogProgress(payload: { cfi: string | null; pageNumber: number | null; percentage: number }) {
+  if (!catalogMediaType || !catalogRemoteId) return
+  await patchCatalogSourceUserState(catalogMediaType, catalogRemoteId, {
+    progressPercent: payload.percentage,
+  })
+}
+
+async function saveCatalogSession(payload: Parameters<typeof saveCatalogSourceReadingSession>[2], options: { useBeacon: boolean }) {
+  if (!catalogMediaType || !catalogRemoteId) return
+  await saveCatalogSourceReadingSession(catalogMediaType, catalogRemoteId, payload, options)
+  await patchCatalogSourceUserState(catalogMediaType, catalogRemoteId, {
+    progressPercent: payload.endProgress,
+  })
+}
+
+function toReaderBookmark(item: WarehouseCatalogBookmark): Bookmark {
+  return {
+    id: item.id,
+    bookId,
+    cfi: item.cfi ?? '',
+    title: item.title,
+    createdAt: item.createdAt,
+  }
+}
+
+function toReaderAnnotation(item: WarehouseCatalogAnnotation): Annotation {
+  return {
+    id: item.id,
+    bookId,
+    cfi: item.cfi,
+    jumpFileId: null,
+    pageno: null,
+    text: item.text,
+    color: item.color,
+    style: item.style,
+    note: item.note,
+    chapterTitle: item.chapterTitle,
+    origin: 'web',
+    positionStatus: null,
+    chapterIndex: null,
+    createdAt: item.createdAt,
+  }
+}
 
 const { handleHighlight, handleOpenNoteDialog, handleSaveNote } = useReaderAnnotationActions({
   bookId,
@@ -303,9 +475,17 @@ onMounted(async () => {
   }
 
   const hadProgress = progress.percentage.value > 0
-  await open(bookId, fileId, fileFormat, progress.cfi.value, hadProgress ? progress.percentage.value / 100 : undefined, {
-    fixedLayoutSpread: state.value.fixedLayoutSpread,
-  })
+  if (catalogMediaType === 'ebook' && catalogRemoteId) {
+    await openFromUrl(
+      catalogSourceEbookDownloadUrl(catalogRemoteId),
+      fileFormat,
+      catalogRemoteId,
+      progress.cfi.value,
+      hadProgress ? progress.percentage.value / 100 : undefined,
+    )
+  } else {
+    await open(bookId, fileId, fileFormat, progress.cfi.value, hadProgress ? progress.percentage.value / 100 : undefined)
+  }
   setChapters(getChapters())
   sectionFractions.value = getSectionFractions()
   await bookmarks.load(bookId)
@@ -572,9 +752,39 @@ watch(
 </script>
 
 <template>
-  <PdfV4ReaderView v-if="isPdfFormat" :bookId="bookId" :fileId="fileId" :peek-mode="isPeekMode" />
-  <CbzReaderView v-else-if="isComicFormat" :bookId="bookId" :fileId="fileId" :peek-mode="isPeekMode" />
-  <AudiobookReaderView v-else-if="isAudioFormat" :bookId="bookId" :fileId="fileId" :peek-mode="isPeekMode" />
+  <PdfV4ReaderView
+    v-if="isPdfFormat"
+    :bookId="bookId"
+    :fileId="fileId"
+    :peek-mode="isPeekMode"
+    :document-url="pdfDocumentUrl"
+    :settings-storage-key="catalogSettingsStorageKey"
+    :reader-route-name="catalogReaderRouteName"
+    :load-progress="catalogProgressAdapters.loadProgress"
+    :save-progress="catalogProgressAdapters.saveProgress"
+    :save-session="catalogSessionAdapters.saveSession"
+  />
+  <CbzReaderView
+    v-else-if="isComicFormat"
+    :bookId="bookId"
+    :fileId="fileId"
+    :peek-mode="isPeekMode"
+    :catalog-source="cbzCatalogSource"
+    :settings-storage-key="catalogSettingsStorageKey"
+    :reader-route-name="catalogReaderRouteName"
+    :load-progress="catalogProgressAdapters.loadProgress"
+    :save-progress="catalogProgressAdapters.saveProgress"
+    :save-session="catalogSessionAdapters.saveSession"
+  />
+  <AudiobookReaderView
+    v-else-if="isAudioFormat"
+    :bookId="bookId"
+    :fileId="fileId"
+    :peek-mode="isPeekMode"
+    :catalog-media-type="audioCatalogMediaType"
+    :catalog-remote-id="audioCatalogRemoteId"
+    :catalog-format="fileFormat"
+  />
   <div
     v-else
     class="fixed inset-0 overflow-hidden"

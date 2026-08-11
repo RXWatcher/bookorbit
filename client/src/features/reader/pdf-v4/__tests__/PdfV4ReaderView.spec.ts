@@ -9,7 +9,9 @@ import type { PdfReaderSettings } from '@bookorbit/types'
 const mockRouterBack = vi.fn<() => void>()
 const mockRouterReplace = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
 const mockRoute = {
-  params: { bookId: '42', fileId: '101' },
+  // Record, not the inferred { bookId, fileId }: the catalog-PDF cases assign
+  // { id, remoteId } instead, which the narrow inferred shape rejected.
+  params: { bookId: '42', fileId: '101' } as Record<string, string>,
   query: {} as Record<string, string>,
 }
 
@@ -23,6 +25,7 @@ vi.mock('@/lib/api', () => ({ api: mockApi }))
 
 const mockSettingsLoad = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
 const mockUpdateBookSettings = vi.fn<(patch: Partial<PdfReaderSettings>) => void>()
+const mockUseReaderSettings = vi.fn<(...args: unknown[]) => void>()
 const mockEffective = ref<PdfReaderSettings>({
   scrollMode: 'page' as const,
   spread: 'none' as const,
@@ -32,33 +35,44 @@ const mockEffective = ref<PdfReaderSettings>({
 })
 
 vi.mock('../../shared/composables/useReaderSettings', () => ({
-  useReaderSettings: () => ({
-    load: mockSettingsLoad,
-    effective: mockEffective,
-    updateBookSettings: mockUpdateBookSettings,
-  }),
+  useReaderSettings: (...args: unknown[]) => {
+    mockUseReaderSettings(...args)
+    return {
+      load: mockSettingsLoad,
+      effective: mockEffective,
+      updateBookSettings: mockUpdateBookSettings,
+    }
+  },
 }))
 
 const mockProgressLoad = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
 const mockProgressSave = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+const mockUseReaderProgress = vi.fn<(...args: unknown[]) => void>()
 const mockProgressPageNumber = ref<number | null>(5)
 const mockProgressPercentage = ref(25)
 
 vi.mock('../../shared/composables/useReaderProgress', () => ({
-  useReaderProgress: () => ({
-    load: mockProgressLoad,
-    save: mockProgressSave,
-    pageNumber: mockProgressPageNumber,
-    percentage: mockProgressPercentage,
-  }),
+  useReaderProgress: (...args: unknown[]) => {
+    mockUseReaderProgress(...args)
+    return {
+      load: mockProgressLoad,
+      save: mockProgressSave,
+      pageNumber: mockProgressPageNumber,
+      percentage: mockProgressPercentage,
+    }
+  },
 }))
 
 const mockOnActivity = vi.fn<() => void>()
+const mockUseReadingSession = vi.fn<(...args: unknown[]) => void>()
 vi.mock('../../shared/composables/useReadingSession', () => ({
-  useReadingSession: () => ({
-    onActivity: mockOnActivity,
-    elapsedMinutes: ref(0),
-  }),
+  useReadingSession: (...args: unknown[]) => {
+    mockUseReadingSession(...args)
+    return {
+      onActivity: mockOnActivity,
+      elapsedMinutes: ref(0),
+    }
+  },
 }))
 
 const mockUsePdfiumEngine = vi.fn<() => unknown>(() => ({
@@ -127,6 +141,7 @@ describe('PdfV4ReaderView', () => {
     mockRegistry.pluginsReady.mockResolvedValue(undefined)
     mockRegistry.isDestroyed.mockReturnValue(false)
     mockRegistry.getPlugin.mockReturnValue({ provides: () => mockDocumentManager })
+    mockRoute.params = { bookId: '42', fileId: '101' }
     mockRoute.query = {}
     mockProgressPageNumber.value = 5
     mockProgressPercentage.value = 25
@@ -139,9 +154,9 @@ describe('PdfV4ReaderView', () => {
     }
   })
 
-  async function mountReader(peekMode = false) {
+  async function mountReader(peekMode = false, props: Partial<InstanceType<typeof PdfV4ReaderView>['$props']> = {}) {
     const wrapper = mount(PdfV4ReaderView, {
-      props: { bookId: 42, fileId: 101, peekMode },
+      props: { bookId: 42, fileId: 101, peekMode, ...props },
       global: {
         stubs: {
           PdfReaderContent: {
@@ -180,6 +195,31 @@ describe('PdfV4ReaderView', () => {
       rotation: 0,
     })
     expect(mockApi).toHaveBeenCalledWith('/api/v1/books/files/101/serve', { signal: expect.any(AbortSignal) })
+  })
+
+  it('uses a catalog document URL and custom state adapters when provided', async () => {
+    const loadProgress = vi.fn<() => Promise<{ pageNumber: number; percentage: number }>>()
+    const saveProgress = vi.fn<() => Promise<void>>()
+    const saveSession = vi.fn<() => Promise<void>>()
+
+    await mountReader(false, {
+      bookId: 0,
+      fileId: 0,
+      documentUrl: '/api/v1/catalog/ebooks/remote-7/download',
+      settingsStorageKey: 'reader:catalog:ebook:remote-7:pdf',
+      loadProgress,
+      saveProgress,
+      saveSession,
+      readerRouteName: 'library-reader',
+    })
+
+    expect(mockApi).toHaveBeenCalledWith('/api/v1/catalog/ebooks/remote-7/download', { signal: expect.any(AbortSignal) })
+    expect(mockUseReaderSettings).toHaveBeenCalledWith(0, 'pdf', {
+      bookStorageKey: 'reader:catalog:ebook:remote-7:pdf',
+      syncBookPreferences: false,
+    })
+    expect(mockUseReaderProgress).toHaveBeenCalledWith(0, 0, expect.any(Object), 0, expect.objectContaining({ loadProgress, saveProgress }))
+    expect(mockUseReadingSession).toHaveBeenCalledWith(0, expect.any(Function), expect.objectContaining({ saveSession }))
   })
 
   it('retries a zero-page engine result once before showing an error', async () => {
@@ -289,6 +329,26 @@ describe('PdfV4ReaderView', () => {
     expect(mockRouterReplace).toHaveBeenCalledWith({ name: 'reader', params: mockRoute.params, query: {} })
     expect(mockProgressSave).toHaveBeenCalledOnce()
     expect(mockOnActivity).toHaveBeenCalledOnce()
+  })
+
+  it('starts a catalog PDF on the native library reader route', async () => {
+    mockRoute.params = { id: '-1', remoteId: 'remote-7' }
+    mockRoute.query = { format: 'pdf', mode: 'peek' }
+    const wrapper = await mountReader(true, {
+      bookId: 0,
+      fileId: 0,
+      documentUrl: '/api/v1/catalog/ebooks/remote-7/download',
+      readerRouteName: 'library-reader',
+    })
+
+    wrapper.getComponent({ name: 'PdfReaderContent' }).vm.$emit('startReading')
+    await flushPromises()
+
+    expect(mockRouterReplace).toHaveBeenCalledWith({
+      name: 'library-reader',
+      params: mockRoute.params,
+      query: { format: 'pdf' },
+    })
   })
 
   it('routes back from the BookOrbit reader shell', async () => {

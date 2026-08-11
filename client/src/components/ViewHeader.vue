@@ -19,6 +19,7 @@ withDefaults(
     icon?: string
     fallbackIcon?: string
     total: number
+    showTotal?: boolean
     coverSize: number
     gridGap: number
     showJumpRailToggle?: boolean
@@ -48,6 +49,7 @@ withDefaults(
     gridGapMax: 40,
     gridGapStep: 4,
     showSelection: true,
+    showTotal: true,
     showViewModeToggle: true,
     allowedViewModes: () => ['grid', 'list', 'table'] as BookViewMode[],
     mobileSearchInMenu: true,
@@ -80,7 +82,7 @@ function handleShowJumpRailsUpdate(value: boolean) {
     <div class="flex min-w-0 flex-1 items-center gap-2">
       <AppIcon v-if="icon" :icon="icon" :fallback="fallbackIcon" :size="16" class="shrink-0 text-muted-foreground" />
       <span class="truncate text-[16px] font-bold tracking-tight text-foreground">{{ title }}</span>
-      <span class="shrink-0 tabular-nums text-[12px] font-semibold text-primary">({{ formatNumber(total) }})</span>
+      <span v-if="showTotal" class="shrink-0 tabular-nums text-[12px] font-semibold text-primary">({{ formatNumber(total) }})</span>
     </div>
 
     <div class="flex shrink-0 items-center gap-2">

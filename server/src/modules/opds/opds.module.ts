@@ -1,8 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
 import { AppSettingsModule } from '../app-settings/app-settings.module';
 import { BookModule } from '../book/book.module';
+import { KoreaderModule } from '../koreader/koreader.module';
 import { UserModule } from '../user/user.module';
+import { WarehouseModule } from '../warehouse/warehouse.module';
 import { CommonModule } from '../../common/common.module';
 import { OpdsAuthGuard } from './opds-auth.guard';
 import { OpdsBookService } from './opds-book.service';
@@ -13,7 +15,7 @@ import { OpdsUserController } from './opds-user.controller';
 import { OpdsUserService } from './opds-user.service';
 
 @Module({
-  imports: [AppSettingsModule, BookModule, UserModule, CommonModule],
+  imports: [AppSettingsModule, BookModule, UserModule, CommonModule, WarehouseModule, forwardRef(() => KoreaderModule)],
   controllers: [OpdsController, OpdsUserController],
   providers: [OpdsService, OpdsBookService, OpdsUserService, OpdsAuthGuard, OpdsEnabledGuard],
   exports: [OpdsBookService],

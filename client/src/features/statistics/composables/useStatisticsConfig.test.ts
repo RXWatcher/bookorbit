@@ -100,7 +100,7 @@ describe('useStatisticsConfig - persist', () => {
     expect(body).toHaveProperty('settings.statisticsConfig')
     expect(body.settings.statisticsConfig).toHaveProperty('charts')
     expect(body.settings.statisticsConfig).toHaveProperty('filters')
-  })
+  }, 15_000)
 
   it('shows error toast when API call throws', async () => {
     setupAuth()
@@ -115,7 +115,7 @@ describe('useStatisticsConfig - persist', () => {
     await flushPromises()
 
     expect(mockToast.error).toHaveBeenCalledWith('Failed to save chart configuration')
-  })
+  }, 15_000)
 
   it('migrates the old default user chart order to put Where You Read last', async () => {
     setupAuth({

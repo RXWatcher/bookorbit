@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types'
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(),
@@ -63,26 +64,54 @@ describe('useBookMetadataExport', () => {
     })
 
     expect(result).toEqual(expected)
+    const [, init] = mocks.api.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      query: {
+        libraryId: 5,
+        q: 'dune',
+        sort: [{ field: 'title', dir: 'asc' }],
+      },
+      format: 'csv',
+      viewType: 'library',
+      options: {
+        includePersonalData: false,
+        includeFilePaths: false,
+        includeContextMeta: true,
+        columnsMode: 'canonical',
+        visibleColumns: [],
+      },
+    })
+  })
+
+  it('serializes source-backed all-matching export library ids as friendly aliases', async () => {
+    mocks.api.mockResolvedValue(makeResponse({ json: async () => ({}) }))
+
+    const { useBookMetadataExport } = await import('../useBookMetadataExport')
+    const { preflight } = useBookMetadataExport()
+
+    await preflight({
+      scope: 'all-matching',
+      format: 'csv',
+      viewType: 'library',
+      selectedBookIds: [],
+      allMatchingQuery: {
+        libraryId: CLOUD_EBOOK_LIBRARY_ID,
+        q: 'dune',
+      },
+      options: {
+        includePersonalData: false,
+        includeFilePaths: false,
+        includeContextMeta: true,
+        columnsMode: 'canonical',
+        visibleColumns: [],
+      },
+    })
+
     expect(mocks.api).toHaveBeenCalledWith(
       '/api/v1/books/metadata-export/preflight',
       expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          query: {
-            libraryId: 5,
-            q: 'dune',
-            sort: [{ field: 'title', dir: 'asc' }],
-          },
-          format: 'csv',
-          viewType: 'library',
-          options: {
-            includePersonalData: false,
-            includeFilePaths: false,
-            includeContextMeta: true,
-            columnsMode: 'canonical',
-            visibleColumns: [],
-          },
-        }),
+        body: expect.stringContaining('"libraryId":"ebooks"'),
       }),
     )
   })

@@ -1,4 +1,4 @@
-import type { BooksPage } from "./book";
+import type { BookCard } from "./book";
 
 export type AuthorSummary = {
   id: number;
@@ -21,7 +21,14 @@ export type AuthorsPage = {
   size: number;
 };
 
-export type AuthorBooksPage = BooksPage;
+export type AuthorLibraryItem = BookCard;
+
+export type AuthorBooksPage = {
+  items: AuthorLibraryItem[];
+  total: number;
+  page: number;
+  size: number;
+};
 
 export type MergeAuthorsResult = {
   target: AuthorDetail;

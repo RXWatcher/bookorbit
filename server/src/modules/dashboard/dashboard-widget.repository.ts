@@ -94,15 +94,18 @@ export class DashboardWidgetRepository {
         0
       )
     `;
-    const mergedLastReadAt = sql<Date | null>`coalesce(${readingProgress.updatedAt}, ${audiobookProgress.updatedAt})`;
-
+    const mergedLastActivityAt = sql<Date>`greatest(
+      coalesce(${readingProgress.updatedAt}, 'epoch'::timestamp),
+      coalesce(${audiobookProgress.updatedAt}, 'epoch'::timestamp),
+      coalesce(${userBookStatus.updatedAt}, 'epoch'::timestamp)
+    )`;
     const rows = await this.db
       .select({
         bookId: books.id,
         title: bookMetadata.title,
         progress: mergedProgress,
         coverSource: bookMetadata.coverSource,
-        lastReadAt: mergedLastReadAt,
+        lastActivityAt: mergedLastActivityAt,
         fileId: bookFiles.id,
         fileFormat: bookFiles.format,
       })
@@ -120,7 +123,7 @@ export class DashboardWidgetRepository {
           ...cfClauses,
         ),
       )
-      .orderBy(desc(sql`coalesce(${readingProgress.updatedAt}, ${audiobookProgress.updatedAt}, ${userBookStatus.updatedAt})`))
+      .orderBy(desc(mergedLastActivityAt))
       .limit(CURRENTLY_READING_LIMIT);
 
     if (rows.length === 0) return { books: [] };
@@ -150,15 +153,43 @@ export class DashboardWidgetRepository {
       hasCover: row.coverSource != null,
       fileId: row.fileId ?? null,
       fileFormat: row.fileFormat ?? null,
+      lastActivityAt: row.lastActivityAt?.toISOString?.() ?? null,
     }));
 
     return { books: result };
   }
 
   async getReadingStreak(userId: number, accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<ReadingStreakWidgetData> {
-    void contentFilters;
-    if (accessibleLibraryIds.length === 0) {
-      return { currentStreak: 0, longestStreak: 0, lastSevenDays: [false, false, false, false, false, false, false] };
+    const readDays = new Set(await this.getReadingStreakDays(userId, accessibleLibraryIds, contentFilters));
+    return computeStreakData(readDays, new Date());
+  }
+
+  async getReadingStreakDays(userId: number, accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<string[]> {
+    if (accessibleLibraryIds.length === 0) return [];
+
+    const cfClauses = this.getContentFilterClauses(contentFilters);
+    if (cfClauses.length > 0) {
+      const sessionDay = sql<string>`date_trunc('day', ${readingSessions.startedAt})::date::text`;
+      const rows = await this.db
+        .select({
+          day: sessionDay,
+          totalSeconds: sql<number>`sum(${readingSessions.durationSeconds})::int`,
+        })
+        .from(readingSessions)
+        .innerJoin(bookFiles, eq(bookFiles.id, readingSessions.bookFileId))
+        .innerJoin(books, eq(books.id, bookFiles.bookId))
+        .where(
+          and(
+            eq(readingSessions.userId, userId),
+            inArray(books.libraryId, accessibleLibraryIds),
+            gt(readingSessions.durationSeconds, 0),
+            ...cfClauses,
+          ),
+        )
+        .groupBy(sessionDay)
+        .orderBy(desc(sessionDay));
+
+      return rows.filter((r) => r.totalSeconds > 0).map((r) => r.day);
     }
 
     const rows = await this.db
@@ -171,8 +202,7 @@ export class DashboardWidgetRepository {
       .groupBy(userReadingDailyStats.day)
       .orderBy(desc(userReadingDailyStats.day));
 
-    const readDays = new Set(rows.filter((r) => r.totalSeconds > 0).map((r) => r.day));
-    return computeStreakData(readDays, new Date());
+    return rows.filter((r) => r.totalSeconds > 0).map((r) => r.day);
   }
 
   async getLibraryOverview(accessibleLibraryIds: number[], contentFilters?: ContentFilterRules): Promise<LibraryOverviewWidgetData> {
@@ -296,6 +326,10 @@ export class DashboardWidgetRepository {
     maxStreakThisMonth: number;
     newAuthorsRead: number;
     pagesReadThisMonth: number;
+    genresLast6Months: string[];
+    genresReadThisMonth: string[];
+    authorsReadThisMonth: string[];
+    readingDaysThisMonth: string[];
   }> {
     if (accessibleLibraryIds.length === 0) {
       return {
@@ -312,6 +346,10 @@ export class DashboardWidgetRepository {
         maxStreakThisMonth: 0,
         newAuthorsRead: 0,
         pagesReadThisMonth: 0,
+        genresLast6Months: [],
+        genresReadThisMonth: [],
+        authorsReadThisMonth: [],
+        readingDaysThisMonth: [],
       };
     }
 
@@ -351,10 +389,17 @@ export class DashboardWidgetRepository {
         .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
         .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookGenres.genreId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
         .where(
           and(
             eq(userBookStatus.userId, userId),
@@ -417,10 +462,17 @@ export class DashboardWidgetRepository {
           ),
         ),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookGenres.genreId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
         .where(
           and(
             eq(userBookStatus.userId, userId),
@@ -432,10 +484,17 @@ export class DashboardWidgetRepository {
           ),
         ),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookAuthors.authorId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookAuthors.authorId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${authors.name}), ''))) filter (where nullif(trim(${authors.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookAuthors, eq(bookAuthors.bookId, books.id))
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
         .where(
           and(
             eq(userBookStatus.userId, userId),
@@ -548,6 +607,10 @@ export class DashboardWidgetRepository {
       oldestInProgressFinished: (finishedThisMonthRow?.count ?? 0) > 0,
       newAuthorsRead: newAuthorRow?.count ?? 0,
       pagesReadThisMonth,
+      genresLast6Months: genreRow?.values ?? [],
+      genresReadThisMonth: newGenreRow?.values ?? [],
+      authorsReadThisMonth: newAuthorRow?.values ?? [],
+      readingDaysThisMonth: thisMonthReadDays.map((r) => r.day),
     };
   }
 
@@ -698,16 +761,35 @@ export class DashboardWidgetRepository {
     readingDaysRatio: number;
     peakHour: number;
     avgPagesPerHour: number | null;
+    genresRead: string[];
+    readingDays: string[];
+    lookbackDays: number;
+    hourBuckets: { hour: number; totalSeconds: number }[];
+    pagesReadForSpeed: number;
+    secondsReadForSpeed: number;
   }> {
     if (accessibleLibraryIds.length === 0) {
-      return { avgPageCount: 0, uniqueGenres: 0, totalBooks: 0, readingDaysRatio: 0, peakHour: 12, avgPagesPerHour: null };
+      return {
+        avgPageCount: 0,
+        uniqueGenres: 0,
+        totalBooks: 0,
+        readingDaysRatio: 0,
+        peakHour: 12,
+        avgPagesPerHour: null,
+        genresRead: [],
+        readingDays: [],
+        lookbackDays: 0,
+        hourBuckets: [],
+        pagesReadForSpeed: 0,
+        secondsReadForSpeed: 0,
+      };
     }
 
     const cfClauses = this.getContentFilterClauses(contentFilters);
     const libFilter = inArray(books.libraryId, accessibleLibraryIds);
     const presentFilter = eq(books.status, 'present');
 
-    const [[statsRow], [genreRow], dailyRows, [peakRow], [knownSpeedRow], [unknownSpeedRow]] = await Promise.all([
+    const [[statsRow], [genreRow], dailyRows, hourRows, [knownSpeedRow], [unknownSpeedRow]] = await Promise.all([
       this.db
         .select({
           avg: sql<number>`coalesce(avg(${bookMetadata.pageCount}), 0)::int`,
@@ -718,10 +800,17 @@ export class DashboardWidgetRepository {
         .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
         .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookGenres.genreId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`coalesce(
+            array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+            array[]::text[]
+          )`,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
         .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), libFilter, presentFilter, ...cfClauses)),
       this.db
         .select({
@@ -746,8 +835,7 @@ export class DashboardWidgetRepository {
         .innerJoin(books, eq(books.id, readingSessions.bookId))
         .where(and(eq(readingSessions.userId, userId), libFilter, presentFilter, ...cfClauses))
         .groupBy(sql`extract(hour from ${readingSessions.startedAt})`)
-        .orderBy(desc(sql`sum(${readingSessions.durationSeconds})`))
-        .limit(1),
+        .orderBy(desc(sql`sum(${readingSessions.durationSeconds})`)),
       this.db
         .select({
           totalPages: sql<number>`coalesce(sum(${bookMetadata.pageCount} * ${readingSessions.progressDelta} / 100.0), 0)::float`,
@@ -801,15 +889,23 @@ export class DashboardWidgetRepository {
     const pagesFromKnownSpeed = knownSpeedRow?.totalPages ?? 0;
     const pagesFromUnknownSpeed = ((unknownSpeedRow?.totalProgress ?? 0) * inferredPageCount) / 100;
     const speedSeconds = (knownSpeedRow?.totalSeconds ?? 0) + (unknownSpeedRow?.totalSeconds ?? 0);
+    const speedPages = pagesFromKnownSpeed + pagesFromUnknownSpeed;
     const avgPagesPerHour = speedSeconds > 0 ? (pagesFromKnownSpeed + pagesFromUnknownSpeed) / (speedSeconds / 3600) : null;
+    const hourBuckets = hourRows.map((row) => ({ hour: row.hour, totalSeconds: row.total }));
 
     return {
       avgPageCount: statsRow?.avg ?? 0,
       uniqueGenres: genreRow?.count ?? 0,
       totalBooks: statsRow?.total ?? 0,
       readingDaysRatio: activeDays / daysSinceLookback,
-      peakHour: peakRow?.hour ?? 12,
+      peakHour: hourBuckets[0]?.hour ?? 12,
       avgPagesPerHour,
+      genresRead: genreRow?.values ?? [],
+      readingDays: dailyRows.filter((r) => r.seconds > 0).map((r) => r.day),
+      lookbackDays: daysSinceLookback,
+      hourBuckets,
+      pagesReadForSpeed: speedPages,
+      secondsReadForSpeed: speedSeconds,
     };
   }
 
@@ -896,9 +992,24 @@ export class DashboardWidgetRepository {
     totalBooksRead: number;
     publicationYears: number[];
     uniqueLanguages: number;
+    genresRead: string[];
+    genresInLibrary: string[];
+    authorsRead: string[];
+    languagesRead: string[];
   }> {
     if (accessibleLibraryIds.length === 0) {
-      return { uniqueGenresRead: 0, totalGenresInLibrary: 0, uniqueAuthorsRead: 0, totalBooksRead: 0, publicationYears: [], uniqueLanguages: 0 };
+      return {
+        uniqueGenresRead: 0,
+        totalGenresInLibrary: 0,
+        uniqueAuthorsRead: 0,
+        totalBooksRead: 0,
+        publicationYears: [],
+        uniqueLanguages: 0,
+        genresRead: [],
+        genresInLibrary: [],
+        authorsRead: [],
+        languagesRead: [],
+      };
     }
 
     const cfClauses = this.getContentFilterClauses(contentFilters);
@@ -908,21 +1019,48 @@ export class DashboardWidgetRepository {
 
     const [[genresReadRow], [totalGenresRow], [authorsRow], [booksRow], yearRows, [langRow]] = await Promise.all([
       this.db
-        .select({ count: sql<number>`count(distinct ${bookGenres.genreId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookGenres, eq(bookGenres.bookId, books.id))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
         .where(and(readFilter, libFilter, presentFilter, ...cfClauses)),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookGenres.genreId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookGenres.genreId})::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${genres.name}), ''))) filter (where nullif(trim(${genres.name}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
         .from(bookGenres)
         .innerJoin(books, eq(books.id, bookGenres.bookId))
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
         .where(and(libFilter, presentFilter, ...cfClauses)),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookAuthors.authorId})::int` })
+        .select({
+          count: sql<number>`count(distinct ${bookAuthors.authorId})::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${authors.name}), ''))) filter (where nullif(trim(${authors.name}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookAuthors, eq(bookAuthors.bookId, books.id))
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
         .where(and(readFilter, libFilter, presentFilter, ...cfClauses)),
       this.db
         .select({ count: sql<number>`count(*)::int` })
@@ -936,7 +1074,15 @@ export class DashboardWidgetRepository {
         .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
         .where(and(readFilter, libFilter, presentFilter, isNotNull(bookMetadata.publishedYear), ...cfClauses)),
       this.db
-        .select({ count: sql<number>`count(distinct ${bookMetadata.language})::int` })
+        .select({
+          count: sql<number>`count(distinct lower(nullif(trim(${bookMetadata.language}), '')))::int`,
+          values: sql<string[]>`
+            coalesce(
+              array_agg(distinct lower(nullif(trim(${bookMetadata.language}), ''))) filter (where nullif(trim(${bookMetadata.language}), '') is not null),
+              array[]::text[]
+            )
+          `,
+        })
         .from(userBookStatus)
         .innerJoin(books, eq(books.id, userBookStatus.bookId))
         .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
@@ -950,6 +1096,10 @@ export class DashboardWidgetRepository {
       totalBooksRead: booksRow?.count ?? 0,
       publicationYears: yearRows.map((r) => r.year!),
       uniqueLanguages: langRow?.count ?? 0,
+      genresRead: stringArrayValue(genresReadRow?.values),
+      genresInLibrary: stringArrayValue(totalGenresRow?.values),
+      authorsRead: stringArrayValue(authorsRow?.values),
+      languagesRead: stringArrayValue(langRow?.values),
     };
   }
 
@@ -982,4 +1132,9 @@ export class DashboardWidgetRepository {
 
     return rows;
   }
+}
+
+function stringArrayValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter((item) => item.length > 0);
 }

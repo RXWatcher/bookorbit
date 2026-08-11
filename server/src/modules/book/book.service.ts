@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { access, readdir, rm, stat, rename } from 'fs/promises';
-import { inArray, type SQL } from 'drizzle-orm';
+import { and, inArray, type SQL } from 'drizzle-orm';
 
 import { bookCoverDirPath, bookThumbnailPath, findPreferredBookCoverFileName } from '../../common/book-cover-storage';
 import { MAX_BOOK_QUERY_OFFSET_ROWS, isBookQueryOffsetWithinLimit } from '../../common/constants/pagination.constants';
@@ -19,6 +19,7 @@ import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { normalizeMetadataText, normalizeMetadataTextKey } from '../../common/utils/metadata-text-normalize.utils';
 import { normalizePublishedDate, publishedYearFromDateKey } from '../../common/utils/published-date.utils';
 import { formatSeriesIndex } from '../../common/utils/series-index-format.utils';
+import { transformLibraryIdQueryValue } from '../../common/utils/library-query-id-transform';
 import { SeriesExpectedCountService } from '../../common/services/series-expected-count.service';
 import { SeriesMembershipService } from '../../common/services/series-membership.service';
 import { isDateKey, resolveTimeZone, toDateKeyInTimeZone, toTimeZoneStartOfDay } from '../../common/utils/timezone.utils';
@@ -32,6 +33,9 @@ import { basename, dirname, extname, join } from 'path';
 
 import {
   BOOK_METADATA_LOCK_FIELDS,
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
   DEFAULT_DOWNLOAD_PATTERN,
   MetadataProviderKey,
   Permission,
@@ -43,6 +47,7 @@ import {
 } from '@bookorbit/types';
 import type {
   AudiobookChapter,
+  BookCard,
   BookCommunityRating,
   BookKoboState,
   BookMetadataRefreshPreviewFields,
@@ -57,11 +62,14 @@ import type {
   GroupRule,
   JumpBucketsResponse,
   JumpBucketsQuery,
+  LibraryBookItem,
+  LibraryBooksPage,
   MetadataFetchDiagnostics,
   MetadataField,
   ReadStatus,
   SortSpec,
   UserBookStatus,
+  WarehouseMediaType,
   WriteResult,
 } from '@bookorbit/types';
 import type { ContentFilterRules } from '@bookorbit/types';
@@ -85,8 +93,17 @@ import { AchievementEventsService, ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED } from 
 import { BookMetadataLockService } from '../book-metadata-lock/book-metadata-lock.service';
 import { BookQueryBuilder } from './book-query-builder.service';
 import { BookRepository } from './book.repository';
+import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service';
+import { WarehouseRepository } from '../warehouse/warehouse.repository';
 import { ComicMetadataRepository } from '../metadata/comic-metadata.repository';
 import { CustomMetadataService } from '../custom-metadata/custom-metadata.service';
+import { BookSearchService } from '../book-search/book-search.service';
+import {
+  catalogDocumentId,
+  nativeDocumentId,
+  parseSearchDocumentId as parseSearchDocumentIdFromMapper,
+} from '../book-search/book-search-document.mapper';
+import { ContentFilterRepository } from '../user/content-filter.repository';
 import { BookDetailDto } from './dto/book-detail.dto';
 import type { BulkMetadataField } from './dto/bulk-set-metadata.dto';
 import type { BulkEditFieldsDto } from './dto/bulk-edit-metadata.dto';
@@ -101,6 +118,7 @@ import { UpdatePersonalNoteDto } from './dto/update-personal-note.dto';
 import type { UpdateBookMetadataAndLocksDto } from './dto/update-book-metadata-and-locks.dto';
 import { buildBookDetailSupplementalFields } from './utils/build-book-detail-supplemental-fields';
 import type { SetStatusDto } from '../user-book-status/dto/set-status.dto';
+import type { WarehouseCatalogItemRow } from '../../db/schema';
 
 type SeriesCollapseQueryOptions = {
   seriesSelectionFilter: GroupRule | undefined;
@@ -154,6 +172,21 @@ type ExportCandidateFile = {
   sizeBytes: number | null;
   sortOrder?: number;
 };
+
+type LocalGlobalSearchResult = Awaited<ReturnType<BookRepository['searchAcrossLibraries']>>[number] & { type: 'book' };
+type CatalogItemGlobalSearchResult = {
+  type: 'catalog-item';
+  mediaType: WarehouseMediaType;
+  remoteId: string;
+  title: string | null;
+  seriesName: string | null;
+  authors: string[];
+  narrators: string[];
+  libraryName: string;
+  formats: string[];
+  hasCover: boolean;
+};
+type GlobalSearchResult = LocalGlobalSearchResult | CatalogItemGlobalSearchResult;
 
 export type ExportPlan = {
   files: { absolutePath: string; zipPath: string; sizeBytes: number }[];
@@ -216,6 +249,127 @@ type MetadataExportBuildResult = {
   fileName: string;
 };
 
+function isCatalogLibraryItem(item: LibraryBookItem): item is Extract<LibraryBookItem, { type: 'catalog-item' }> {
+  return 'type' in item && item.type === 'catalog-item';
+}
+
+function getLibraryBookItemSortValue(item: LibraryBookItem, field: BookQuery['sort'][number]['field']): string | number | null {
+  switch (field) {
+    case 'title':
+      return item.title?.toLowerCase() ?? null;
+    case 'author':
+      return item.authors?.[0]?.toLowerCase() ?? null;
+    case 'series':
+      return item.seriesName?.toLowerCase() ?? null;
+    case 'addedAt':
+      return item.addedAt ?? null;
+    case 'language':
+      return item.language?.toLowerCase() ?? null;
+    case 'format':
+      return isCatalogLibraryItem(item) ? (item.formats[0]?.toLowerCase() ?? null) : (item.files[0]?.format?.toLowerCase() ?? null);
+    case 'rating':
+      return item.rating ?? null;
+    case 'publishedYear':
+      return item.publishedYear ?? null;
+    case 'pageCount':
+      return item.pageCount ?? null;
+    case 'seriesIndex':
+      return item.seriesIndex ?? null;
+    case 'metadataScore':
+      return item.metadataScore ?? null;
+    case 'updatedAt':
+      return item.updatedAt ?? null;
+    case 'readProgress':
+      return item.readingProgress ?? null;
+    case 'publisher':
+      return item.publisher?.toLowerCase() ?? null;
+    case 'lastReadAt':
+      return isCatalogLibraryItem(item) ? (item.lastReadAt ?? null) : (item.readStatus?.updatedAt ?? null);
+    case 'startedAt':
+      return isCatalogLibraryItem(item) ? null : (item.readStatus?.startedAt ?? null);
+    case 'finishedAt':
+      return isCatalogLibraryItem(item) ? (item.finishedAt ?? null) : (item.readStatus?.finishedAt ?? null);
+    case 'readStatus':
+      return isCatalogLibraryItem(item) ? (item.readStatus ?? null) : (item.readStatus?.status ?? null);
+    case 'fileSize':
+      return isCatalogLibraryItem(item)
+        ? (item.fileSizeBytes ?? null)
+        : (item.files.find((file) => file.role === 'primary')?.sizeBytes ?? item.files[0]?.sizeBytes ?? null);
+    default:
+      return null;
+  }
+}
+
+/** Mirrors the ranking the catalogue query applies, so a merged page keeps the same order. */
+const RELEVANCE_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'of', 'or', 'to', 'in', 'on', 'for', 'is', 'it', 'at', 'by', 'with']);
+
+function relevanceWords(term: string): string[] {
+  const words = term.trim().split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((word) => !RELEVANCE_STOPWORDS.has(word.toLowerCase()));
+  return meaningful.length > 0 ? meaningful : words;
+}
+
+/** Lower is better, matching buildCatalogRelevanceOrder in the warehouse repository. */
+function libraryBookRelevance(item: LibraryBookItem, term: string): number {
+  const query = term
+    .trim()
+    .replace(/^"(.+)"$/, '$1')
+    .toLowerCase();
+  if (!query) return 4;
+
+  const title = (item.title ?? '').toLowerCase();
+  if (title === query) return 0;
+  if (title.includes(query)) return 1;
+
+  const words = relevanceWords(query);
+  if (words.length > 0 && words.every((word) => title.includes(word.toLowerCase()))) return 2;
+
+  const authors = (item.authors ?? []).join(' ').toLowerCase();
+  if (authors.includes(query)) return 3;
+
+  return 4;
+}
+
+function sortLibraryBookItems(items: LibraryBookItem[], sort: BookQuery['sort'], searchTerm?: string): LibraryBookItem[] {
+  const term = searchTerm?.trim();
+  if (sort.length === 0 && !term) return items;
+
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      if (term) {
+        const relevance = libraryBookRelevance(a.item, term) - libraryBookRelevance(b.item, term);
+        if (relevance !== 0) return relevance;
+        // Within a tier, the title that is closest to being just the query wins, so
+        // "The Will of the Many" beats "How Many Old Ladies Will Die?".
+        const excess = (a.item.title ?? '').length - (b.item.title ?? '').length;
+        if (excess !== 0) return excess;
+      }
+      for (const spec of sort) {
+        const av = getLibraryBookItemSortValue(a.item, spec.field);
+        const bv = getLibraryBookItemSortValue(b.item, spec.field);
+        if (av === null && bv === null) continue;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        if (cmp !== 0) return spec.dir === 'asc' ? cmp : -cmp;
+      }
+      return a.index - b.index;
+    })
+    .map(({ item }) => item);
+}
+
+type ParsedSearchDocumentId = { source: 'native'; bookId: number } | { source: 'catalog'; mediaType: WarehouseMediaType; remoteId: string };
+
+/** Thin wrapper over the mapper's shared parser: this call site knows the media type is
+ *  actually a WarehouseMediaType, whereas the mapper (shared with the outbox drain, which has
+ *  no such guarantee) only promises a string. */
+function parseSearchDocumentId(id: string): ParsedSearchDocumentId | null {
+  const parsed = parseSearchDocumentIdFromMapper(id);
+  if (!parsed) return null;
+  return parsed.source === 'native' ? parsed : { source: 'catalog', mediaType: parsed.mediaType as WarehouseMediaType, remoteId: parsed.remoteId };
+}
+
 type MetadataSaveResult = {
   book: BookDetailDto;
   write: WriteResult | null;
@@ -266,8 +420,12 @@ export class BookService {
     @Optional() private readonly fileWriteService: FileWriteService,
     @Optional() private readonly fileRenameService: FileRenameService,
     @Optional() private readonly achievementEvents: AchievementEventsService,
+    @Optional() private readonly warehouseRepo?: WarehouseRepository,
+    @Optional() private readonly warehouseCatalog?: WarehouseCatalogService,
     @Optional() private readonly seriesMemberships?: SeriesMembershipService,
     @Optional() private readonly seriesExpectedCount?: SeriesExpectedCountService,
+    @Optional() private readonly bookSearchService?: BookSearchService,
+    @Optional() private readonly contentFilterRepository?: ContentFilterRepository,
   ) {
     this.appDataPath = this.config.get<string>('storage.appDataPath')!;
   }
@@ -513,14 +671,15 @@ export class BookService {
       let accessibleLibraryIds = libs.map((l) => l.id);
       const timeZone = this.resolveUserTimeZone(user);
       if (dto.query.libraryId !== undefined) {
-        if (!accessibleLibraryIds.includes(dto.query.libraryId)) {
-          throw new ForbiddenException(`Library ${dto.query.libraryId} is not accessible`);
+        const requestedLibraryId = this.normalizeQueryLibraryId(dto.query.libraryId);
+        if (!accessibleLibraryIds.includes(requestedLibraryId)) {
+          throw new ForbiddenException(`Library ${requestedLibraryId} is not accessible`);
         }
-        accessibleLibraryIds = [dto.query.libraryId];
+        accessibleLibraryIds = [requestedLibraryId];
       }
       const where = this.queryBuilder.buildWhere(dto.query.filter, {
         accessibleLibraryIds,
-        implicitLibraryId: dto.query.libraryId,
+        implicitLibraryId: dto.query.libraryId === undefined ? undefined : this.normalizeQueryLibraryId(dto.query.libraryId),
         userId: user.id,
         q: dto.query.q,
         timeZone,
@@ -608,12 +767,17 @@ export class BookService {
     dto: MetadataExportDto,
     user: RequestUser,
   ): Promise<{
-    rows: BooksPage['items'];
+    rows: LibraryBookItem[];
     rowCount: number;
     scope: MetadataExportSelectionScope;
     queryMeta?: MetadataExportContextMeta['query'];
   }> {
     if (dto.query) {
+      const sourceBackedMediaType = dto.query.libraryId !== undefined ? this.sourceBackedMediaTypeForLibraryId(dto.query.libraryId) : null;
+      if (sourceBackedMediaType) {
+        return this.resolveSourceBackedMetadataExportRows(dto, user, sourceBackedMediaType, dto.query.libraryId!);
+      }
+
       const libraries = await this.libraryService.findAll(user);
       let accessibleLibraryIds = libraries.map((library) => library.id);
       const timeZone = this.resolveUserTimeZone(user);
@@ -688,6 +852,12 @@ export class BookService {
     scope: MetadataExportSelectionScope;
   }> {
     if (dto.query) {
+      const sourceBackedMediaType = dto.query.libraryId !== undefined ? this.sourceBackedMediaTypeForLibraryId(dto.query.libraryId) : null;
+      if (sourceBackedMediaType) {
+        const rowCount = await this.resolveSourceBackedMetadataExportSelectionCount(dto, user, sourceBackedMediaType, dto.query.libraryId!);
+        return { rowCount, scope: 'all-matching' };
+      }
+
       const libraries = await this.libraryService.findAll(user);
       let accessibleLibraryIds = libraries.map((library) => library.id);
       const timeZone = this.resolveUserTimeZone(user);
@@ -719,6 +889,89 @@ export class BookService {
       throw new BadRequestException(`Some selected books were not found: ${missingIds.join(', ')}`);
     }
     return { rowCount: uniqueIds.length, scope: 'selected' };
+  }
+
+  private sourceBackedMediaTypeForLibraryId(libraryId: number): WarehouseMediaType | null {
+    if (libraryId === CLOUD_EBOOK_LIBRARY_ID) return 'ebook';
+    if (libraryId === CLOUD_AUDIO_LIBRARY_ID) return 'audiobook';
+    if (libraryId === CLOUD_COMIC_LIBRARY_ID) return 'comic';
+    return null;
+  }
+
+  private sourceBackedLibraryIdForMediaType(mediaType: WarehouseMediaType): number {
+    if (mediaType === 'audiobook') return CLOUD_AUDIO_LIBRARY_ID;
+    if (mediaType === 'comic') return CLOUD_COMIC_LIBRARY_ID;
+    return CLOUD_EBOOK_LIBRARY_ID;
+  }
+
+  private async assertSourceBackedMetadataExportAccess(user: RequestUser, libraryId: number): Promise<void> {
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    if (!libraries.some((library) => library.id === libraryId)) {
+      throw new ForbiddenException(`Library ${libraryId} is not accessible`);
+    }
+  }
+
+  private async resolveSourceBackedMetadataExportSelectionCount(
+    dto: MetadataExportDto,
+    user: RequestUser,
+    mediaType: WarehouseMediaType,
+    libraryId: number,
+  ): Promise<number> {
+    if (!this.warehouseCatalog) throw new BadRequestException('No books matched export selection');
+    await this.assertSourceBackedMetadataExportAccess(user, libraryId);
+    const sort = this.normalizeExportSort(dto.query?.sort);
+    const page = await this.warehouseCatalog.queryLibraryItems(user, mediaType, {
+      filter: dto.query?.filter,
+      q: dto.query?.q,
+      sort,
+      pagination: { page: 0, size: 1 },
+    });
+    if (page.total === 0) throw new BadRequestException('No books matched export selection');
+    return page.total;
+  }
+
+  private async resolveSourceBackedMetadataExportRows(
+    dto: MetadataExportDto,
+    user: RequestUser,
+    mediaType: WarehouseMediaType,
+    libraryId: number,
+  ): Promise<{
+    rows: LibraryBookItem[];
+    rowCount: number;
+    scope: MetadataExportSelectionScope;
+    queryMeta?: MetadataExportContextMeta['query'];
+  }> {
+    if (!this.warehouseCatalog) throw new BadRequestException('No books matched export selection');
+    const rowCount = await this.resolveSourceBackedMetadataExportSelectionCount(dto, user, mediaType, libraryId);
+    if (rowCount > METADATA_EXPORT_LIMITS.MAX_ROWS) {
+      throw new BadRequestException(`Too many rows selected for metadata export. Limit is ${METADATA_EXPORT_LIMITS.MAX_ROWS}.`);
+    }
+
+    const sort = this.normalizeExportSort(dto.query?.sort);
+    const rows: LibraryBookItem[] = [];
+    const pageSize = Math.min(100, rowCount);
+    for (let pageIndex = 0; rows.length < rowCount; pageIndex++) {
+      const page = await this.warehouseCatalog.queryLibraryItems(user, mediaType, {
+        filter: dto.query?.filter,
+        q: dto.query?.q,
+        sort,
+        pagination: { page: pageIndex, size: pageSize },
+      });
+      rows.push(...page.items);
+      if (page.items.length === 0 || rows.length >= page.total) break;
+    }
+
+    return {
+      rows: rows.slice(0, rowCount),
+      rowCount,
+      scope: 'all-matching',
+      queryMeta: {
+        libraryId,
+        q: dto.query?.q,
+        sort: sort.map((spec) => ({ field: spec.field, dir: spec.dir })),
+        filterApplied: !!dto.query?.filter,
+      },
+    };
   }
 
   private resolveVisibleExportKeys(visibleColumns: string[], options: MetadataExportResolvedOptions): string[] {
@@ -886,12 +1139,13 @@ export class BookService {
       scope,
       format: dto.format,
     };
-    const bookIds = rows.map((row) => row.id);
+    const localRows = rows.filter((row): row is BooksPage['items'][number] => !isCatalogLibraryItem(row));
+    const bookIds = localRows.map((row) => row.id);
     const [libraryRows, libraries, filePathRows, customValuesByBookId] = await Promise.all([
-      this.bookRepo.findLibraryIdsByBookIds(bookIds),
-      this.libraryService.findAll(user),
-      options.includeFilePaths ? this.bookRepo.findAllFilesByBookIds(bookIds) : Promise.resolve([]),
-      this.customMetadataService.getExportValues(bookIds),
+      bookIds.length > 0 ? this.bookRepo.findLibraryIdsByBookIds(bookIds) : Promise.resolve([]),
+      bookIds.length > 0 ? this.libraryService.findAll(user) : Promise.resolve([]),
+      options.includeFilePaths && bookIds.length > 0 ? this.bookRepo.findAllFilesByBookIds(bookIds) : Promise.resolve([]),
+      bookIds.length > 0 ? this.customMetadataService.getExportValues(bookIds) : Promise.resolve(new Map()),
     ]);
 
     const libraryIdByBookId = new Map(libraryRows.map((row) => [row.id, row.libraryId]));
@@ -904,6 +1158,10 @@ export class BookService {
     }
 
     const records = rows.map((row) => {
+      if (isCatalogLibraryItem(row)) {
+        return this.catalogMetadataExportRecord(row, options);
+      }
+
       const libraryId = libraryIdByBookId.get(row.id) ?? null;
       const primaryFile = row.files.find((file) => file.role === 'primary') ?? row.files[0] ?? null;
       const formats = [...new Set(row.files.map((file) => file.format).filter((format): format is string => !!format))];
@@ -967,7 +1225,9 @@ export class BookService {
       } as Record<string, unknown>;
     });
 
-    const customExportKeys = [...new Set(records.flatMap((record) => Object.keys(record).filter((key) => key.startsWith('custom.'))))].sort();
+    const customExportKeys = [
+      ...new Set(records.flatMap((record) => Object.keys(record).filter((key) => key.startsWith('custom.')))),
+    ].sort() as string[];
     const exportKeys =
       options.columnsMode === 'visible'
         ? this.resolveVisibleExportKeys(options.visibleColumns, options)
@@ -1010,6 +1270,56 @@ export class BookService {
     };
   }
 
+  private catalogMetadataExportRecord(
+    row: Extract<LibraryBookItem, { type: 'catalog-item' }>,
+    options: MetadataExportResolvedOptions,
+  ): Record<string, unknown> {
+    const includePersonalData = options.includePersonalData;
+    const readStatus = includePersonalData ? (row.readStatus ?? null) : null;
+    const rating = includePersonalData ? (row.rating ?? null) : null;
+    const readProgress = includePersonalData ? (row.readingProgress ?? null) : null;
+    const readFinishedAt = includePersonalData ? (row.finishedAt ?? null) : null;
+    const readUpdatedAt = includePersonalData ? (row.lastReadAt ?? null) : null;
+
+    return {
+      bookId: row.remoteId,
+      libraryId: this.sourceBackedLibraryIdForMediaType(row.mediaType),
+      libraryName: row.libraryName,
+      status: 'present',
+      title: row.title,
+      subtitle: row.subtitle,
+      authors: row.authors,
+      seriesName: row.seriesName,
+      seriesIndex: row.seriesIndex ?? null,
+      publishedYear: row.publishedYear ?? null,
+      language: row.language ?? null,
+      publisher: row.publisher ?? null,
+      pageCount: row.pageCount ?? null,
+      isbn13: null,
+      genres: [],
+      tags: [],
+      narrators: row.narrators,
+      metadataScore: row.metadataScore ?? null,
+      hasCover: row.hasCover,
+      hasMetadataLocks: false,
+      lockedFields: [],
+      addedAt: row.addedAt ?? null,
+      updatedAt: row.updatedAt ?? null,
+      fileCount: row.formats.length,
+      primaryFormat: row.formats[0] ?? null,
+      formats: row.formats,
+      totalFileSizeBytes: row.fileSizeBytes ?? null,
+      rating,
+      readProgress,
+      readStatus,
+      readStartedAt: null,
+      readFinishedAt,
+      readUpdatedAt,
+      folderPath: null,
+      filePaths: [],
+    };
+  }
+
   private assertPaginationWindow(page: number, size: number): void {
     if (!isBookQueryOffsetWithinLimit(page * size)) {
       throw new BadRequestException(`pagination window is too deep; page * size must be <= ${MAX_BOOK_QUERY_OFFSET_ROWS}`);
@@ -1031,19 +1341,199 @@ export class BookService {
     return this.executeBooksQuery(user.id, where, query);
   }
 
-  async globalQuery(user: RequestUser, query: BookQuery): Promise<BooksPage> {
+  async globalQuery(user: RequestUser, query: BookQuery): Promise<LibraryBooksPage> {
     this.assertPaginationWindow(query.pagination.page, query.pagination.size);
-    const libs = await this.libraryService.findAll(user);
-    const accessibleLibraryIds = libs.map((l) => l.id);
+    const libs = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    const accessibleLibraryIds = libs.map((l) => l.id).filter((id) => id > 0);
+    const hasEbookLibrary = libs.some((l) => l.id === CLOUD_EBOOK_LIBRARY_ID);
+    const hasAudioLibrary = libs.some((l) => l.id === CLOUD_AUDIO_LIBRARY_ID);
+    const hasComicLibrary = libs.some((l) => l.id === CLOUD_COMIC_LIBRARY_ID);
+
+    // BookSearchQuery has no filter concept, so a request carrying both a search term and a
+    // filter must take the merge path, which applies the filter through queryBuilder.buildWhere
+    // and querySourceBackedGlobalWindow.
+    const trimmedSearchTerm = query.q?.trim();
+    const hasActiveFilter = (query.filter?.rules?.length ?? 0) > 0;
+    if (trimmedSearchTerm && !hasActiveFilter) {
+      const catalogMediaTypes: WarehouseMediaType[] = [];
+      if (hasEbookLibrary) catalogMediaTypes.push('ebook');
+      if (hasAudioLibrary) catalogMediaTypes.push('audiobook');
+      if (hasComicLibrary) catalogMediaTypes.push('comic');
+
+      const providerPage = await this.globalQueryViaSearchProvider(user, query, trimmedSearchTerm, accessibleLibraryIds, catalogMediaTypes);
+      if (providerPage) return providerPage;
+    }
+
+    const { page, size } = query.pagination;
+    const windowSize = (page + 1) * size;
+    const effectiveSort: BookQuery['sort'] = query.sort.length > 0 ? query.sort : [{ field: 'title', dir: 'asc' }];
+    const effectiveQuery: BookQuery = { ...query, sort: effectiveSort };
+    const windowQuery: BookQuery = { ...effectiveQuery, pagination: { page: 0, size: windowSize } };
     const timeZone = this.resolveUserTimeZone(user);
-    const where = this.queryBuilder.buildWhere(query.filter, {
+    const localPage =
+      accessibleLibraryIds.length > 0
+        ? await this.executeBooksQuery(
+            user.id,
+            this.queryBuilder.buildWhere(effectiveQuery.filter, {
+              accessibleLibraryIds,
+              userId: user.id,
+              q: effectiveQuery.q,
+              timeZone,
+              contentFilters: this.isSuperuser(user) ? undefined : user.contentFilters,
+            }),
+            windowQuery,
+          )
+        : { items: [], total: 0, page: 0, size: windowSize };
+
+    const sourcePages = await Promise.all([
+      hasEbookLibrary ? this.querySourceBackedGlobalWindow(user, 'ebook', effectiveQuery, windowSize) : null,
+      hasAudioLibrary ? this.querySourceBackedGlobalWindow(user, 'audiobook', effectiveQuery, windowSize) : null,
+      hasComicLibrary ? this.querySourceBackedGlobalWindow(user, 'comic', effectiveQuery, windowSize) : null,
+    ]);
+
+    const items = [localPage.items, ...sourcePages.map((sourcePage) => sourcePage?.items ?? [])].flat();
+    const sortedItems = sortLibraryBookItems(items, effectiveSort, effectiveQuery.q);
+    return {
+      items: sortedItems.slice(page * size, page * size + size),
+      total: localPage.total + sourcePages.reduce((sum, sourcePage) => sum + (sourcePage?.total ?? 0), 0),
+      page,
+      size,
+    };
+  }
+
+  /**
+   * Routes a global search through the configured search provider. Returns null when the
+   * provider is unavailable or fell back to SQL, so the caller runs the merge path instead
+   * (the SQL provider's own ranking already comes back through that path's ordering rules).
+   *
+   * Meilisearch returns a ranked page of document ids rather than rows, so the result is
+   * returned in exactly that order. Re-sorting it, even to apply the requested sort field,
+   * would throw away the ranking this method exists to preserve.
+   */
+  private async globalQueryViaSearchProvider(
+    user: RequestUser,
+    query: BookQuery,
+    q: string,
+    accessibleLibraryIds: number[],
+    catalogMediaTypes: WarehouseMediaType[],
+  ): Promise<LibraryBooksPage | null> {
+    if (!this.bookSearchService) return null;
+
+    const contentFilters = this.isSuperuser(user) ? undefined : await this.contentFilterRepository?.findByUserIdWithNames(user.id);
+    const result = await this.bookSearchService.search(
+      {
+        q,
+        page: query.pagination.page,
+        size: query.pagination.size,
+        userId: user.id,
+        accessibleLibraryIds,
+        mediaTypes: catalogMediaTypes,
+        contentFilters,
+      },
+      { allowSqlFallback: false },
+    );
+
+    if (!result) return null;
+
+    return {
+      items: await this.loadSearchResultItemsInOrder(user, result.ids, accessibleLibraryIds, catalogMediaTypes),
+      total: result.total,
+      page: query.pagination.page,
+      size: query.pagination.size,
+    };
+  }
+
+  /** Loads rows for a page of search result ids and restores the provider's order. A plain
+   *  `IN` lookup returns rows in arbitrary order, so the caller cannot rely on it for ranking. */
+  private async loadSearchResultItemsInOrder(
+    user: RequestUser,
+    ids: string[],
+    accessibleLibraryIds: number[],
+    catalogMediaTypes: WarehouseMediaType[],
+  ): Promise<LibraryBookItem[]> {
+    const nativeBookIds: number[] = [];
+    const catalogRemoteIdsByMediaType = new Map<WarehouseMediaType, string[]>();
+
+    for (const id of ids) {
+      const parsed = parseSearchDocumentId(id);
+      if (!parsed) continue;
+      if (parsed.source === 'native') {
+        nativeBookIds.push(parsed.bookId);
+      } else if (catalogMediaTypes.includes(parsed.mediaType)) {
+        const remoteIds = catalogRemoteIdsByMediaType.get(parsed.mediaType) ?? [];
+        remoteIds.push(parsed.remoteId);
+        catalogRemoteIdsByMediaType.set(parsed.mediaType, remoteIds);
+      }
+    }
+
+    const [nativeItems, catalogItemGroups] = await Promise.all([
+      this.loadNativeItemsByIds(user, nativeBookIds, accessibleLibraryIds),
+      Promise.all(
+        Array.from(catalogRemoteIdsByMediaType.entries()).map(([mediaType, remoteIds]) =>
+          this.warehouseCatalog ? this.warehouseCatalog.getCatalogItemsByRemoteIds(user, mediaType, remoteIds) : Promise.resolve([]),
+        ),
+      ),
+    ]);
+
+    const itemsById = new Map<string, LibraryBookItem>();
+    for (const item of nativeItems) {
+      itemsById.set(nativeDocumentId(item.id), item);
+    }
+    for (const group of catalogItemGroups) {
+      for (const item of group) {
+        if (!item.catalogSource) continue;
+        itemsById.set(catalogDocumentId(item.catalogSource.mediaType, item.catalogSource.remoteId), item);
+      }
+    }
+
+    return ids.map((id) => itemsById.get(id)).filter((item): item is LibraryBookItem => item !== undefined);
+  }
+
+  /** The search index is the first line of defence, but native documents carry no tags or
+   *  genres and can lag a permission change, so the library scope and the user's content
+   *  filters are both re-applied here through the same buildWhere the merge path uses. */
+  private async loadNativeItemsByIds(user: RequestUser, bookIds: number[], accessibleLibraryIds: number[]): Promise<BookCard[]> {
+    if (bookIds.length === 0 || accessibleLibraryIds.length === 0) return [];
+
+    const where = this.queryBuilder.buildWhere(null, {
       accessibleLibraryIds,
       userId: user.id,
-      q: query.q,
-      timeZone,
       contentFilters: this.isSuperuser(user) ? undefined : user.contentFilters,
     });
-    return this.executeBooksQuery(user.id, where, query);
+
+    const page = await this.executeBooksQuery(user.id, and(inArray(books.id, bookIds), where), {
+      sort: [],
+      pagination: { page: 0, size: bookIds.length },
+    });
+    return page.items;
+  }
+
+  private async querySourceBackedGlobalWindow(
+    user: RequestUser,
+    mediaType: WarehouseMediaType,
+    query: BookQuery,
+    windowSize: number,
+  ): Promise<{ items: LibraryBookItem[]; total: number }> {
+    if (!this.warehouseCatalog || windowSize <= 0) {
+      return { items: [], total: 0 };
+    }
+
+    const limit = Math.min(100, windowSize);
+    const items: LibraryBookItem[] = [];
+    let total = 0;
+
+    for (let page = 0; items.length < windowSize; page++) {
+      const sourcePage = await this.warehouseCatalog.queryLibraryBooks(user, mediaType, {
+        ...query,
+        pagination: { page, size: limit },
+      });
+      total = sourcePage.total;
+      items.push(...sourcePage.items);
+
+      if (sourcePage.items.length === 0 || items.length >= total) break;
+    }
+
+    return { items: items.slice(0, windowSize), total };
   }
 
   /**
@@ -1504,11 +1994,26 @@ export class BookService {
     }
   }
 
-  async searchAcrossLibraries(q: string, limit: number, user: RequestUser) {
-    const libs = await this.libraryService.findAll(user);
+  async searchAcrossLibraries(q: string, limit: number, user: RequestUser): Promise<GlobalSearchResult[]> {
+    if (q.trim().length === 0) {
+      return [];
+    }
+
+    const libs = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const libraryIds = libs.map((l) => l.id);
+    const localLibraryIds = libraryIds.filter((libraryId) => libraryId > 0);
+    const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraryIds);
     const contentFilters = this.isSuperuser(user) ? undefined : user.contentFilters;
-    return this.bookRepo.searchAcrossLibraries(libraryIds, q, limit, contentFilters);
+    const [bookRows, catalogRows] = await Promise.all([
+      this.bookRepo.searchAcrossLibraries(localLibraryIds, q, limit, contentFilters),
+      sourceBackedMediaTypes.length > 0
+        ? (this.warehouseCatalog?.searchCatalogItems(q, limit, contentFilters, sourceBackedMediaTypes) ?? Promise.resolve([]))
+        : Promise.resolve([]),
+    ]);
+
+    return [...bookRows.map((row) => ({ type: 'book' as const, ...row })), ...catalogRows.map(mapCatalogSearchResult)]
+      .sort(compareGlobalSearchResults)
+      .slice(0, limit);
   }
 
   async deleteBooks(bookIds: number[], user: RequestUser): Promise<BookDeletionAuditMeta> {
@@ -2248,6 +2753,21 @@ export class BookService {
     );
   }
 
+  async bulkSetStatusForSelection(dto: BulkSelectionDto, status: ReadStatus, user: RequestUser): Promise<void> {
+    const sourceBackedMediaType = this.sourceBackedMediaTypeForQuerySelection(dto);
+    if (sourceBackedMediaType) {
+      if (!this.warehouseCatalog) {
+        throw new NotFoundException('Library not found');
+      }
+      await this.verifySourceBackedLibrarySelectionAccess(this.normalizeQueryLibraryId(dto.query!.libraryId), user);
+      await this.warehouseCatalog.bulkSetReadStatusForQuery(user, sourceBackedMediaType, dto.query!, status);
+      return;
+    }
+
+    const ids = await this.resolveSelectionToIds(dto, user);
+    await this.bulkSetStatus(ids, status, user);
+  }
+
   async bulkSetRating(bookIds: number[], rating: number | null, user: RequestUser): Promise<void> {
     const event = 'book.bulk.set_rating';
     const startedAt = Date.now();
@@ -2267,6 +2787,45 @@ export class BookService {
     this.logger.log(
       `[${event}] [end] userId=${user.id} count=${bookIds.length} rating=${rating ?? 'null'} updated=${updatableIds.length} skippedLocked=${lockedIds.size} durationMs=${Date.now() - startedAt} - bulk set rating completed`,
     );
+  }
+
+  async bulkSetRatingForSelection(dto: BulkSelectionDto, rating: number | null, user: RequestUser): Promise<void> {
+    const sourceBackedMediaType = this.sourceBackedMediaTypeForQuerySelection(dto);
+    if (sourceBackedMediaType) {
+      if (!this.warehouseCatalog) {
+        throw new NotFoundException('Library not found');
+      }
+      await this.verifySourceBackedLibrarySelectionAccess(this.normalizeQueryLibraryId(dto.query!.libraryId), user);
+      await this.warehouseCatalog.bulkSetRatingForQuery(user, sourceBackedMediaType, dto.query!, rating);
+      return;
+    }
+
+    const ids = await this.resolveSelectionToIds(dto, user);
+    await this.bulkSetRating(ids, rating, user);
+  }
+
+  private sourceBackedMediaTypeForQuerySelection(dto: BulkSelectionDto): WarehouseMediaType | null {
+    if (!dto.query || dto.query.libraryId === undefined) return null;
+    const libraryId = this.normalizeQueryLibraryId(dto.query.libraryId);
+    if (libraryId === CLOUD_EBOOK_LIBRARY_ID) return 'ebook';
+    if (libraryId === CLOUD_AUDIO_LIBRARY_ID) return 'audiobook';
+    if (libraryId === CLOUD_COMIC_LIBRARY_ID) return 'comic';
+    return null;
+  }
+
+  private normalizeQueryLibraryId(value: unknown): number {
+    const libraryId = transformLibraryIdQueryValue(value);
+    if (libraryId === undefined || Number.isNaN(libraryId)) {
+      throw new BadRequestException('Invalid libraryId');
+    }
+    return libraryId;
+  }
+
+  private async verifySourceBackedLibrarySelectionAccess(libraryId: number, user: RequestUser): Promise<void> {
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    if (!libraries.some((library) => library.id === libraryId)) {
+      throw new ForbiddenException(`Library ${libraryId} is not accessible`);
+    }
   }
 
   async bulkSetMetadata(bookIds: number[], field: BulkMetadataField, value: string | number | string[] | null, user: RequestUser): Promise<void> {
@@ -3366,4 +3925,47 @@ export class BookService {
     }
     return chapters;
   }
+}
+
+function mapCatalogSearchResult(row: WarehouseCatalogItemRow): CatalogItemGlobalSearchResult {
+  return {
+    type: 'catalog-item',
+    mediaType: row.mediaType,
+    remoteId: row.remoteId,
+    title: row.title,
+    seriesName: row.series ?? null,
+    authors: safeStringArray(row.authors),
+    narrators: safeStringArray(row.narrators),
+    libraryName: catalogSearchLibraryName(row.mediaType),
+    formats: row.format ? [row.format] : [],
+    hasCover: row.hasCover,
+  };
+}
+
+function catalogSearchLibraryName(mediaType: WarehouseCatalogItemRow['mediaType']): string {
+  if (mediaType === 'audiobook') return 'Audiobooks';
+  if (mediaType === 'comic') return 'Comics';
+  return 'Books';
+}
+
+function sourceBackedMediaTypesForLibraryIds(libraryIds: number[]): WarehouseMediaType[] {
+  const mediaTypes: WarehouseMediaType[] = [];
+  if (libraryIds.includes(CLOUD_EBOOK_LIBRARY_ID)) mediaTypes.push('ebook');
+  if (libraryIds.includes(CLOUD_AUDIO_LIBRARY_ID)) mediaTypes.push('audiobook');
+  if (libraryIds.includes(CLOUD_COMIC_LIBRARY_ID)) mediaTypes.push('comic');
+  return mediaTypes;
+}
+
+function compareGlobalSearchResults(a: GlobalSearchResult, b: GlobalSearchResult): number {
+  const titleOrder = searchTitle(a).localeCompare(searchTitle(b), undefined, { sensitivity: 'base' });
+  if (titleOrder !== 0) return titleOrder;
+  return a.type.localeCompare(b.type);
+}
+
+function searchTitle(result: GlobalSearchResult): string {
+  return result.title?.trim() || '';
+}
+
+function safeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }

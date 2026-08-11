@@ -1,6 +1,14 @@
 import { computed, ref, type Ref } from 'vue'
 import { useElementSize, useWindowSize } from '@vueuse/core'
-import { jumpBucketKindForSort, type GroupRule, type JumpBucket, type SortSpec } from '@bookorbit/types'
+import {
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
+  jumpBucketKindForSort,
+  type GroupRule,
+  type JumpBucket,
+  type SortSpec,
+} from '@bookorbit/types'
 import { useBookProgressRefresh } from './useBookProgressRefresh'
 import { BOOK_WINDOW_BLOCK_SIZE, useBookWindow, type BookWindowQuery } from './useBookWindow'
 import { useJumpBuckets } from './useJumpBuckets'
@@ -14,7 +22,11 @@ const RAIL_VERTICAL_FRACTION = 0.85
 const RAIL_VERTICAL_PADDING_PX = 16
 
 function isValidScopeId(value: number | null): value is number {
-  return value !== null && Number.isInteger(value) && value > 0
+  return (
+    value !== null &&
+    Number.isInteger(value) &&
+    (value > 0 || value === CLOUD_EBOOK_LIBRARY_ID || value === CLOUD_AUDIO_LIBRARY_ID || value === CLOUD_COMIC_LIBRARY_ID)
+  )
 }
 
 /**

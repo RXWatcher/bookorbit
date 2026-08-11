@@ -16,8 +16,10 @@ import { BookService } from '../book/book.service';
 import type { RequestUser } from '../../common/types/request-user';
 import type { SendBookDto } from './dto/send-book.dto';
 import * as fs from 'fs';
+import { Readable } from 'stream';
 import { KINDLE_CONVERT_SUBJECT } from './email-send.constants';
 import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service';
 
 vi.mock('fs');
 
@@ -32,6 +34,7 @@ describe('EmailSendOrchestrator', () => {
   let bookAccessService: EmailBookAccessService;
   let bookService: BookService;
   let templateService: EmailTemplateService;
+  let warehouseCatalogService: WarehouseCatalogService;
 
   const mockUser: RequestUser = {
     id: 1,
@@ -104,7 +107,10 @@ describe('EmailSendOrchestrator', () => {
         },
         {
           provide: EmailTemplateContextService,
-          useValue: { buildForBook: vi.fn().mockResolvedValue({ title: 'Book Title' }) },
+          useValue: {
+            buildForBook: vi.fn().mockResolvedValue({ title: 'Book Title' }),
+            buildForCatalogEbook: vi.fn().mockReturnValue({ title: 'Cloud Book' }),
+          },
         },
         {
           provide: EmailPreferencesService,
@@ -134,6 +140,32 @@ describe('EmailSendOrchestrator', () => {
           provide: NotificationService,
           useValue: { notify: vi.fn().mockResolvedValue(undefined) },
         },
+        {
+          provide: WarehouseCatalogService,
+          useValue: {
+            assertUserCanAccessEbook: vi.fn().mockResolvedValue(undefined),
+            downloadEbook: vi.fn().mockResolvedValue({
+              status: 200,
+              contentType: 'application/epub+zip',
+              contentLength: 1024,
+              body: Buffer.from('epub bytes'),
+              fileName: 'Cloud Book.epub',
+            }),
+            getEbook: vi.fn().mockResolvedValue({
+              remoteId: 'ebook-1',
+              title: 'Cloud Book',
+              subtitle: 'Skybound',
+              authors: ['Ada Author'],
+              series: 'Cloud Series',
+              seriesIndex: 2,
+              publisher: 'Orbit Press',
+              language: 'en',
+              format: 'epub',
+              identifiers: { isbn13: '9780000000001' },
+              tags: ['sci-fi'],
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -147,6 +179,7 @@ describe('EmailSendOrchestrator', () => {
     bookAccessService = module.get<EmailBookAccessService>(EmailBookAccessService);
     bookService = module.get<BookService>(BookService);
     templateService = module.get<EmailTemplateService>(EmailTemplateService);
+    warehouseCatalogService = module.get<WarehouseCatalogService>(WarehouseCatalogService);
 
     (fs.createReadStream as vi.Mock).mockReturnValue('mock-stream');
   });
@@ -226,6 +259,42 @@ describe('EmailSendOrchestrator', () => {
 
       expect(templateService.resolveTemplate).toHaveBeenCalledWith(777, mockUser);
     });
+
+    it('queues source-backed ebook refs without treating remote ids as local book ids', async () => {
+      const result = await orchestrator.send(
+        {
+          catalogEbooks: [{ remoteId: 'ebook-1' }],
+          recipientIds: [10],
+          providerId: 300,
+        } as never,
+        mockUser,
+      );
+
+      expect(result.queued).toBe(1);
+      expect(bookAccessService.assertUserCanAccessBooks).not.toHaveBeenCalled();
+      expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledWith(mockUser, 'ebook-1');
+      expect(sendLogService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: mockUser.id,
+          bookId: null,
+          bookFileId: null,
+          catalogMediaType: 'ebook',
+          catalogRemoteId: 'ebook-1',
+          toEmail: mockRecipient.email,
+          subject: KINDLE_CONVERT_SUBJECT,
+        }),
+      );
+      expect(transportService.buildTransporter().sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachments: [
+            expect.objectContaining({
+              filename: 'Cloud Book.epub',
+              content: Buffer.from('epub bytes'),
+            }),
+          ],
+        }),
+      );
+    });
   });
 
   describe('quickSend', () => {
@@ -251,6 +320,8 @@ describe('EmailSendOrchestrator', () => {
         userId: mockUser.id,
         bookId: 1,
         bookFileId: 100,
+        catalogMediaType: null,
+        catalogRemoteId: null,
         providerId: 300,
         templateId: 200,
         toEmail: 'resend@test.com',
@@ -268,6 +339,78 @@ describe('EmailSendOrchestrator', () => {
           toEmail: 'resend@test.com',
         }),
       );
+    });
+
+    it('should queue a resend of a source-backed ebook log entry', async () => {
+      const existingLog = {
+        userId: mockUser.id,
+        bookId: null,
+        bookFileId: null,
+        catalogMediaType: 'ebook',
+        catalogRemoteId: 'ebook-1',
+        providerId: 300,
+        templateId: 200,
+        toEmail: 'cloud-resend@test.com',
+        toName: 'Cloud Resend',
+        subject: 'Original Cloud Subject',
+      };
+      (sendLogService.getForResend as vi.Mock).mockResolvedValue(existingLog);
+
+      const result = await orchestrator.resend(400, mockUser);
+
+      expect(result.queued).toBe(1);
+      expect(bookAccessService.assertUserCanAccessBook).not.toHaveBeenCalled();
+      expect(warehouseCatalogService.assertUserCanAccessEbook).toHaveBeenCalledWith(mockUser, 'ebook-1');
+      expect(warehouseCatalogService.getEbook).toHaveBeenCalledWith('ebook-1');
+      expect(sendLogService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: mockUser.id,
+          bookId: null,
+          bookFileId: null,
+          catalogMediaType: 'ebook',
+          catalogRemoteId: 'ebook-1',
+          toEmail: 'cloud-resend@test.com',
+          toName: 'Cloud Resend',
+          subject: 'Subject Cloud Book',
+        }),
+      );
+      expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledWith(mockUser, 'ebook-1');
+      await vi.waitFor(() => {
+        expect(transportService.buildTransporter().sendMail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            to: 'cloud-resend@test.com',
+            attachments: [
+              expect.objectContaining({
+                filename: 'Cloud Book.epub',
+                content: Buffer.from('epub bytes'),
+              }),
+            ],
+          }),
+        );
+      });
+    });
+
+    it('should not queue a source-backed resend when the ebook is no longer accessible', async () => {
+      const existingLog = {
+        userId: mockUser.id,
+        bookId: null,
+        bookFileId: null,
+        catalogMediaType: 'ebook',
+        catalogRemoteId: 'ebook-1',
+        providerId: 300,
+        templateId: 200,
+        toEmail: 'cloud-resend@test.com',
+        toName: 'Cloud Resend',
+        subject: 'Original Cloud Subject',
+      };
+      const accessError = new Error('Library item not available');
+      (sendLogService.getForResend as vi.Mock).mockResolvedValue(existingLog);
+      (warehouseCatalogService.assertUserCanAccessEbook as vi.Mock).mockRejectedValue(accessError);
+
+      await expect(orchestrator.resend(400, mockUser)).rejects.toThrow(accessError);
+
+      expect(sendLogService.create).not.toHaveBeenCalled();
+      expect(warehouseCatalogService.downloadEbook).not.toHaveBeenCalled();
     });
   });
 
@@ -308,6 +451,39 @@ describe('EmailSendOrchestrator', () => {
 
       expect(sendLogService.markFailed).toHaveBeenCalledWith(400, 'SMTP Error', 0);
       expect(setTimeout).toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it('should reload source-backed attachment streams for retry attempts', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(global, 'setTimeout');
+      mockTransporter.sendMail.mockRejectedValueOnce(new Error('SMTP Error')).mockResolvedValueOnce({ messageId: 'retry-ok' });
+      (sendLogService.markFailed as vi.Mock).mockResolvedValue({ isFinal: false });
+      const firstStream = Readable.from(['first attempt']);
+      const retryStream = Readable.from(['retry attempt']);
+      const load = vi
+        .fn()
+        .mockResolvedValueOnce({ fileName: 'cloud.epub', contentLength: null, contentType: 'application/epub+zip', body: firstStream })
+        .mockResolvedValueOnce({ fileName: 'cloud.epub', contentLength: null, contentType: 'application/epub+zip', body: retryStream });
+      const task = { recipientEmail: 'test@test.com', userId: 1 } as any;
+      const attachment = { kind: 'catalog', fallbackFilename: 'cloud.epub', load };
+
+      await (orchestrator as any).dispatchSend(400, {}, task, attachment, 'Subject', 'Body', 0);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(mockTransporter.sendMail).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          attachments: [expect.objectContaining({ content: firstStream })],
+        }),
+      );
+      expect(mockTransporter.sendMail).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          attachments: [expect.objectContaining({ content: retryStream })],
+        }),
+      );
       vi.useRealTimers();
     });
 

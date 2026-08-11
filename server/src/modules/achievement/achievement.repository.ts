@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, countDistinct, desc, eq, gt, gte, isNotNull, isNull, lt, lte, ne, notInArray, sql, sum } from 'drizzle-orm';
+import { and, count, countDistinct, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, sql, sum } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, type WarehouseMediaType } from '@bookorbit/types';
 
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
@@ -18,16 +19,100 @@ import {
   bookFiles,
   bookMetadata,
   bookGenres,
+  genres,
   bookAuthors,
+  authors,
   userReadingDailyStats,
   userLibraryAccess,
   koreaderDeviceProgress,
   koboReadingStates,
   users,
+  warehouseCatalogItems,
+  warehouseUserState,
 } from '../../db/schema';
 import type { AchievementRow, NewAchievement, UserAchievementRow } from '../../db/schema';
 
 type Db = NodePgDatabase<typeof schema>;
+type WarehouseRawPayload = Record<string, unknown> | null;
+
+const WAREHOUSE_PUBLICATION_YEAR_KEYS = ['publishedYear', 'published_year', 'publicationYear', 'publication_year'] as const;
+const WAREHOUSE_PUBLICATION_DATE_KEYS = ['publishedDate', 'published_date', 'releaseDate', 'release_date'] as const;
+const WAREHOUSE_PAGE_COUNT_KEYS = ['pageCount', 'page_count', 'pages'] as const;
+const AUDIOBOOK_VIRTUAL_PAGES_PER_HOUR = 30;
+
+function parseWarehousePublishedYear(rawPayload: unknown): number | null {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return null;
+  const payload = rawPayload as Record<string, unknown>;
+  for (const key of WAREHOUSE_PUBLICATION_YEAR_KEYS) {
+    const year = normalizeWarehouseYear(payload[key]);
+    if (year !== null) return year;
+  }
+  for (const key of WAREHOUSE_PUBLICATION_DATE_KEYS) {
+    const value = payload[key];
+    if (typeof value !== 'string') continue;
+    const match = value.match(/^\d{4}/);
+    if (!match) continue;
+    const year = normalizeWarehouseYear(match[0]);
+    if (year !== null) return year;
+  }
+  return null;
+}
+
+function normalizeWarehouseYear(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value >= 1000 && value <= 2200 ? value : null;
+  }
+  if (typeof value === 'string' && /^\d{4}$/.test(value)) {
+    const year = Number(value);
+    return year >= 1000 && year <= 2200 ? year : null;
+  }
+  return null;
+}
+
+function parseWarehousePageCount(mediaType: WarehouseMediaType, rawPayload: unknown, durationSeconds: number | null): number | null {
+  if (mediaType === 'audiobook') {
+    if (typeof durationSeconds !== 'number' || durationSeconds <= 0) return null;
+    const pageCount = Math.round((durationSeconds / 3600) * AUDIOBOOK_VIRTUAL_PAGES_PER_HOUR);
+    return pageCount > 0 ? pageCount : null;
+  }
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return null;
+  const payload = rawPayload as Record<string, unknown>;
+  for (const key of WAREHOUSE_PAGE_COUNT_KEYS) {
+    const pageCount = normalizeWarehousePageCount(payload[key]);
+    if (pageCount !== null) return pageCount;
+  }
+  return null;
+}
+
+function normalizeWarehousePageCount(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value > 0 ? value : null;
+  }
+  if (typeof value === 'string' && /^[0-9]+$/.test(value)) {
+    const pageCount = Number(value);
+    return pageCount > 0 ? pageCount : null;
+  }
+  return null;
+}
+
+function canonicalAchievementAuthorName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  const commaIndex = trimmed.indexOf(',');
+  if (commaIndex <= 0) return trimmed.toLowerCase();
+
+  const family = trimmed.slice(0, commaIndex).trim();
+  const given = trimmed.slice(commaIndex + 1).trim();
+  return given && family ? `${given} ${family}`.toLowerCase() : trimmed.toLowerCase();
+}
+
+function canonicalAchievementGenreName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function canonicalAchievementLanguageName(name: string): string {
+  return name.trim().toLowerCase();
+}
 
 @Injectable()
 export class AchievementRepository {
@@ -115,7 +200,7 @@ export class AchievementRepository {
       .select({ value: count() })
       .from(userBookStatus)
       .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read')));
-    return value;
+    return value + (await this.countFinishedWarehouseItems(userId));
   }
 
   async sumPagesRead(userId: number): Promise<number> {
@@ -155,31 +240,228 @@ export class AchievementRepository {
   async countAccessibleBooks(userId: number, isSuperuser: boolean): Promise<number> {
     if (isSuperuser) {
       const [{ value }] = await this.db.select({ value: count() }).from(books).where(eq(books.status, 'present'));
-      return value;
+      return value + (await this.countAccessibleWarehouseItems(await this.accessibleWarehouseMediaTypes(userId, isSuperuser)));
     }
     const [{ value }] = await this.db
       .select({ value: count() })
       .from(books)
       .innerJoin(userLibraryAccess, eq(books.libraryId, userLibraryAccess.libraryId))
       .where(and(eq(userLibraryAccess.userId, userId), eq(books.status, 'present')));
-    return value;
+    return value + (await this.countAccessibleWarehouseItems(await this.accessibleWarehouseMediaTypes(userId, isSuperuser)));
   }
 
   async countDistinctFormats(userId: number, isSuperuser: boolean): Promise<number> {
-    if (isSuperuser) {
-      const [{ value }] = await this.db
-        .select({ value: countDistinct(bookFiles.format) })
-        .from(bookFiles)
-        .where(isNotNull(bookFiles.format));
-      return value;
-    }
+    const localRows = isSuperuser
+      ? await this.db.select({ format: bookFiles.format }).from(bookFiles).where(isNotNull(bookFiles.format))
+      : await this.db
+          .select({ format: bookFiles.format })
+          .from(bookFiles)
+          .innerJoin(books, eq(bookFiles.bookId, books.id))
+          .innerJoin(userLibraryAccess, eq(books.libraryId, userLibraryAccess.libraryId))
+          .where(and(eq(userLibraryAccess.userId, userId), isNotNull(bookFiles.format)));
+    const warehouseRows = await this.listAccessibleWarehouseFormats(await this.accessibleWarehouseMediaTypes(userId, isSuperuser));
+    return new Set(
+      [...localRows, ...warehouseRows].map((row) => row.format).filter((format): format is string => typeof format === 'string' && format.length > 0),
+    ).size;
+  }
+
+  private async accessibleWarehouseMediaTypes(userId: number, isSuperuser: boolean): Promise<WarehouseMediaType[]> {
+    if (isSuperuser) return ['ebook', 'audiobook', 'comic'];
+    const rows = await this.db.select({ libraryId: userLibraryAccess.libraryId }).from(userLibraryAccess).where(eq(userLibraryAccess.userId, userId));
+    const ids = new Set(rows.map((row) => row.libraryId));
+    const mediaTypes: WarehouseMediaType[] = [];
+    if (ids.has(CLOUD_EBOOK_LIBRARY_ID)) mediaTypes.push('ebook');
+    if (ids.has(CLOUD_AUDIO_LIBRARY_ID)) mediaTypes.push('audiobook');
+    if (ids.has(CLOUD_COMIC_LIBRARY_ID)) mediaTypes.push('comic');
+    return mediaTypes;
+  }
+
+  private async countAccessibleWarehouseItems(mediaTypes: WarehouseMediaType[]): Promise<number> {
+    if (mediaTypes.length === 0) return 0;
     const [{ value }] = await this.db
-      .select({ value: countDistinct(bookFiles.format) })
-      .from(bookFiles)
-      .innerJoin(books, eq(bookFiles.bookId, books.id))
-      .innerJoin(userLibraryAccess, eq(books.libraryId, userLibraryAccess.libraryId))
-      .where(and(eq(userLibraryAccess.userId, userId), isNotNull(bookFiles.format)));
+      .select({ value: count() })
+      .from(warehouseCatalogItems)
+      .where(inArray(warehouseCatalogItems.mediaType, mediaTypes));
     return value;
+  }
+
+  private async listAccessibleWarehouseFormats(mediaTypes: WarehouseMediaType[]): Promise<{ format: string | null }[]> {
+    if (mediaTypes.length === 0) return [];
+    return this.db
+      .select({ format: warehouseCatalogItems.format })
+      .from(warehouseCatalogItems)
+      .where(and(inArray(warehouseCatalogItems.mediaType, mediaTypes), isNotNull(warehouseCatalogItems.format)));
+  }
+
+  private async countFinishedWarehouseItems(userId: number, range?: { start: Date; end: Date }): Promise<number> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return 0;
+
+    const clauses = [
+      eq(warehouseUserState.userId, userId),
+      eq(warehouseUserState.readStatus, 'read'),
+      inArray(warehouseUserState.mediaType, mediaTypes),
+    ];
+    if (range) {
+      clauses.push(gte(warehouseUserState.finishedAt, range.start), lt(warehouseUserState.finishedAt, range.end));
+    }
+
+    const [{ value }] = await this.db
+      .select({ value: count() })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(and(...clauses));
+    return value;
+  }
+
+  private async listFinishedWarehouseGenres(userId: number): Promise<{ genres: string[] }[]> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return [];
+    return this.db
+      .select({ genres: warehouseCatalogItems.genres })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(
+        and(eq(warehouseUserState.userId, userId), eq(warehouseUserState.readStatus, 'read'), inArray(warehouseUserState.mediaType, mediaTypes)),
+      );
+  }
+
+  private async listFinishedWarehouseLanguages(userId: number): Promise<{ language: string | null }[]> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return [];
+    return this.db
+      .select({ language: warehouseCatalogItems.language })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(
+        and(
+          eq(warehouseUserState.userId, userId),
+          eq(warehouseUserState.readStatus, 'read'),
+          inArray(warehouseUserState.mediaType, mediaTypes),
+          isNotNull(warehouseCatalogItems.language),
+        ),
+      );
+  }
+
+  private async listFinishedWarehouseAuthors(userId: number): Promise<{ authors: string[] }[]> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return [];
+    return this.db
+      .select({ authors: warehouseCatalogItems.authors })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(
+        and(eq(warehouseUserState.userId, userId), eq(warehouseUserState.readStatus, 'read'), inArray(warehouseUserState.mediaType, mediaTypes)),
+      );
+  }
+
+  private async hasFinishedWarehouseSeriesBook(userId: number): Promise<boolean> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return false;
+    const [row] = await this.db
+      .select({ series: warehouseCatalogItems.series })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(
+        and(
+          eq(warehouseUserState.userId, userId),
+          eq(warehouseUserState.readStatus, 'read'),
+          inArray(warehouseUserState.mediaType, mediaTypes),
+          isNotNull(warehouseCatalogItems.series),
+          ne(warehouseCatalogItems.series, ''),
+        ),
+      )
+      .limit(1);
+    return !!row;
+  }
+
+  private async hasCompletedWarehouseSeriesOfSize(userId: number, size: number): Promise<boolean> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return false;
+    const mediaTypeList = sql.join(
+      mediaTypes.map((mediaType) => sql`${mediaType}`),
+      sql`, `,
+    );
+    const result = await this.db.execute(sql`
+      SELECT 1 FROM (
+        SELECT ${warehouseCatalogItems.series} AS series,
+          COUNT(DISTINCT ${warehouseCatalogItems.mediaType} || ':' || ${warehouseCatalogItems.remoteId}) AS total_in_series,
+          COUNT(DISTINCT CASE
+            WHEN ${warehouseUserState.remoteId} IS NOT NULL
+            THEN ${warehouseCatalogItems.mediaType} || ':' || ${warehouseCatalogItems.remoteId}
+          END) AS read_count
+        FROM ${warehouseCatalogItems}
+        LEFT JOIN ${warehouseUserState}
+          ON ${warehouseUserState.mediaType} = ${warehouseCatalogItems.mediaType}
+          AND ${warehouseUserState.remoteId} = ${warehouseCatalogItems.remoteId}
+          AND ${warehouseUserState.userId} = ${userId}
+          AND ${warehouseUserState.readStatus} = 'read'
+        WHERE ${warehouseCatalogItems.mediaType} IN (${mediaTypeList})
+          AND ${warehouseCatalogItems.series} IS NOT NULL
+          AND ${warehouseCatalogItems.series} != ''
+        GROUP BY ${warehouseCatalogItems.series}
+        HAVING COUNT(DISTINCT ${warehouseCatalogItems.mediaType} || ':' || ${warehouseCatalogItems.remoteId}) = ${size}
+          AND COUNT(DISTINCT ${warehouseCatalogItems.mediaType} || ':' || ${warehouseCatalogItems.remoteId}) = COUNT(DISTINCT CASE
+            WHEN ${warehouseUserState.remoteId} IS NOT NULL
+            THEN ${warehouseCatalogItems.mediaType} || ':' || ${warehouseCatalogItems.remoteId}
+          END)
+      ) complete_series
+      LIMIT 1
+    `);
+    return (result as unknown as { rows: unknown[] }).rows.length > 0;
+  }
+
+  private async listFinishedWarehousePublicationYears(userId: number): Promise<number[]> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return [];
+    const rows = await this.db
+      .select({ rawPayload: warehouseCatalogItems.rawPayload })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(
+        and(eq(warehouseUserState.userId, userId), eq(warehouseUserState.readStatus, 'read'), inArray(warehouseUserState.mediaType, mediaTypes)),
+      );
+    return rows.map((row) => parseWarehousePublishedYear(row.rawPayload as WarehouseRawPayload)).filter((year): year is number => year !== null);
+  }
+
+  private async listFinishedWarehousePageCounts(userId: number): Promise<number[]> {
+    const mediaTypes = await this.accessibleWarehouseMediaTypes(userId, false);
+    if (mediaTypes.length === 0) return [];
+    const rows = await this.db
+      .select({
+        mediaType: warehouseCatalogItems.mediaType,
+        rawPayload: warehouseCatalogItems.rawPayload,
+        durationSeconds: warehouseCatalogItems.durationSeconds,
+      })
+      .from(warehouseUserState)
+      .innerJoin(
+        warehouseCatalogItems,
+        and(eq(warehouseUserState.mediaType, warehouseCatalogItems.mediaType), eq(warehouseUserState.remoteId, warehouseCatalogItems.remoteId)),
+      )
+      .where(
+        and(eq(warehouseUserState.userId, userId), eq(warehouseUserState.readStatus, 'read'), inArray(warehouseUserState.mediaType, mediaTypes)),
+      );
+    return rows
+      .map((row) => parseWarehousePageCount(row.mediaType as WarehouseMediaType, row.rawPayload as WarehouseRawPayload, row.durationSeconds))
+      .filter((pageCount): pageCount is number => pageCount !== null);
   }
 
   async countCollections(userId: number): Promise<number> {
@@ -188,31 +470,45 @@ export class AchievementRepository {
   }
 
   async countDistinctGenresRead(userId: number): Promise<number> {
-    const [{ value }] = await this.db
-      .select({ value: countDistinct(bookGenres.genreId) })
+    const localRows = await this.db
+      .select({ genre: genres.name })
       .from(userBookStatus)
       .innerJoin(bookGenres, eq(userBookStatus.bookId, bookGenres.bookId))
+      .innerJoin(genres, eq(bookGenres.genreId, genres.id))
       .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read')));
-    return value;
+    const warehouseRows = await this.listFinishedWarehouseGenres(userId);
+    return new Set(
+      [...localRows.map((row) => row.genre), ...warehouseRows.flatMap((row) => row.genres)]
+        .map((genre) => canonicalAchievementGenreName(genre))
+        .filter((genre) => genre.length > 0),
+    ).size;
   }
 
   async countDistinctLanguagesRead(userId: number): Promise<number> {
-    const [{ value }] = await this.db
-      .select({ value: countDistinct(bookMetadata.language) })
+    const localRows = await this.db
+      .select({ language: bookMetadata.language })
       .from(userBookStatus)
       .innerJoin(bookMetadata, eq(userBookStatus.bookId, bookMetadata.bookId))
       .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), isNotNull(bookMetadata.language)));
-    return value;
+    const warehouseRows = await this.listFinishedWarehouseLanguages(userId);
+    return new Set(
+      [...localRows, ...warehouseRows]
+        .map((row) => row.language)
+        .filter((language): language is string => typeof language === 'string')
+        .map((language) => canonicalAchievementLanguageName(language))
+        .filter((language) => language.length > 0),
+    ).size;
   }
 
   async countDistinctCenturiesRead(userId: number): Promise<number> {
-    const rows = await this.db
+    const localRows = await this.db
       .select({ century: sql<number>`floor(${bookMetadata.publishedYear} / 100)` })
       .from(userBookStatus)
       .innerJoin(bookMetadata, eq(userBookStatus.bookId, bookMetadata.bookId))
       .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), isNotNull(bookMetadata.publishedYear)))
       .groupBy(sql`floor(${bookMetadata.publishedYear} / 100)`);
-    return rows.length;
+    const warehouseYears = await this.listFinishedWarehousePublicationYears(userId);
+    return new Set([...localRows.map((row) => row.century), ...warehouseYears.map((year) => Math.floor(year / 100))]).size;
   }
 
   async hasCompletedSeries(userId: number): Promise<boolean> {
@@ -235,15 +531,30 @@ export class AchievementRepository {
   }
 
   async maxBooksPerAuthor(userId: number): Promise<number> {
-    const rows = await this.db
-      .select({ cnt: count() })
+    const localRows = await this.db
+      .select({ authorName: authors.name })
       .from(userBookStatus)
       .innerJoin(bookAuthors, eq(userBookStatus.bookId, bookAuthors.bookId))
-      .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read')))
-      .groupBy(bookAuthors.authorId)
-      .orderBy(desc(count()))
-      .limit(1);
-    return rows.length > 0 ? rows[0].cnt : 0;
+      .innerJoin(authors, eq(bookAuthors.authorId, authors.id))
+      .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read')));
+    const counts = new Map<string, number>();
+    for (const row of localRows) {
+      this.incrementAuthorCount(counts, row.authorName);
+    }
+    for (const row of await this.listFinishedWarehouseAuthors(userId)) {
+      const authorKeys = new Set(row.authors.map((author) => canonicalAchievementAuthorName(author)).filter((author) => author.length > 0));
+      for (const authorKey of authorKeys) {
+        counts.set(authorKey, (counts.get(authorKey) ?? 0) + 1);
+      }
+    }
+    return Math.max(0, ...counts.values());
+  }
+
+  private incrementAuthorCount(counts: Map<string, number>, authorName: string | null): void {
+    if (!authorName) return;
+    const authorKey = canonicalAchievementAuthorName(authorName);
+    if (!authorKey) return;
+    counts.set(authorKey, (counts.get(authorKey) ?? 0) + 1);
   }
 
   async getBookPageCount(bookId: number): Promise<number | null> {
@@ -335,7 +646,7 @@ export class AchievementRepository {
           sql`${readingAttempts.endedOn} < ${end.toISOString().slice(0, 10)}::date`,
         ),
       );
-    return value;
+    return value + (await this.countFinishedWarehouseItems(userId, { start, end }));
   }
 
   async wasBookStartedAndFinishedOnSameDay(userId: number, bookId: number): Promise<boolean> {
@@ -492,7 +803,8 @@ export class AchievementRepository {
         ),
       )
       .limit(1);
-    return !!row;
+    if (row) return true;
+    return (await this.listFinishedWarehousePublicationYears(userId)).some((publishedYear) => publishedYear < year);
   }
 
   async hasFinishedBookPublishedInYear(userId: number, year: number): Promise<boolean> {
@@ -502,7 +814,8 @@ export class AchievementRepository {
       .innerJoin(bookMetadata, eq(userBookStatus.bookId, bookMetadata.bookId))
       .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), eq(bookMetadata.publishedYear, year)))
       .limit(1);
-    return !!row;
+    if (row) return true;
+    return (await this.listFinishedWarehousePublicationYears(userId)).some((publishedYear) => publishedYear === year);
   }
 
   async hasAnyBookRebornFromAbandoned(userId: number, monthsAgo: number): Promise<boolean> {
@@ -604,17 +917,19 @@ export class AchievementRepository {
       ) complete_series
       LIMIT 1
     `);
-    return (result as unknown as { rows: unknown[] }).rows.length > 0;
+    if ((result as unknown as { rows: unknown[] }).rows.length > 0) return true;
+    return this.hasCompletedWarehouseSeriesOfSize(userId, size);
   }
 
   async countDistinctDecadesRead(userId: number): Promise<number> {
-    const rows = await this.db
+    const localRows = await this.db
       .select({ decade: sql<number>`floor(${bookMetadata.publishedYear} / 10)` })
       .from(userBookStatus)
       .innerJoin(bookMetadata, eq(userBookStatus.bookId, bookMetadata.bookId))
       .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read'), isNotNull(bookMetadata.publishedYear)))
       .groupBy(sql`floor(${bookMetadata.publishedYear} / 10)`);
-    return rows.length;
+    const warehouseYears = await this.listFinishedWarehousePublicationYears(userId);
+    return new Set([...localRows.map((row) => row.decade), ...warehouseYears.map((year) => Math.floor(year / 10))]).size;
   }
 
   async countFinishedBooksByMaxPageCount(userId: number, maxPages: number): Promise<number> {
@@ -630,7 +945,8 @@ export class AchievementRepository {
           lt(bookMetadata.pageCount, maxPages),
         ),
       );
-    return value;
+    const warehouseCount = (await this.listFinishedWarehousePageCounts(userId)).filter((pageCount) => pageCount < maxPages).length;
+    return value + warehouseCount;
   }
 
   async hasFinishedBookUnderPages(userId: number, maxPages: number): Promise<boolean> {
@@ -647,7 +963,8 @@ export class AchievementRepository {
         ),
       )
       .limit(1);
-    return !!row;
+    if (row) return true;
+    return (await this.listFinishedWarehousePageCounts(userId)).some((pageCount) => pageCount < maxPages);
   }
 
   async hasFinishedBookOverPages(userId: number, minPages: number): Promise<boolean> {
@@ -664,19 +981,35 @@ export class AchievementRepository {
         ),
       )
       .limit(1);
-    return !!row;
+    if (row) return true;
+    return (await this.listFinishedWarehousePageCounts(userId)).some((pageCount) => pageCount > minPages);
   }
 
   async maxBooksPerGenre(userId: number): Promise<number> {
-    const rows = await this.db
-      .select({ cnt: count() })
+    const localRows = await this.db
+      .select({ genre: genres.name })
       .from(userBookStatus)
       .innerJoin(bookGenres, eq(userBookStatus.bookId, bookGenres.bookId))
-      .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read')))
-      .groupBy(bookGenres.genreId)
-      .orderBy(desc(count()))
-      .limit(1);
-    return rows.length > 0 ? rows[0].cnt : 0;
+      .innerJoin(genres, eq(bookGenres.genreId, genres.id))
+      .where(and(eq(userBookStatus.userId, userId), eq(userBookStatus.status, 'read')));
+    const counts = new Map<string, number>();
+    for (const row of localRows) {
+      this.incrementGenreCount(counts, row.genre);
+    }
+    for (const row of await this.listFinishedWarehouseGenres(userId)) {
+      const genreKeys = new Set(row.genres.map((genre) => canonicalAchievementGenreName(genre)).filter((genre) => genre.length > 0));
+      for (const genreKey of genreKeys) {
+        counts.set(genreKey, (counts.get(genreKey) ?? 0) + 1);
+      }
+    }
+    return Math.max(0, ...counts.values());
+  }
+
+  private incrementGenreCount(counts: Map<string, number>, genreName: string | null): void {
+    if (!genreName) return;
+    const genreKey = canonicalAchievementGenreName(genreName);
+    if (!genreKey) return;
+    counts.set(genreKey, (counts.get(genreKey) ?? 0) + 1);
   }
 
   async countAnnotationsOnDay(userId: number, date: Date): Promise<number> {
@@ -916,7 +1249,8 @@ export class AchievementRepository {
         ),
       )
       .limit(1);
-    return !!row;
+    if (row) return true;
+    return this.hasFinishedWarehouseSeriesBook(userId);
   }
 
   // ── Ratings ──

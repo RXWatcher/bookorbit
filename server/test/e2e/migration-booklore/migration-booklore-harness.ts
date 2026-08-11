@@ -383,7 +383,7 @@ async function startMariaDbContainer(): Promise<MariaDbService> {
 
   const service: MariaDbService = {
     containerName,
-    host: '127.0.0.1',
+    host: process.env.MIGRATION_BOOKLORE_DOCKER_HOST ?? '127.0.0.1',
     port,
     database,
     user,

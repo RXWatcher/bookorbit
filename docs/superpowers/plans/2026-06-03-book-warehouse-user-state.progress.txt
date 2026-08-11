@@ -1,0 +1,75 @@
+Book Warehouse User State Progress
+2026-06-03
+
+Completed:
+- Task 1: User state schema, migration, and shared contracts.
+  - 10ab7379 feat: add catalog user state schema
+  - Spec review passed.
+  - Quality/security review passed.
+- Task 2: Repository user-state methods.
+  - fc9cfd1a feat: store catalog user state
+  - Spec review passed.
+  - Quality/security review passed.
+- Task 3: Server native catalog state routes.
+  - 6c5811b3 feat: expose catalog user state api
+  - d2cb1c87 fix: harden catalog user state validation
+  - Spec review passed.
+  - Initial quality review found malformed PATCH body and fractional rating gaps.
+  - Quality/security re-review passed after hardening.
+- Task 4: Client API and composable.
+  - 9e97f823 feat: add catalog user state client api
+  - ff29fb2d fix: serialize catalog user state saves
+  - 31c22057 fix: reconcile catalog state optimistic saves
+  - b95a1870 fix: serialize catalog state persistence
+  - Spec review passed.
+  - Initial quality reviews found overlapping optimistic-save corruption and out-of-order persistence risk.
+  - Quality/security re-review passed after confirmed-state reconciliation and wire serialization.
+- Task 5: User state phase verification.
+  - Focused server and client tests passed.
+  - Repo-wide typecheck and lint passed.
+  - Visible-copy guard passed.
+  - Final full-phase review passed after b95a1870.
+
+Latest Task 1 verification:
+- pnpm --filter server exec vitest run src/db/schema/schema.test.ts src/db/schema/reader.test.ts => 46 passed
+- pnpm --filter server type-check => passed
+- git status --short => clean
+
+Latest Task 2 verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse.repository.test.ts --testNamePattern "user catalog state|user catalog items" => 5 passed
+- pnpm --filter server type-check => passed
+- Spec reviewer Gibbs (019e8d78-a782-78a3-bd23-f2469ff72568) => SPEC PASS
+- Quality reviewer Bohr (019e8d7a-ae50-7af3-8d7c-fd8cef175b74) => QUALITY PASS
+
+Latest Task 3 verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-user-state.service.test.ts src/modules/warehouse/warehouse-user-state.controller.test.ts => 26 passed
+- pnpm --filter server type-check => passed
+- git diff --check HEAD~2..HEAD => passed/no output
+- Spec reviewer Tesla (019e8d8b-4cdd-7380-ad49-af1950760283) => SPEC PASS
+- Quality reviewer Plato (019e8d8d-de66-7ce1-9c5d-38d9f7285d8f) => QUALITY FAIL, fixed in d2cb1c87
+- Quality re-reviewer Carson (019e8d9b-e573-79e0-8e9f-909b239f25b7) => QUALITY PASS
+
+Latest Task 4 verification:
+- pnpm --filter client test:unit --run src/features/warehouse/composables/__tests__/useCatalogSourceUserState.spec.ts => 10 passed
+- pnpm --filter client type-check => passed
+- pnpm --filter client lint:check => passed
+- git diff --check a9647f67..HEAD => passed/no output
+- Spec reviewer Boyle (019e8da5-f45e-7373-a85b-e78ddcf5ab10) => SPEC PASS
+- Quality reviewers Erdos/Hume => QUALITY FAIL, fixed in ff29fb2d and 31c22057
+- Quality re-reviewer Mill (019e8e45-afc9-7983-aa4b-a498b38ecf3b) => QUALITY PASS
+
+Latest Task 5 verification:
+- pnpm --filter server exec vitest run src/db/schema/schema.test.ts src/modules/warehouse/warehouse.repository.test.ts --testNamePattern "user catalog state|user catalog items|warehouse user" => 6 passed
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-user-state.service.test.ts src/modules/warehouse/warehouse-user-state.controller.test.ts => 26 passed
+- pnpm --filter client test:unit --run src/features/warehouse/composables/__tests__/useCatalogSourceUserState.spec.ts => 10 passed
+- pnpm run typecheck => passed
+- pnpm run lint:check => passed
+- User-state visible-copy guard => passed
+- Final reviewer Hypatia (019e8e4a-16fc-79d1-b6e4-d292458833fb) => FINAL REVIEW FAIL, fixed in b95a1870
+- Final re-reviewer Tesla (019e8e50-446e-7ab3-9f0d-0350306ade0d) => FINAL REVIEW PASS
+
+Residual note:
+- Catalog state save serialization is per useCatalogSourceUserState instance. Future dashboard/search/reader integrations should avoid competing writers for the same item or add a shared keyed queue.
+
+Next:
+- Move to the next Book Warehouse parity phase.

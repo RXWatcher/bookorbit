@@ -1,3 +1,6 @@
+import type { DashboardCatalogItem } from "./dashboard";
+import type { WarehouseMediaType } from "./warehouse";
+
 export type Collection = {
   id: number;
   name: string;
@@ -9,6 +12,18 @@ export type Collection = {
   memberCount?: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CollectionCatalogItemRef = {
+  mediaType: WarehouseMediaType;
+  remoteId: string;
+};
+
+export type CollectionCatalogItemsPage = {
+  items: DashboardCatalogItem[];
+  total: number;
+  page: number;
+  size: number;
 };
 
 export type CollectionSummary = {

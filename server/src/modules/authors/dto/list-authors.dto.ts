@@ -1,6 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
+import { CLOUD_COMIC_LIBRARY_ID } from '@bookorbit/types';
+
 export const AUTHOR_LIST_SORTS = ['name', 'sortName', 'bookCount', 'lastAddedAt', 'lastEnrichedAt'] as const;
 export type AuthorListSort = (typeof AUTHOR_LIST_SORTS)[number];
 
@@ -37,7 +39,7 @@ export class ListAuthorsDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(1)
+  @Min(CLOUD_COMIC_LIBRARY_ID)
   libraryId?: number;
 
   @IsOptional()

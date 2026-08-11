@@ -1,0 +1,13 @@
+Feature: Range-aware catalog binary proxy
+Status: Complete
+Date: 2026-06-03
+
+Summary:
+- Confirmed RED coverage for native catalog binary range behavior at the upstream client and controller boundaries.
+- Forward validated single `Range` headers for catalog binary requests while dropping malformed or injection-shaped values.
+- Strip proxied `Content-Type` parameters so allowed media responses cannot reflect upstream URLs, API-key-shaped values, or other raw header details.
+- Preserve safe partial-content metadata through valid `206`, safe `416`, `Content-Range`, and `Accept-Ranges` without exposing raw upstream headers, URLs, or credentials.
+- Propagate range requests through the catalog service only after cached-item and current-user catalog-state checks.
+
+Verification:
+- `pnpm --filter server exec vitest run src/modules/warehouse/warehouse-client.service.test.ts src/modules/warehouse/warehouse-catalog.controller.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts`

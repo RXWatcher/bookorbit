@@ -1,0 +1,11 @@
+2026-06-05 08:47 EDT - Feature: Source-backed metadata export parity. Status: Complete. Notes: Metadata export preflight and all-matching JSON exports now resolve Ebook Library and Audio Library rows through the source-backed library query path instead of local filesystem book queries.
+
+Review checkpoint:
+- Fixed the blocker by adding an inaccessible source-backed library preflight denial test, and added an impossible-state guard for mixed local/source-backed export rows.
+
+Verification:
+- pnpm --filter server exec vitest run src/modules/book/book.service.test.ts
+- pnpm run typecheck:server
+- pnpm --filter server lint:check
+- pnpm run test:server
+- git diff --check

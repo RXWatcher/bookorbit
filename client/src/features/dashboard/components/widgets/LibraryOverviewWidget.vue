@@ -6,12 +6,13 @@ import { useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 
 import { useLibraries } from '@/features/library/composables/useLibraries'
+import { libraryRouteForId } from '@/features/library/lib/library-route'
 import { useLibraryOverviewWidget } from '../../composables/useLibraryOverviewWidget'
 
 const { data, loading, error } = useLibraryOverviewWidget()
 const { t } = useI18n()
 const router = useRouter()
-const { libraries } = useLibraries()
+const { libraries } = useLibraries({ includeSourceBacked: true })
 
 function formatStorage(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -37,7 +38,7 @@ const stats = computed<Stat[]>(() => {
       label: t('dashboard.widgets.libraryOverview.stats.books'),
       value: data.value.totalBooks,
       icon: Library,
-      route: firstLibraryId ? { name: 'library', params: { id: firstLibraryId } } : null,
+      route: firstLibraryId ? libraryRouteForId(firstLibraryId) : null,
     },
     { label: t('dashboard.widgets.libraryOverview.stats.authors'), value: data.value.totalAuthors, icon: Users, route: { name: 'authors' } },
     { label: t('dashboard.widgets.libraryOverview.stats.series'), value: data.value.totalSeries, icon: BookCopy, route: { name: 'series' } },
@@ -84,6 +85,7 @@ function navigate(route: StatRoute) {
         <div
           v-for="stat in stats"
           :key="stat.label"
+          data-testid="library-overview-stat"
           class="flex min-h-0 min-w-0 items-center justify-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-2 py-1.5 transition-colors"
           :class="stat.route ? 'cursor-pointer hover:bg-muted/60 hover:border-border' : ''"
           @click="navigate(stat.route)"

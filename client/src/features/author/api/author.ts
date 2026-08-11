@@ -1,5 +1,12 @@
 import { api } from '@/lib/api'
-import type { AuthorsPage, AuthorDetail, AuthorMetadataCandidate, AuthorMetadataProviderKey, BooksPage, MergeAuthorsResult } from '@bookorbit/types'
+import type {
+  AuthorsPage,
+  AuthorBooksPage,
+  AuthorDetail,
+  AuthorMetadataCandidate,
+  AuthorMetadataProviderKey,
+  MergeAuthorsResult,
+} from '@bookorbit/types'
 import type { AuthorBookSort, AuthorListSort, SortDirection } from '../types/author'
 
 export const MAX_AUTHOR_IMAGE_BYTES = 20 * 1024 * 1024
@@ -106,7 +113,7 @@ export async function fetchAuthor(id: number): Promise<AuthorDetail | null> {
   return res.json()
 }
 
-export async function fetchAuthorBooks(authorId: number, params: ListAuthorBooksParams): Promise<BooksPage> {
+export async function fetchAuthorBooks(authorId: number, params: ListAuthorBooksParams): Promise<AuthorBooksPage> {
   const query = toQuery({
     page: params.page,
     size: params.size,
@@ -261,7 +268,8 @@ export async function bulkRefreshAuthorsMetadata(
       if (!line.startsWith('data: ')) continue
       try {
         const payload = JSON.parse(line.slice(6)) as
-          (BulkAuthorMetadataRefreshEvent & { done?: false }) | (BulkAuthorMetadataRefreshResult & { done: true })
+          | (BulkAuthorMetadataRefreshEvent & { done?: false })
+          | (BulkAuthorMetadataRefreshResult & { done: true })
 
         if ('done' in payload && payload.done) {
           summary = {

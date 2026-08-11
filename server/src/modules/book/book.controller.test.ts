@@ -164,6 +164,7 @@ function makeController() {
     setReadStatus: vi.fn(),
     getDetail: vi.fn(),
     resolveSelectionToIds: vi.fn().mockImplementation((dto: { bookIds?: number[] }) => Promise.resolve(dto.bookIds ?? [])),
+    bulkSetRatingForSelection: vi.fn(),
   };
   const fileWriteService = {
     findWriteLog: vi.fn(),
@@ -978,6 +979,17 @@ describe('BookController', () => {
     }
 
     expect(Reflect.getMetadata(FORBIDDEN_PERMISSION_KEY, BookController.prototype.refreshMetadata)).toBeUndefined();
+  });
+
+  it('delegates bulk rating selection payloads without resolving them in the controller', async () => {
+    const { controller, bookService } = makeController();
+    const user = makeUser();
+    const dto = { query: { libraryId: -1, q: 'dune' }, rating: 4 };
+
+    await controller.bulkSetRating(dto as never, user);
+
+    expect(bookService.bulkSetRatingForSelection).toHaveBeenCalledWith(dto, 4, user);
+    expect(bookService.resolveSelectionToIds).not.toHaveBeenCalled();
   });
 
   it('marks bulk-download endpoints as demo-restricted', () => {

@@ -20,7 +20,17 @@ import { useSmartScopes } from '@/features/smart-scope/composables/useSmartScope
 const { t } = useI18n()
 const { hasPermission } = usePermissions()
 const { user } = useAuth()
-const { libraries, loading: librariesLoading, loaded: librariesLoaded, error: librariesError, fetchLibraries } = useLibraries()
+// includeSourceBacked, or this counts ONLY filesystem libraries — of which
+// there are none here, because every book lives in the Book Warehouse catalog.
+// Without it the dashboard greets a library of hundreds of thousands of titles
+// with "your library is empty".
+const {
+  libraries,
+  loading: librariesLoading,
+  loaded: librariesLoaded,
+  error: librariesError,
+  fetchLibraries,
+} = useLibraries({ includeSourceBacked: true })
 const { scrollers, shelfLayout, pruneDeletedSmartScopeScrollers } = useDashboardConfig()
 const { shelfTitle } = useDashboardLabels()
 const { maybeStartTour } = useOnboardingTour()

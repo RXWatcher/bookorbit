@@ -36,6 +36,16 @@ describe('RecommendationController', () => {
     expect(methodType).toBe(RequestMethod.GET);
   });
 
+  it('keeps the expected route contract for catalog recommendations endpoint', () => {
+    const classPath = Reflect.getMetadata(PATH_METADATA, RecommendationController);
+    const methodPath = Reflect.getMetadata(PATH_METADATA, RecommendationController.prototype.getCatalogRecommendations);
+    const methodType = Reflect.getMetadata(METHOD_METADATA, RecommendationController.prototype.getCatalogRecommendations);
+
+    expect(classPath).toBe('books');
+    expect(methodPath).toBe(':id/catalog-recommendations');
+    expect(methodType).toBe(RequestMethod.GET);
+  });
+
   it('delegates recommendation lookup to the service', async () => {
     const recommendation = [{ id: 10, title: 'Book 10', hasCover: true, authors: [], isAudiobook: false }];
     const recommendationService = {
@@ -62,6 +72,34 @@ describe('RecommendationController', () => {
 
     await expect(controller.getRecommendations(10, user)).resolves.toEqual(recommendation);
     expect(recommendationService.getRecommendations).toHaveBeenCalledWith(10, user);
+  });
+
+  it('delegates catalog recommendation lookup to the service', async () => {
+    const recommendations = [{ type: 'catalog-item', mediaType: 'ebook', remoteId: 'ebook-1', title: 'Book 10' }];
+    const recommendationService = {
+      getCatalogRecommendations: vi.fn().mockResolvedValue(recommendations),
+    };
+
+    const controller = new RecommendationController(recommendationService as never);
+    const user: RequestUser = {
+      id: 1,
+      username: 'user',
+      name: 'User',
+      email: null,
+      active: true,
+      isDefaultPassword: false,
+      tokenVersion: 1,
+      settings: {},
+      avatarUrl: null,
+      provisioningMethod: 'local',
+      isSuperuser: false,
+      permissions: [],
+
+      contentFilters: EMPTY_CONTENT_FILTER_RULES,
+    };
+
+    await expect(controller.getCatalogRecommendations(10, user)).resolves.toEqual(recommendations);
+    expect(recommendationService.getCatalogRecommendations).toHaveBeenCalledWith(10, user);
   });
 
   it('delegates series books lookup to the service', async () => {

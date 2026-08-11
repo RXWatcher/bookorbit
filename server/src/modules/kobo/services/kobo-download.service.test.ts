@@ -17,6 +17,7 @@ const createReadStreamMock = vi.mocked(createReadStream);
 
 function makeReply() {
   return {
+    status: vi.fn().mockReturnThis(),
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
     send: vi.fn().mockReturnThis(),
@@ -33,7 +34,8 @@ function makeDeps() {
     },
     kepubConversionService: { getKepubPath: vi.fn() },
     settingsService: { getSettings: vi.fn() },
-    bookAccessService: { assertBookAccessible: vi.fn() },
+    bookAccessService: { assertBookAccessible: vi.fn(), resolveCatalogEbookRemoteId: vi.fn() },
+    warehouseCatalog: { downloadEbook: vi.fn() },
   };
 }
 
@@ -43,6 +45,7 @@ function makeService(deps: ReturnType<typeof makeDeps>) {
     deps.kepubConversionService as never,
     deps.settingsService as never,
     deps.bookAccessService as never,
+    deps.warehouseCatalog as never,
   );
 }
 
@@ -190,6 +193,54 @@ describe('KoboDownloadService', () => {
 
     expect(reply.type).toHaveBeenCalledWith('application/epub+zip');
     expect(reply.header).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="book-55.kepub.epub"');
+  });
+
+  it('streams catalog ebooks through user-scoped catalog download with range and safe headers', async () => {
+    const deps = makeDeps();
+    const service = makeService(deps);
+    const reply = makeReply();
+    const body = Buffer.from('partial');
+    deps.bookAccessService.resolveCatalogEbookRemoteId.mockResolvedValue('remote/book-12');
+    deps.warehouseCatalog.downloadEbook.mockResolvedValue({
+      body,
+      contentType: 'application/epub+zip; private=https://example.invalid',
+      contentLength: body.length,
+      fileName: 'private-title.epub',
+      status: 206,
+      contentRange: 'bytes 100-106/1000',
+      acceptRanges: 'bytes',
+    });
+
+    await service.streamCatalogEbook(7, 42, reply as never, 'bytes=100-106');
+
+    expect(deps.warehouseCatalog.downloadEbook).toHaveBeenCalledWith({ id: 7 }, 'remote/book-12', 'bytes=100-106');
+    expect(reply.status).toHaveBeenCalledWith(206);
+    expect(reply.header).toHaveBeenCalledWith('Content-Length', String(body.length));
+    expect(reply.header).toHaveBeenCalledWith('Content-Range', 'bytes 100-106/1000');
+    expect(reply.header).toHaveBeenCalledWith('Accept-Ranges', 'bytes');
+    expect(reply.header).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="book-boce_42.epub"');
+    expect(reply.header).not.toHaveBeenCalledWith('Content-Disposition', expect.stringContaining('private-title'));
+    expect(reply.type).toHaveBeenCalledWith('application/epub+zip');
+    expect(reply.send).toHaveBeenCalledWith(body);
+  });
+
+  it('rejects catalog ebook downloads with unsafe content metadata', async () => {
+    const deps = makeDeps();
+    const service = makeService(deps);
+    deps.bookAccessService.resolveCatalogEbookRemoteId.mockResolvedValue('remote/book-12');
+    deps.warehouseCatalog.downloadEbook.mockResolvedValue({
+      body: Buffer.from('<html></html>'),
+      contentType: 'text/html',
+      contentLength: 13,
+      fileName: 'bad.html',
+      status: 206,
+      contentRange: 'bytes 200-100/1000',
+      acceptRanges: 'bytes',
+    });
+
+    await expect(service.streamCatalogEbook(7, 42, makeReply() as never, 'bytes=100-200')).rejects.toThrow(
+      'Library media is temporarily unavailable.',
+    );
   });
 
   it('streamFile falls back to application/octet-stream for unknown formats', async () => {

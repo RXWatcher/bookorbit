@@ -63,6 +63,7 @@ describe('SettingsHeader', () => {
       expect(labels).not.toContain('Kobo')
       expect(labels).not.toContain('KOReader')
       expect(labels).not.toContain('Hardcover')
+      expect(labels).not.toContain('Book Warehouse')
     })
 
     it('shows Kobo tab for users with kobo_sync', () => {
@@ -106,7 +107,7 @@ describe('SettingsHeader', () => {
 
     it('places integration tabs after OPDS', () => {
       const labels = getTabLabels(mountHeader({ su: true }))
-      expect(labels.slice(labels.indexOf('OPDS'), labels.indexOf('Admin'))).toEqual(['OPDS', 'Kobo', 'KOReader', 'Integrations'])
+      expect(labels.slice(labels.indexOf('OPDS'), labels.indexOf('Admin'))).toEqual(['OPDS', 'Kobo', 'KOReader', 'Integrations', 'Book Warehouse'])
     })
 
     it('places Integrations after KOReader', () => {
@@ -176,6 +177,23 @@ describe('SettingsHeader', () => {
     it('hides Admin tab without an administrative permission', () => {
       const labels = getTabLabels(mountHeader({ perms: ['kobo_sync'] }))
       expect(labels).not.toContain('Admin')
+    })
+  })
+
+  describe('Book Warehouse tab visibility', () => {
+    it('shows Book Warehouse tab for superuser', () => {
+      const labels = getTabLabels(mountHeader({ su: true }))
+      expect(labels).toContain('Book Warehouse')
+    })
+
+    it('shows Book Warehouse tab for user with manage_app_settings', () => {
+      const labels = getTabLabels(mountHeader({ perms: ['manage_app_settings'] }))
+      expect(labels).toContain('Book Warehouse')
+    })
+
+    it('hides Book Warehouse tab without manage_app_settings', () => {
+      const labels = getTabLabels(mountHeader({ perms: ['kobo_sync'] }))
+      expect(labels).not.toContain('Book Warehouse')
     })
   })
 
@@ -266,6 +284,12 @@ describe('SettingsHeader', () => {
     it('Integrations tab is active when route is settings-integrations', () => {
       const wrapper = mountHeader({ routeName: 'settings-integrations', perms: ['storygraph_sync'] })
       const btn = wrapper.findAll('button').find((b) => b.text() === 'Integrations')
+      expect(btn?.classes()).toContain('border-primary')
+    })
+
+    it('Book Warehouse tab is active when route is settings-warehouse', () => {
+      const wrapper = mountHeader({ routeName: 'settings-warehouse', perms: ['manage_app_settings'] })
+      const btn = wrapper.findAll('button').find((b) => b.text() === 'Book Warehouse')
       expect(btn?.classes()).toContain('border-primary')
     })
 

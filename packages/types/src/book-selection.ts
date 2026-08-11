@@ -1,7 +1,7 @@
 import type { GroupRule, SortSpec } from "./query";
 
 export type BookSelectionQuery = {
-  libraryId?: number;
+  libraryId?: number | string;
   filter?: GroupRule;
   q?: string;
   sort?: SortSpec[];

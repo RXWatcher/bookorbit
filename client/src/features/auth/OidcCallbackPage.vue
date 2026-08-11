@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import type { OidcCallbackResponse } from '@bookorbit/types'
 import { OidcErrorCode } from '@bookorbit/types'
 import { setAccessToken } from '@/lib/api'
+import { canonicalizeUserFacingLibraryUrl } from '@/features/library/lib/library-route'
 import { useAuth } from './composables/useAuth'
 import { useOidc, OidcLoginError } from './composables/useOidc'
 
@@ -55,7 +56,7 @@ onMounted(async () => {
       user.value = data.user
       const redirect = sessionStorage.getItem('oidc_redirect') ?? '/'
       sessionStorage.removeItem('oidc_redirect')
-      router.replace(redirect)
+      router.replace(canonicalizeUserFacingLibraryUrl(redirect))
       return
     }
 

@@ -2,7 +2,7 @@ import { BadRequestException, ExecutionContext, ForbiddenException } from '@nest
 
 import type { RequestUser } from '../types/request-user';
 import { LibraryAccessGuard } from './library-access.guard';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
@@ -81,6 +81,28 @@ describe('LibraryAccessGuard', () => {
     });
     await expect(guard.canActivate(makeContext(makeUser(), { id: '12' }))).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalled();
+  });
+
+  it('allows source-backed libraries for viewer routes without querying access table', async () => {
+    const { guard, findFirst } = makeGuard({ required: 'viewer' });
+
+    await expect(guard.canActivate(makeContext(makeUser(), { id: String(CLOUD_EBOOK_LIBRARY_ID) }))).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext(makeUser(), { id: String(CLOUD_COMIC_LIBRARY_ID) }))).resolves.toBe(true);
+
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects source-backed libraries for editor routes', async () => {
+    const { guard, findFirst } = makeGuard({ required: 'editor' });
+
+    await expect(guard.canActivate(makeContext(makeUser({ isSuperuser: true }), { id: String(CLOUD_EBOOK_LIBRARY_ID) }))).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(guard.canActivate(makeContext(makeUser({ isSuperuser: true }), { id: String(CLOUD_COMIC_LIBRARY_ID) }))).rejects.toThrow(
+      BadRequestException,
+    );
+
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it('throws ForbiddenException when no access row exists', async () => {

@@ -4,6 +4,7 @@ import type { AudiobookChapter, NarratorRef } from "./audiobook";
 import type { ComicMetadataFields } from "./metadata-fetch";
 import type { BookFileWriteField, WriteResult } from "./file-write";
 import type { CustomMetadataBookValue } from "./custom-metadata";
+import type { WarehouseMediaType } from "./warehouse";
 import type { CoverAspectRatio } from "./library";
 import { DEFAULT_FORMAT_PRIORITY } from "./library";
 
@@ -123,8 +124,16 @@ export type BookSeriesMembership = {
 
 export type BookCard = {
   id: number;
+  catalogSource?: {
+    mediaType: WarehouseMediaType;
+    remoteId: string;
+  } | null;
   status: string;
   coverAspectRatio: CoverAspectRatio;
+  /** Audiobook length. Optional because only audio items have one — but
+   *  without it the Audiobookshelf-compatible API cannot report a duration,
+   *  so clients show no length and cannot place a progress position. */
+  durationSeconds?: number | null;
   title: string | null;
   authors: string[];
   seriesId?: number | null;

@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, unref, type MaybeRef } from 'vue'
 import { toast } from 'vue-sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/features/auth/composables/useAuth'
@@ -207,11 +207,17 @@ function sanitizeDefaultSettings(group: ReaderFormatGroup, raw: unknown): Reader
   } as ReaderSettings
 }
 
+export interface ReaderSettingsOptions {
+  bookStorageKey?: string
+  syncBookPreferences?: MaybeRef<boolean>
+}
+
 // -- Per-book settings (used inside the reader) --
 
-export function useReaderSettings(bookFileId: number, format: string) {
+export function useReaderSettings(bookFileId: number, format: string, options: ReaderSettingsOptions = {}) {
   const group = getFormatGroup(format)
   const { user } = useAuth()
+  const bookStorageKey = options.bookStorageKey ?? lsBookKey(bookFileId)
 
   // Only the fields the user explicitly changed for this book — not a full snapshot.
   const bookDelta = ref<Partial<ReaderSettings> | null>(null)
@@ -219,6 +225,7 @@ export function useReaderSettings(bookFileId: number, format: string) {
   const isCustomized = ref(false)
 
   const syncEnabled = computed(() => user.value?.settings?.syncReaderPreferences === true)
+  const syncBookPreferences = computed(() => syncEnabled.value && unref(options.syncBookPreferences ?? true))
 
   // Merge order: hardcoded fallback → format defaults → per-book delta
   const effective = computed<ReaderSettings>(
@@ -231,7 +238,7 @@ export function useReaderSettings(bookFileId: number, format: string) {
   )
 
   async function load() {
-    const lsBook = readLs<Partial<ReaderSettings>>(lsBookKey(bookFileId))
+    const lsBook = readLs<Partial<ReaderSettings>>(bookStorageKey)
     const lsDefault = readLs<ReaderSettings>(lsDefaultKey(group))
 
     if (lsBook) {
@@ -239,11 +246,11 @@ export function useReaderSettings(bookFileId: number, format: string) {
       if (sanitized && Object.keys(sanitized).length > 0) {
         bookDelta.value = sanitized
         isCustomized.value = true
-        if (!jsonEqual(lsBook, sanitized)) writeLs(lsBookKey(bookFileId), sanitized)
+        if (!jsonEqual(lsBook, sanitized)) writeLs(bookStorageKey, sanitized)
       } else {
         bookDelta.value = null
         isCustomized.value = false
-        removeLs(lsBookKey(bookFileId))
+        removeLs(bookStorageKey)
       }
     }
     if (lsDefault) {
@@ -264,7 +271,7 @@ export function useReaderSettings(bookFileId: number, format: string) {
 
   async function syncFromDb() {
     const [prefRes, defRes] = await Promise.all([
-      api(`/api/v1/reader/preferences/${bookFileId}`).then((r) => (r.ok ? r.json() : null)),
+      syncBookPreferences.value ? api(`/api/v1/reader/preferences/${bookFileId}`).then((r) => (r.ok ? r.json() : null)) : Promise.resolve(null),
       api(`/api/v1/reader/defaults`).then((r) => (r.ok ? r.json() : null)),
     ])
 
@@ -273,11 +280,11 @@ export function useReaderSettings(bookFileId: number, format: string) {
       if (sanitized && Object.keys(sanitized).length > 0) {
         bookDelta.value = sanitized
         isCustomized.value = true
-        writeLs(lsBookKey(bookFileId), sanitized)
+        writeLs(bookStorageKey, sanitized)
       } else {
         bookDelta.value = null
         isCustomized.value = false
-        removeLs(lsBookKey(bookFileId))
+        removeLs(bookStorageKey)
       }
     }
     if (defRes?.[group]) {
@@ -297,9 +304,9 @@ export function useReaderSettings(bookFileId: number, format: string) {
     const next = { ...(bookDelta.value ?? undefined), ...patch } as Partial<ReaderSettings>
     bookDelta.value = next
     isCustomized.value = Object.keys(next).length > 0
-    writeLs(lsBookKey(bookFileId), next)
+    writeLs(bookStorageKey, next)
 
-    if (syncEnabled.value) {
+    if (syncBookPreferences.value) {
       api(`/api/v1/reader/preferences/${bookFileId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -311,9 +318,9 @@ export function useReaderSettings(bookFileId: number, format: string) {
   function resetBookSettings() {
     bookDelta.value = null
     isCustomized.value = false
-    removeLs(lsBookKey(bookFileId))
+    removeLs(bookStorageKey)
 
-    if (syncEnabled.value) {
+    if (syncBookPreferences.value) {
       api(`/api/v1/reader/preferences/${bookFileId}`, { method: 'DELETE' }).catch(() => {})
     }
   }

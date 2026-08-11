@@ -1049,7 +1049,7 @@
       },
       "libraries": {
         "title": "Libraries",
-        "subtitle": "Manage your media libraries and trigger content scans.",
+        "subtitle": "Manage your media libraries and keep contents up to date.",
         "scanAll": "Scan All",
         "scanning": "Scanning...",
         "addLibrary": "Add Library",
@@ -1150,7 +1150,8 @@
         "account-activity": "Account Activity",
         "magic-links": "Magic Links",
         "oidc": "OIDC / SSO",
-        "server-fonts": "Server Fonts"
+        "server-fonts": "Server Fonts",
+        "local-scan": "Local Scan"
       },
       "serverFonts": {
         "title": "Server Fonts",
@@ -1158,6 +1159,26 @@
         "listLabel": "Server fonts",
         "noFontsYet": "No server fonts yet",
         "noFontsHint": "Fonts you add here appear in every user's reader."
+      },
+      "localScan": {
+        "title": "Local Scan",
+        "subtitle": "Find books on the filesystem that the Book Warehouse catalogue does not have, and fill their metadata from the sidecars stored beside them.",
+        "scanAll": "Scan all roots",
+        "scan": "Scan",
+        "enrich": "Refresh metadata",
+        "enrichHint": "Refresh metadata reads the metadata.opf and cover file stored next to each book. It needs no API keys and makes no external calls.",
+        "disabled": "disabled",
+        "never": "never",
+        "lastRun": "Last finished: {when}",
+        "loadFailed": "Could not load scan roots.",
+        "actionFailed": "The request failed. Check the server logs.",
+        "unkeyedWarning": "{count} files could not be identified and are not in the library.",
+        "summary": {
+          "scanned": "Scanned",
+          "matched": "Already known",
+          "inserted": "Added",
+          "deduped": "Duplicates"
+        }
       }
     },
     "common": {
@@ -4604,7 +4625,10 @@
         "dropped": "{name} dropped at position {position} of {total}",
         "cancelled": "Reorder cancelled. {name} returned to position {position} of {total}.",
         "filteredHint": "Clear the filter to reorder"
-      }
+      },
+      "tagline": "Personal reading library",
+      "supportShort": "Support",
+      "libraryScanning": "{name} - scanning {pct}%"
     },
     "selectionActionBar": {
       "setReadingStatus": "Set reading status",
@@ -4802,7 +4826,9 @@
         "wantToRead": "Want to Read",
         "upNextInSeries": "Up Next in Series",
         "random": "Discover Something New",
-        "smartScope": "Smart Scope"
+        "smartScope": "Smart Scope",
+        "catalogAdditions": "New in the catalog",
+        "catalogDiscovery": "Discover in the catalog"
       },
       "shelfLayout": {
         "title": "Shelf layout",
@@ -5890,7 +5916,8 @@
         "files": "Files",
         "integrations": "Integrations",
         "personal": "Personal",
-        "app": "App updates"
+        "app": "App updates",
+        "requests": "Library Requests"
       },
       "enabledCount": "{enabled} of {total} enabled",
       "categories": {
@@ -5937,6 +5964,10 @@
         "achievements": {
           "label": "Achievements",
           "description": "When you unlock a new reading achievement."
+        },
+        "catalogRequests": {
+          "label": "Library Requests",
+          "description": "Updates about your ebook and audiobook requests."
         }
       }
     }
@@ -6183,7 +6214,19 @@
         "black": "Black",
         "gray": "Gray",
         "white": "White"
-      }
+      },
+      "tabs": {
+        "view": "View",
+        "reading": "Reading",
+        "layout": "Layout"
+      },
+      "autoFallback": "Auto-fallback",
+      "spreadAlignmentHint": "Spread alignment is unavailable in auto-fallback mode.",
+      "focusTwoPageToggle": "Focus two-page toggle",
+      "off": "Off",
+      "on": "On",
+      "resetBookViewSettings": "Reset book view settings",
+      "resetConfirm": "Reset view settings for this book to your global defaults?"
     },
     "audiobook": {
       "untitled": "Untitled",
@@ -7029,7 +7072,8 @@
       "account-activity": "Account Activity",
       "magic-links": "Magic Links",
       "oidc": "OIDC / SSO",
-      "server-fonts": "Server Fonts"
+      "server-fonts": "Server Fonts",
+      "local-scan": "Local Scan"
     },
     "system": {
       "file-naming": "File Naming",

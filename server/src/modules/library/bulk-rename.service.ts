@@ -93,6 +93,7 @@ export class BulkRenameService {
     this.previewCache.delete(libraryId);
 
     const preview = await this.computeFullPreview(libraryId);
+    const skippedPreviewItems = preview.items.filter((item) => item.status !== 'will_rename');
     const bookIds = preview.items.filter((item) => item.status === 'will_rename').map((item) => item.bookId);
     this.logger.log(`[${event}] [start] libraryId=${libraryId} userId=${userId} candidateCount=${bookIds.length} - bulk rename started`);
 
@@ -104,9 +105,17 @@ export class BulkRenameService {
 
     let succeeded = 0;
     let failed = 0;
-    let skipped = 0;
+    let skipped = skippedPreviewItems.length;
 
     try {
+      for (const item of skippedPreviewItems) {
+        options.onProgress({
+          bookId: item.bookId,
+          status: 'skipped',
+          reason: item.reason ?? this.reasonForSkippedPreviewItem(item.status),
+        });
+      }
+
       for (const bookId of bookIds) {
         if (options.isCancelled()) break;
 
@@ -170,6 +179,21 @@ export class BulkRenameService {
 
   invalidateCache(libraryId: number): void {
     this.previewCache.delete(libraryId);
+  }
+
+  private reasonForSkippedPreviewItem(status: BulkRenameStatus): string {
+    switch (status) {
+      case 'unchanged':
+        return 'path unchanged';
+      case 'collision':
+        return 'collision';
+      case 'no_pattern':
+        return 'no pattern';
+      case 'error':
+        return 'preview error';
+      case 'will_rename':
+        return 'will rename';
+    }
   }
 
   private async computeFullPreview(libraryId: number): Promise<CachedPreview> {

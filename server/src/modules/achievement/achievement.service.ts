@@ -186,6 +186,7 @@ export class AchievementService implements OnModuleInit, OnModuleDestroy {
       ACHIEVEMENT_EVENT_LIBRARY_CATALOG_CHANGED,
       ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED,
       ACHIEVEMENT_EVENT_BOOK_PROGRESS_CHANGED,
+      ACHIEVEMENT_EVENT_BACKFILL,
     ];
 
     for (const eventName of events) {

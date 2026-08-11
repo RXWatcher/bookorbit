@@ -1,17 +1,33 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
 
-import type { BookQuery, BooksPage, GroupRule, JumpBucketsQuery, JumpBucketsResponse, SortSpec } from '@bookorbit/types';
+import {
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
+  type BookQuery,
+  type DashboardCatalogItem,
+  type GroupRule,
+  type JumpBucketsQuery,
+  type JumpBucketsResponse,
+  type LibraryBooksPage,
+  type SmartScopeCatalogItemsPage,
+  type SortSpec,
+  type WarehouseMediaType,
+} from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
 import { normalizeIconValue } from '../../common/utils/icon-value.utils';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { resolveTimeZone } from '../../common/utils/timezone.utils';
+import type { WarehouseCatalogItemRow } from '../../db/schema';
 import type { SmartScope } from '../../db/schema/smart-scopes';
 import { BookService } from '../book/book.service';
-import { BookQueryBuilder } from '../book/book-query-builder.service';
 import { BookReadService } from '../book/book-read.service';
-import { validateGroupRule } from '../book/utils/group-rule.validator';
+import { BookQueryBuilder } from '../book/book-query-builder.service';
 import { LibraryService } from '../library/library.service';
+import { validateGroupRule } from '../book/utils/group-rule.validator';
+import { WarehouseRepository } from '../warehouse/warehouse.repository';
+import { catalogAuthorRefs, catalogSeriesRef } from '../warehouse/catalog-link-refs';
 import { CreateSmartScopeDto } from './dto/create-smart-scope.dto';
 import { ReorderSmartScopesDto } from './dto/reorder-smart-scopes.dto';
 import { UpdateSmartScopeDto } from './dto/update-smart-scope.dto';
@@ -39,10 +55,11 @@ export class SmartScopeService {
 
   constructor(
     private readonly smartScopeRepo: SmartScopeRepository,
+    private readonly bookService: BookService,
     private readonly bookReadService: BookReadService,
     private readonly queryBuilder: BookQueryBuilder,
+    private readonly warehouseRepo: WarehouseRepository,
     private readonly libraryService: LibraryService,
-    private readonly bookService: BookService,
   ) {}
 
   private async getSmartScopeOrThrow(id: number): Promise<SmartScope> {
@@ -201,7 +218,7 @@ export class SmartScopeService {
     }
   }
 
-  async executeSmartScope(id: number, user: RequestUser, page: number, size: number, q?: string): Promise<BooksPage> {
+  async executeSmartScope(id: number, user: RequestUser, page: number, size: number, q?: string): Promise<LibraryBooksPage> {
     return this.queryBooks(id, user, {
       sort: [],
       pagination: { page, size },
@@ -216,11 +233,20 @@ export class SmartScopeService {
     return this.bookService.executeBookIdsQuery(user.id, prepared.where, prepared.effectiveQuery);
   }
 
-  async queryBooks(id: number, user: RequestUser, query: BookQuery): Promise<BooksPage> {
+  // Returns LibraryBooksPage, not upstream's BooksPage: this fork's scopes can
+  // match warehouse catalogue items as well as local books.
+  async queryBooks(id: number, user: RequestUser, query: BookQuery): Promise<LibraryBooksPage> {
     const start = Date.now();
     this.logger.debug(
       `[smart_scope.query_books] [start] scopeId=${id} userId=${user.id} page=${query.pagination.page} size=${query.pagination.size} - query started`,
     );
+
+    const smartScope = await this.getSmartScopeOrThrow(id);
+    this.assertReadAccess(smartScope, user);
+
+    if (!smartScope.filter) {
+      return { items: [], total: 0, page: query.pagination.page, size: query.pagination.size };
+    }
 
     const prepared = await this.prepareBooksQuery(id, user, query);
     if (!prepared) {
@@ -290,6 +316,44 @@ export class SmartScopeService {
     return { where, effectiveQuery };
   }
 
+  async queryCatalogItems(id: number, user: RequestUser, query: BookQuery): Promise<SmartScopeCatalogItemsPage> {
+    const smartScope = await this.getSmartScopeOrThrow(id);
+    this.assertReadAccess(smartScope, user);
+
+    if (!smartScope.filter) {
+      return { items: [], total: 0, page: query.pagination.page, size: query.pagination.size };
+    }
+
+    const filter = this.combineFilters(smartScope.filter, query.filter);
+    if (!filter) {
+      return { items: [], total: 0, page: query.pagination.page, size: query.pagination.size };
+    }
+
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    const mediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
+    if (mediaTypes.length === 0) {
+      return { items: [], total: 0, page: query.pagination.page, size: query.pagination.size };
+    }
+
+    const result = await this.warehouseRepo.queryUserCatalogItems(user.id, {
+      includeAllCatalogItems: true,
+      mediaTypes,
+      filter,
+      sort: query.sort,
+      q: query.q,
+      page: query.pagination.page,
+      limit: query.pagination.size,
+      contentFilters: user.contentFilters,
+    });
+
+    return {
+      items: result.rows.map(mapCatalogSmartScopeItem),
+      total: result.total,
+      page: result.page,
+      size: result.limit,
+    };
+  }
+
   private combineFilters(scopeFilter: GroupRule | null, queryFilter?: GroupRule): GroupRule | undefined {
     if (!scopeFilter) return undefined;
     if (!queryFilter) return scopeFilter;
@@ -306,4 +370,48 @@ export class SmartScopeService {
     }
     return smartScope.defaultSort ?? [];
   }
+}
+
+function mapCatalogSmartScopeItem(
+  row: WarehouseCatalogItemRow & { fileSizeBytes?: number | null; metadataScore?: number | null },
+): DashboardCatalogItem {
+  const authorRefs = catalogAuthorRefs(row.authors);
+  const seriesRef = catalogSeriesRef(row.series);
+  return {
+    type: 'catalog-item',
+    mediaType: row.mediaType,
+    remoteId: row.remoteId,
+    title: row.title,
+    subtitle: row.subtitle ?? null,
+    seriesName: row.series ?? null,
+    seriesRef,
+    seriesIndex: row.seriesIndex ?? null,
+    authors: authorRefs.map((author) => author.name),
+    authorRefs,
+    narrators: safeStringArray(row.narrators),
+    libraryName: sourceBackedLibraryName(row.mediaType),
+    formats: row.format ? [row.format] : [],
+    hasCover: row.hasCover,
+    updatedAt: row.updatedAt.toISOString(),
+    fileSizeBytes: row.fileSizeBytes ?? null,
+    metadataScore: row.metadataScore ?? null,
+  };
+}
+
+function safeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function sourceBackedMediaTypesForLibraryIds(libraryIds: number[]): WarehouseMediaType[] {
+  const mediaTypes: WarehouseMediaType[] = [];
+  if (libraryIds.includes(CLOUD_EBOOK_LIBRARY_ID)) mediaTypes.push('ebook');
+  if (libraryIds.includes(CLOUD_AUDIO_LIBRARY_ID)) mediaTypes.push('audiobook');
+  if (libraryIds.includes(CLOUD_COMIC_LIBRARY_ID)) mediaTypes.push('comic');
+  return mediaTypes;
+}
+
+function sourceBackedLibraryName(mediaType: WarehouseMediaType): string {
+  if (mediaType === 'audiobook') return 'Audiobooks';
+  if (mediaType === 'comic') return 'Comics';
+  return 'Books';
 }

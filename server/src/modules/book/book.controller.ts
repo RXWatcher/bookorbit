@@ -639,8 +639,7 @@ export class BookController {
     },
   })
   async bulkSetStatus(@Body() dto: BulkSetStatusDto, @CurrentUser() user: RequestUser) {
-    const ids = await this.bookService.resolveSelectionToIds(dto, user);
-    return this.bookService.bulkSetStatus(ids, dto.status, user);
+    return this.bookService.bulkSetStatusForSelection(dto, dto.status, user);
   }
 
   @Post('bulk-set-rating')
@@ -657,8 +656,7 @@ export class BookController {
     },
   })
   async bulkSetRating(@Body() dto: BulkSetRatingDto, @CurrentUser() user: RequestUser) {
-    const ids = await this.bookService.resolveSelectionToIds(dto, user);
-    return this.bookService.bulkSetRating(ids, dto.rating ?? null, user);
+    return this.bookService.bulkSetRatingForSelection(dto, dto.rating ?? null, user);
   }
 
   @Post('bulk-set-metadata')

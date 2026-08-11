@@ -135,8 +135,34 @@ export class KoreaderService {
 
     const accessibleLibraryIds = await this.repo.getAccessibleLibraryIds(userId);
     const bookFile = await this.repo.resolveBookFileByHash(data.document, accessibleLibraryIds, userId);
+    const chapterIndex = this.chapterService.parseChapterIndexFromProgress(data.progress ?? null);
 
     if (!bookFile) {
+      const catalogDocument = await this.repo.resolveCatalogDocumentByHash(userId, data.document);
+      if (catalogDocument) {
+        const syncedAt = new Date();
+        await this.repo.upsertCatalogDeviceProgress({
+          catalogDocumentId: catalogDocument.catalogDocumentId,
+          userId,
+          device,
+          deviceId,
+          percentage: data.percentage,
+          progress: data.progress ?? null,
+          chapterIndex,
+          syncTimestamp: data.timestamp ?? null,
+          updatedAt: syncedAt,
+        });
+
+        const bookorbitPercentage = toBookorbitPercentage(data.percentage);
+        await this.repo.upsertCatalogReadingProgress(userId, catalogDocument.remoteId, bookorbitPercentage, syncedAt);
+
+        this.logger.debug(
+          `[${SYNC_EVENT}] [end] userId=${userId} catalogItemId=${catalogDocument.catalogItemId} device=${device} durationMs=${Date.now() - startedAt} percentage=${data.percentage} - save catalog progress completed`,
+        );
+
+        return { document: data.document, timestamp: data.timestamp ?? Math.floor(Date.now() / 1000) };
+      }
+
       this.logger.debug(
         `[${SYNC_EVENT}] [fail] userId=${userId} document=${data.document.slice(0, 16)} durationMs=${Date.now() - startedAt} error="book not found" - save progress failed`,
       );
@@ -323,7 +349,42 @@ export class KoreaderService {
     const accessibleLibraryIds = await this.repo.getAccessibleLibraryIds(userId);
     const bookFile = await this.repo.resolveBookFileByHash(documentHash, accessibleLibraryIds, userId);
 
-    if (!bookFile) return null;
+    if (!bookFile) {
+      const catalogDocument = await this.repo.resolveCatalogDocumentByHash(userId, documentHash);
+      if (!catalogDocument) return null;
+
+      const latestDevice = await this.repo.getLatestCatalogDeviceProgress(catalogDocument.catalogDocumentId, userId);
+      const catalogProgress = await this.repo.getCatalogReadingProgress(userId, catalogDocument.remoteId);
+
+      if (!latestDevice && !catalogProgress) return null;
+
+      const deviceTime = latestDevice?.updatedAt?.getTime() ?? 0;
+      const stateTime = catalogProgress?.updatedAt?.getTime() ?? 0;
+
+      if (latestDevice && deviceTime >= stateTime) {
+        return {
+          document: documentHash,
+          percentage: latestDevice.percentage,
+          progress: latestDevice.progress ?? '',
+          device: latestDevice.device,
+          device_id: latestDevice.deviceId,
+          timestamp: latestDevice.syncTimestamp ?? Math.floor(deviceTime / 1000),
+        };
+      }
+
+      if (catalogProgress) {
+        return {
+          document: documentHash,
+          percentage: toKoreaderPercentage(catalogProgress.progressPercent ?? 0),
+          progress: null,
+          device: 'web',
+          device_id: 'bookorbit-web',
+          timestamp: Math.floor(stateTime / 1000),
+        };
+      }
+
+      return null;
+    }
 
     const latestDevice = await this.repo.getLatestDeviceProgress(bookFile.id, userId);
     const readingProg = await this.repo.getReadingProgress(bookFile.id, userId);
@@ -367,6 +428,10 @@ export class KoreaderService {
     }
 
     return null;
+  }
+
+  async recordCatalogDocumentHash(userId: number, remoteId: string, documentHash: string): Promise<void> {
+    await this.repo.recordCatalogDocumentHash(userId, remoteId, documentHash);
   }
 
   async getSyncStatus(userId: number): Promise<KoreaderSyncStatus> {

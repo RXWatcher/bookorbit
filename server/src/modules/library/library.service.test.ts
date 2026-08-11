@@ -9,7 +9,7 @@ vi.mock('../scanner/lib/classify', () => ({
 }));
 
 import { BadRequestException, ConflictException, ForbiddenException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 import { readdir, rm, stat } from 'fs/promises';
 
 import { ACHIEVEMENT_EVENT_LIBRARY_CATALOG_CHANGED } from '../achievement/achievement-events.service';
@@ -66,6 +66,18 @@ describe('LibraryService', () => {
   const achievementEvents = {
     emit: vi.fn(),
   };
+  const warehouseCatalog = {
+    isCatalogEnabled: vi.fn(),
+    listEbooks: vi.fn(),
+    listAudiobooks: vi.fn(),
+    listComics: vi.fn(),
+    queryLibraryItems: vi.fn(),
+    queryLibraryBooks: vi.fn(),
+    queryLibraryJumpBuckets: vi.fn(),
+  };
+  const warehouseSettings = {
+    getSourceBackedLibraryIcons: vi.fn(),
+  };
   const pathPolicy = {
     assertWithinBrowseRoot: vi.fn((path: string) => Promise.resolve(path)),
     resolveBrowsePath: vi.fn((path: string) => Promise.resolve(path)),
@@ -84,6 +96,8 @@ describe('LibraryService', () => {
       fileWriteService as any,
       achievementEvents as any,
       pathPolicy as any,
+      warehouseCatalog as any,
+      warehouseSettings as any,
     );
 
     mockStat.mockResolvedValue({ isDirectory: () => true } as Awaited<ReturnType<typeof stat>>);
@@ -92,6 +106,13 @@ describe('LibraryService', () => {
     mockIsPrimaryFormat.mockReturnValue(false);
     pathPolicy.assertWithinBrowseRoot.mockImplementation((path: string) => Promise.resolve(path));
     pathPolicy.resolveBrowsePath.mockImplementation((path: string) => Promise.resolve(path));
+    warehouseCatalog.isCatalogEnabled.mockResolvedValue(true);
+    warehouseCatalog.listComics.mockResolvedValue({ items: [], page: 1, limit: 1, total: 0 });
+    warehouseSettings.getSourceBackedLibraryIcons.mockResolvedValue({
+      ebook: 'BookOpen',
+      audiobook: 'Headphones',
+      comic: 'PanelsTopLeft',
+    });
   });
 
   it('findAll uses scoped folder query for non-superusers', async () => {
@@ -105,6 +126,108 @@ describe('LibraryService', () => {
     expect(libraryRepo.findAllFolders).not.toHaveBeenCalled();
     expect(result[0].folders).toEqual([{ id: 1, path: '/a', createdAt: expect.any(Date) }]);
     expect(result[0].coverAspectRatio).toBe('1/1');
+  });
+
+  it('findAll includes source-backed libraries as native library rows when requested', async () => {
+    libraryRepo.findAllForUser.mockResolvedValue([{ id: 10, name: 'A', coverAspectRatio: '1/1' }]);
+    libraryRepo.findFoldersByLibraryIds.mockResolvedValue([{ id: 1, libraryId: 10, path: '/a', createdAt: new Date() }]);
+    warehouseCatalog.listEbooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 56251 });
+    warehouseCatalog.listAudiobooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 2400 });
+    warehouseCatalog.listComics.mockResolvedValue({ items: [], page: 1, limit: 1, total: 915 });
+
+    const result = await service.findAll({ id: 7, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      includeSourceBacked: true,
+    });
+
+    expect(warehouseCatalog.listEbooks).toHaveBeenCalledWith({ page: 1, limit: 1, sort: 'title', order: 'asc' });
+    expect(warehouseCatalog.listAudiobooks).toHaveBeenCalledWith({ page: 1, limit: 1, sort: 'title', order: 'asc' });
+    expect(warehouseCatalog.listComics).toHaveBeenCalledWith({ page: 1, limit: 1, sort: 'title', order: 'asc' });
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: CLOUD_EBOOK_LIBRARY_ID,
+          name: 'Books',
+          sourceKind: 'source_backed',
+          icon: 'BookOpen',
+          coverAspectRatio: '2/3',
+          bookCount: 56251,
+          folders: [],
+        }),
+        expect.objectContaining({
+          id: CLOUD_AUDIO_LIBRARY_ID,
+          name: 'Audiobooks',
+          sourceKind: 'source_backed',
+          icon: 'Headphones',
+          coverAspectRatio: '1/1',
+          bookCount: 2400,
+          folders: [],
+        }),
+        expect.objectContaining({
+          id: CLOUD_COMIC_LIBRARY_ID,
+          name: 'Comics',
+          sourceKind: 'source_backed',
+          icon: 'PanelsTopLeft',
+          coverAspectRatio: '2/3',
+          bookCount: 915,
+          folders: [],
+        }),
+        expect.objectContaining({
+          id: 10,
+          name: 'A',
+          sourceKind: 'filesystem',
+        }),
+      ]),
+    );
+  });
+
+  it('findAll uses configured source-backed library icons', async () => {
+    libraryRepo.findAllForUser.mockResolvedValue([]);
+    libraryRepo.findFoldersByLibraryIds.mockResolvedValue([]);
+    warehouseCatalog.listEbooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 1 });
+    warehouseCatalog.listAudiobooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 2 });
+    warehouseCatalog.listComics.mockResolvedValue({ items: [], page: 1, limit: 1, total: 3 });
+    warehouseSettings.getSourceBackedLibraryIcons.mockResolvedValue({
+      ebook: 'LibraryBig',
+      audiobook: 'Radio',
+      comic: 'BookImage',
+    });
+
+    const result = await service.findAll({ id: 7, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      includeSourceBacked: true,
+    });
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: CLOUD_EBOOK_LIBRARY_ID, icon: 'LibraryBig' }),
+        expect.objectContaining({ id: CLOUD_AUDIO_LIBRARY_ID, icon: 'Radio' }),
+        expect.objectContaining({ id: CLOUD_COMIC_LIBRARY_ID, icon: 'BookImage' }),
+      ]),
+    );
+  });
+
+  it('findAll keeps source-backed libraries out of filesystem-only calls', async () => {
+    libraryRepo.findAllForUser.mockResolvedValue([]);
+    libraryRepo.findFoldersByLibraryIds.mockResolvedValue([]);
+
+    await expect(service.findAll({ id: 7, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any)).resolves.toEqual([]);
+
+    expect(warehouseCatalog.listEbooks).not.toHaveBeenCalled();
+    expect(warehouseCatalog.listAudiobooks).not.toHaveBeenCalled();
+    expect(warehouseCatalog.listComics).not.toHaveBeenCalled();
+  });
+
+  it('findAll omits source-backed libraries when the catalog source is disabled', async () => {
+    libraryRepo.findAllForUser.mockResolvedValue([{ id: 10, name: 'A', coverAspectRatio: '1/1' }]);
+    libraryRepo.findFoldersByLibraryIds.mockResolvedValue([]);
+    warehouseCatalog.isCatalogEnabled.mockResolvedValue(false);
+
+    const result = await service.findAll({ id: 7, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      includeSourceBacked: true,
+    });
+
+    expect(result).toEqual([expect.objectContaining({ id: 10, name: 'A', sourceKind: 'filesystem' })]);
+    expect(warehouseCatalog.listEbooks).not.toHaveBeenCalled();
+    expect(warehouseCatalog.listAudiobooks).not.toHaveBeenCalled();
   });
 
   it('passes contentFilters to findAllForUser for non-superuser and skips for superuser', async () => {
@@ -149,8 +272,129 @@ describe('LibraryService', () => {
     await expect(service.findOne(111)).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('findOne returns source-backed ebook library details', async () => {
+    warehouseCatalog.listEbooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 56251 });
+    warehouseCatalog.listAudiobooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 2400 });
+    warehouseCatalog.listComics.mockResolvedValue({ items: [], page: 1, limit: 1, total: 915 });
+
+    await expect(service.findOne(CLOUD_EBOOK_LIBRARY_ID)).resolves.toEqual(
+      expect.objectContaining({
+        id: CLOUD_EBOOK_LIBRARY_ID,
+        name: 'Books',
+        sourceKind: 'source_backed',
+        folders: [],
+        bookCount: 56251,
+      }),
+    );
+
+    expect(libraryRepo.findById).not.toHaveBeenCalled();
+  });
+
+  it('findOne hides source-backed libraries when the catalog source is disabled', async () => {
+    warehouseCatalog.isCatalogEnabled.mockResolvedValue(false);
+
+    await expect(service.findOne(CLOUD_EBOOK_LIBRARY_ID)).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(libraryRepo.findById).not.toHaveBeenCalled();
+  });
+
+  it('queries source-backed ebook libraries through the catalog service', async () => {
+    const query = {
+      sort: [{ field: 'title', dir: 'asc' }],
+      pagination: { page: 0, size: 50 },
+      q: 'dune',
+    } as const;
+    const page = {
+      items: [{ type: 'catalog-item', mediaType: 'ebook', remoteId: 'ebook-1', title: 'Dune' }],
+      total: 1,
+      page: 0,
+      limit: 50,
+    };
+    warehouseCatalog.queryLibraryItems.mockResolvedValue(page);
+
+    await expect(service.querySourceBackedCatalogItems({ id: 42, isSuperuser: false } as any, CLOUD_EBOOK_LIBRARY_ID, query as any)).resolves.toBe(
+      page,
+    );
+
+    expect(warehouseCatalog.queryLibraryItems).toHaveBeenCalledWith({ id: 42, isSuperuser: false }, 'ebook', query);
+  });
+
+  it('queries source-backed audiobook libraries through the catalog service', async () => {
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as const;
+    warehouseCatalog.queryLibraryItems.mockResolvedValue({ items: [], total: 0, page: 0, limit: 50 });
+
+    await service.querySourceBackedCatalogItems({ id: 42, isSuperuser: false } as any, CLOUD_AUDIO_LIBRARY_ID, query as any);
+
+    expect(warehouseCatalog.queryLibraryItems).toHaveBeenCalledWith({ id: 42, isSuperuser: false }, 'audiobook', query);
+  });
+
+  it('queries source-backed comic libraries through the catalog service', async () => {
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as const;
+    warehouseCatalog.queryLibraryItems.mockResolvedValue({ items: [], total: 0, page: 0, limit: 50 });
+
+    await service.querySourceBackedCatalogItems({ id: 42, isSuperuser: false } as any, CLOUD_COMIC_LIBRARY_ID, query as any);
+
+    expect(warehouseCatalog.queryLibraryItems).toHaveBeenCalledWith({ id: 42, isSuperuser: false }, 'comic', query);
+  });
+
+  it('adapts source-backed library book queries to the native library books page shape', async () => {
+    const user = { id: 42, isSuperuser: false } as any;
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 1, size: 25 } } as const;
+    const item = { id: -1000000001, status: 'present', title: 'Dune', authors: ['Frank Herbert'], addedAt: '2026-01-01T00:00:00.000Z' };
+    warehouseCatalog.queryLibraryBooks.mockResolvedValue({ items: [item], total: 3, page: 1, limit: 25 });
+
+    await expect(service.querySourceBackedLibraryBooks(user, CLOUD_EBOOK_LIBRARY_ID, query as any)).resolves.toEqual({
+      items: [item],
+      total: 3,
+      page: 1,
+      size: 25,
+    });
+    expect(warehouseCatalog.queryLibraryBooks).toHaveBeenCalledWith(user, 'ebook', query);
+    expect(warehouseCatalog.queryLibraryItems).not.toHaveBeenCalled();
+  });
+
+  it('queries source-backed comic library jump buckets through the catalog service', async () => {
+    const user = { id: 42, isSuperuser: false } as any;
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as const;
+    const buckets = { buckets: [{ key: 'M', label: 'M', index: 12 }], total: 91 };
+    warehouseCatalog.queryLibraryJumpBuckets.mockResolvedValue(buckets);
+
+    await expect(service.querySourceBackedLibraryJumpBuckets(user, CLOUD_COMIC_LIBRARY_ID, query as any)).resolves.toBe(buckets);
+    expect(warehouseCatalog.queryLibraryJumpBuckets).toHaveBeenCalledWith(user, 'comic', query);
+  });
+
+  it('rejects catalog item queries for non-source-backed libraries', async () => {
+    await expect(
+      service.querySourceBackedCatalogItems({ id: 42, isSuperuser: false } as any, 12, {
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 0, size: 50 },
+      } as any),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(warehouseCatalog.queryLibraryItems).not.toHaveBeenCalled();
+  });
+
   it('verifyUserAccess bypasses lookup for superusers', async () => {
     await service.verifyUserAccess(1, 2, true);
+    expect(libraryRepo.hasUserAccess).not.toHaveBeenCalled();
+  });
+
+  it('verifyUserAccess allows source-backed libraries when the catalog source is enabled', async () => {
+    warehouseCatalog.listEbooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 56251 });
+    warehouseCatalog.listAudiobooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 2400 });
+    warehouseCatalog.listComics.mockResolvedValue({ items: [], page: 1, limit: 1, total: 915 });
+
+    await service.verifyUserAccess(1, CLOUD_COMIC_LIBRARY_ID, false);
+
+    expect(warehouseCatalog.isCatalogEnabled).toHaveBeenCalled();
+    expect(libraryRepo.hasUserAccess).not.toHaveBeenCalled();
+  });
+
+  it('verifyUserAccess rejects source-backed libraries when the catalog source is disabled', async () => {
+    warehouseCatalog.isCatalogEnabled.mockResolvedValue(false);
+
+    await expect(service.verifyUserAccess(1, CLOUD_COMIC_LIBRARY_ID, false)).rejects.toThrow('No access to this library');
+
     expect(libraryRepo.hasUserAccess).not.toHaveBeenCalled();
   });
 
@@ -484,6 +728,29 @@ describe('LibraryService', () => {
     libraryRepo.getStats.mockRejectedValue(new RangeError('overflow'));
 
     await expect(service.getStats(1)).rejects.toBeInstanceOf(InternalServerErrorException);
+  });
+
+  it('getStats returns source-backed ebook library counts without local storage size', async () => {
+    warehouseCatalog.listEbooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 56251 });
+    warehouseCatalog.listAudiobooks.mockResolvedValue({ items: [], page: 1, limit: 1, total: 2400 });
+
+    await expect(service.getStats(CLOUD_EBOOK_LIBRARY_ID)).resolves.toEqual({
+      totalBooks: 56251,
+      totalSizeBytes: 0,
+      formatCounts: {},
+    });
+
+    expect(libraryRepo.findById).not.toHaveBeenCalled();
+    expect(libraryRepo.getStats).not.toHaveBeenCalled();
+  });
+
+  it('getStats hides source-backed libraries when the catalog source is disabled', async () => {
+    warehouseCatalog.isCatalogEnabled.mockResolvedValue(false);
+
+    await expect(service.getStats(CLOUD_EBOOK_LIBRARY_ID)).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(libraryRepo.findById).not.toHaveBeenCalled();
+    expect(libraryRepo.getStats).not.toHaveBeenCalled();
   });
 
   it('writeMetadataToFiles blocks non-dry-run when file write is disabled', async () => {

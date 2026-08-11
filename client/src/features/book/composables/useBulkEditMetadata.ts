@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { api } from '@/lib/api'
+import { libraryRouteQueryValueForId } from '@/features/library/lib/library-route'
 import { toast } from 'vue-sonner'
 import type { Ref } from 'vue'
 import type { BookCard, SortSpec, GroupRule } from '@bookorbit/types'
@@ -41,7 +42,7 @@ export type BulkEditResult = {
 
 type QueryPayload = {
   query: {
-    libraryId?: number
+    libraryId?: number | string
     filter?: GroupRule
     q?: string
     sort?: SortSpec[]
@@ -55,14 +56,14 @@ type SelectionPayload = QueryPayload | IdsPayload
 export function useBulkEditMetadata(
   selectedIds: Ref<Set<number>>,
   books?: Ref<BookCard[]>,
-  querySelection?: Ref<{ libraryId?: number; filter?: GroupRule; q?: string; sort?: SortSpec[]; total: number } | null>,
+  querySelection?: Ref<{ libraryId?: number | string; filter?: GroupRule; q?: string; sort?: SortSpec[]; total: number } | null>,
 ) {
   const submitting = ref(false)
 
   function getSelectionPayload(): SelectionPayload {
     if (querySelection?.value) {
       const { libraryId, filter, q, sort } = querySelection.value
-      return { query: { libraryId, filter, q, sort } }
+      return { query: { libraryId: bulkQueryLibraryIdValue(libraryId), filter, q, sort } }
     }
     return { bookIds: [...selectedIds.value] }
   }
@@ -116,6 +117,13 @@ export function useBulkEditMetadata(
   }
 
   return { submit, submitting, selectedCount }
+}
+
+function bulkQueryLibraryIdValue(libraryId: number | string | undefined): number | string | undefined {
+  if (libraryId === undefined) return undefined
+  if (typeof libraryId === 'string') return libraryId
+  const routeValue = libraryRouteQueryValueForId(libraryId)
+  return routeValue === String(libraryId) ? libraryId : routeValue
 }
 
 function hasAddOrRemoveMode(fields: BulkEditFields): boolean {

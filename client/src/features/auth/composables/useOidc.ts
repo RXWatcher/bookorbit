@@ -1,4 +1,5 @@
 import type { OidcCallbackResponse, OidcProviderPublic } from '@bookorbit/types'
+import { canonicalizeUserFacingLibraryUrl } from '@/features/library/lib/library-route'
 
 export async function generatePkce(): Promise<{ codeVerifier: string; codeChallenge: string }> {
   const array = new Uint8Array(32)
@@ -59,7 +60,7 @@ export function useOidc() {
     sessionStorage.removeItem('oidc_redirect')
     const redirectTarget = new URLSearchParams(window.location.search).get('redirect')
     if (redirectTarget && redirectTarget.startsWith('/') && !redirectTarget.startsWith('//')) {
-      sessionStorage.setItem('oidc_redirect', redirectTarget)
+      sessionStorage.setItem('oidc_redirect', canonicalizeUserFacingLibraryUrl(redirectTarget))
     }
 
     const stateRes = await fetch(`/api/v1/auth/oidc/${provider.slug}/state`, { method: 'POST', credentials: 'include' })

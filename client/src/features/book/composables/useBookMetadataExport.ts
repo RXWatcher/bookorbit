@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import type { GroupRule, SortSpec } from '@bookorbit/types'
 import { api } from '@/lib/api'
+import { libraryRouteQueryValueForId } from '@/features/library/lib/library-route'
 
 export type MetadataExportFormat = 'csv' | 'json'
 export type MetadataExportScope = 'selected' | 'all-matching'
@@ -44,7 +45,7 @@ export type MetadataExportPreflight = {
 
 type MetadataExportPayload = {
   bookIds?: number[]
-  query?: MetadataExportQuery
+  query?: Omit<MetadataExportQuery, 'libraryId'> & { libraryId?: number | string }
   sort?: SortSpec[]
   format: MetadataExportFormat
   viewType: MetadataExportViewType
@@ -96,8 +97,12 @@ function toPayload(request: MetadataExportRequest): MetadataExportPayload {
     if (!request.allMatchingQuery) {
       throw new Error('All-matching metadata export requires a query payload')
     }
+    const { libraryId, ...query } = request.allMatchingQuery
     return {
-      query: request.allMatchingQuery,
+      query: {
+        ...query,
+        libraryId: metadataExportLibraryIdValue(libraryId),
+      },
       format: request.format,
       viewType: request.viewType,
       options: request.options,
@@ -111,6 +116,12 @@ function toPayload(request: MetadataExportRequest): MetadataExportPayload {
     viewType: request.viewType,
     options: request.options,
   }
+}
+
+function metadataExportLibraryIdValue(libraryId: number | undefined): number | string | undefined {
+  if (libraryId === undefined) return undefined
+  const routeValue = libraryRouteQueryValueForId(libraryId)
+  return routeValue === String(libraryId) ? libraryId : routeValue
 }
 
 export function useBookMetadataExport() {

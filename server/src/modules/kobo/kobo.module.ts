@@ -9,6 +9,7 @@ import { ReadingSessionModule } from '../reading-session/reading-session.module'
 import { SmartScopeModule } from '../smart-scope/smart-scope.module';
 import { UserModule } from '../user/user.module';
 import { UserBookStatusModule } from '../user-book-status/user-book-status.module';
+import { WarehouseModule } from '../warehouse/warehouse.module';
 import { KoboAuthController } from './kobo-auth.controller';
 import { KoboDeviceController } from './kobo-device.controller';
 import { KoboReadingServicesController } from './kobo-reading-services.controller';
@@ -44,6 +45,7 @@ import { KoboAnalyticsService } from './services/kobo-analytics.service';
     UserModule,
     UserBookStatusModule,
     ReadingSessionModule,
+    WarehouseModule,
     SmartScopeModule,
   ],
   controllers: [KoboUserController, KoboAuthController, KoboSyncController, KoboDeviceController, KoboReadingServicesController],

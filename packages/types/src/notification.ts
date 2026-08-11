@@ -20,6 +20,8 @@ export const NotificationType = {
   FileRenameFailed: "file_rename_failed",
   BulkRenameCompleted: "bulk_rename_completed",
   BulkRenameFailed: "bulk_rename_failed",
+  CatalogRequestCompleted: "catalog_request_completed",
+  CatalogRequestFailed: "catalog_request_failed",
   AchievementUnlocked: "achievement_unlocked",
 } as const;
 
@@ -36,6 +38,7 @@ export const NOTIFICATION_CATEGORIES = {
   fileWriteBack: [NotificationType.FileWriteBackCompleted, NotificationType.FileWriteBackFailed],
   fileRename: [NotificationType.FileRenameCompleted, NotificationType.FileRenameFailed],
   bulkRename: [NotificationType.BulkRenameCompleted, NotificationType.BulkRenameFailed],
+  catalogRequests: [NotificationType.CatalogRequestCompleted, NotificationType.CatalogRequestFailed],
   achievements: [NotificationType.AchievementUnlocked],
 } as const;
 

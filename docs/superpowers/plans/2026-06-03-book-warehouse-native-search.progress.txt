@@ -1,0 +1,26 @@
+Book Warehouse Native Search Progress
+2026-06-03
+
+Completed:
+- Task 1: Repository owned catalog search.
+  - Added `WarehouseRepository.searchUserCatalogItems` with user-owned membership scoping and cached metadata search.
+  - Focused repository test passed.
+- Task 2: Typed global search API.
+  - Added shared `GlobalSearchResult` union.
+  - Merged local book search and owned catalog item search in `BookService.searchAcrossLibraries`.
+  - Focused service test passed.
+- Task 3: Client global search and native detail route.
+  - Added route/key helpers and tests.
+  - Updated `AppHeader` to render and navigate local books and catalog items.
+  - Added `/catalog/:mediaType/:remoteId` detail route with native-safe item metadata, library state controls, and audiobook media actions.
+
+Latest verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse.repository.test.ts src/modules/book/book.service.test.ts --testNamePattern "searches only the current user owned catalog items|typed global search results" => 2 passed
+- pnpm --filter client test:unit --run src/features/book/lib/global-search-results.spec.ts src/router/__tests__/route-meta-title.spec.ts => 4 passed
+- pnpm run typecheck => passed
+- pnpm run lint:check => passed
+- pnpm run verify => passed; server 485 files / 6062 tests, client 191 files / 2196 tests
+- Native search visible-copy guard => passed
+
+Next:
+- Commit this loop.

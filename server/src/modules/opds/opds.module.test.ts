@@ -5,7 +5,9 @@ import { MODULE_METADATA } from '@nestjs/common/constants';
 import { CommonModule } from '../../common/common.module';
 import { AppSettingsModule } from '../app-settings/app-settings.module';
 import { BookModule } from '../book/book.module';
+import { KoreaderModule } from '../koreader/koreader.module';
 import { UserModule } from '../user/user.module';
+import { WarehouseModule } from '../warehouse/warehouse.module';
 import { OpdsAuthGuard } from './opds-auth.guard';
 import { OpdsBookService } from './opds-book.service';
 import { OpdsController } from './opds.controller';
@@ -17,7 +19,9 @@ import { OpdsUserService } from './opds-user.service';
 
 describe('OpdsModule', () => {
   it('registers expected module wiring', () => {
-    expect(Reflect.getMetadata(MODULE_METADATA.IMPORTS, OpdsModule)).toEqual([AppSettingsModule, BookModule, UserModule, CommonModule]);
+    const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, OpdsModule);
+    expect(imports.slice(0, 5)).toEqual([AppSettingsModule, BookModule, UserModule, CommonModule, WarehouseModule]);
+    expect(imports[5].forwardRef()).toBe(KoreaderModule);
     expect(Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, OpdsModule)).toEqual([OpdsController, OpdsUserController]);
     expect(Reflect.getMetadata(MODULE_METADATA.PROVIDERS, OpdsModule)).toEqual([
       OpdsService,

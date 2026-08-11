@@ -7,12 +7,22 @@ export interface ProgressSnapshot {
   pageNumber?: number | null
 }
 
+export interface ReadingSessionPayload {
+  sessionId: string
+  startedAt: string
+  endedAt: string
+  durationSeconds: number
+  progressDelta: number | null
+  endProgress: number
+}
+
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const MIN_SESSION_MS = 10 * 1000
 const ELAPSED_UPDATE_INTERVAL_MS = 30 * 1000
 
 export interface ReadingSessionOptions {
   trackingEnabled?: MaybeRef<boolean>
+  saveSession?: (payload: ReadingSessionPayload, options: { useBeacon: boolean }) => Promise<void> | void
 }
 
 function generateSessionId(): string {
@@ -143,21 +153,27 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
     const progressDelta = startProgress !== null ? Number((snap.percentage - startProgress).toFixed(4)) : null
     const endProgress = snap.percentage
 
-    const payload = JSON.stringify({
+    const payload = {
       sessionId,
       startedAt: startedAt.toISOString(),
       endedAt: endedAt.toISOString(),
       durationSeconds,
       progressDelta,
       endProgress,
-    })
+    }
+
+    if (options.saveSession) {
+      Promise.resolve(options.saveSession(payload, { useBeacon })).catch(() => {})
+      return
+    }
 
     const url = `/api/v1/books/files/${bookFileId}/sessions`
+    const body = JSON.stringify(payload)
 
     if (useBeacon && typeof navigator.sendBeacon === 'function') {
-      navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }))
+      navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))
     } else {
-      api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).catch(() => {})
+      api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {})
     }
   }
 

@@ -1,4 +1,11 @@
-import { createRouter, createWebHistory, type RouteLocationNormalizedLoaded, type RouteRecordRaw } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type RouteLocationNormalizedLoaded,
+  type RouteLocationRaw,
+  type RouteRecordRaw,
+  type Router,
+} from 'vue-router'
 import { normalizeEmailTab } from '@/features/email/lib/email-tabs'
 import { normalizeMetadataTab } from '@/features/settings/lib/metadata-tabs'
 import { normalizeReaderTab } from '@/features/settings/lib/reader-tabs'
@@ -6,6 +13,9 @@ import { ADMIN_TAB_INFO, normalizeAdminTab } from '@/features/settings/lib/admin
 import { normalizeSystemTab } from '@/features/settings/lib/system-tabs'
 import { normalizeAccountTab } from '@/features/settings/lib/account-tabs'
 import { normalizeAppearanceTab } from '@/features/settings/lib/appearance-tabs'
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, type WarehouseMediaType } from '@bookorbit/types'
+import { libraryRouteForId, libraryRouteParamForId, parseLibraryRouteId } from '@/features/library/lib/library-route'
+import { catalogLibraryItemRoute, catalogLibraryReaderRoute } from '@/features/warehouse/lib/catalog-item-route'
 import { INTEGRATION_TAB_INFO, normalizeIntegrationTab } from '@/features/settings/lib/integration-tabs'
 import { i18n } from '@/i18n'
 import { registerAuthGuard } from './guards/auth.guard'
@@ -15,8 +25,8 @@ const t = i18n.global.t
 
 function firstText(value: unknown): string | null {
   if (Array.isArray(value)) return firstText(value[0])
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const trimmed = String(value).trim()
   return trimmed.length > 0 ? trimmed : null
 }
 
@@ -30,6 +40,58 @@ function numericParam(to: RouteLocationNormalizedLoaded, key: string): number | 
 function fallbackById(prefixKey: string, id: number | null): string {
   const prefix = t(prefixKey)
   return id === null ? prefix : `${prefix} #${id}`
+}
+
+function sourceBackedLibraryName(id: number | null): string | null {
+  if (id === CLOUD_EBOOK_LIBRARY_ID) return 'Books'
+  if (id === CLOUD_AUDIO_LIBRARY_ID) return 'Audiobooks'
+  if (id === CLOUD_COMIC_LIBRARY_ID) return 'Comics'
+  return null
+}
+
+function resolveLibraryTitle(to: RouteLocationNormalizedLoaded): string {
+  const id = parseLibraryRouteId(to.params.id)
+  return sourceBackedLibraryName(id) ?? fallbackById('Library', id)
+}
+
+function normalizeSourceBackedLibraryRoute(
+  to: RouteLocationNormalizedLoaded,
+  name: 'library' | 'library-item-detail' | 'library-reader',
+): RouteLocationRaw | undefined {
+  const raw = firstText(to.params.id)?.toLowerCase()
+  if (!raw || raw === 'ebooks' || raw === 'audiobooks' || raw === 'comics') return undefined
+
+  const id = parseLibraryRouteId(raw)
+  if (id === null) return undefined
+
+  const routeParam = libraryRouteParamForId(id)
+  if (String(routeParam) === raw) return undefined
+
+  return {
+    name,
+    params: { ...to.params, id: routeParam },
+    query: to.query,
+    hash: to.hash,
+  }
+}
+
+type SourceBackedLibraryRouteName = 'library' | 'library-item-detail' | 'library-reader'
+
+function sourceBackedLibraryRouteName(name: unknown): SourceBackedLibraryRouteName | null {
+  return name === 'library' || name === 'library-item-detail' || name === 'library-reader' ? name : null
+}
+
+export function registerSourceBackedLibraryNormalizationGuard(router: Pick<Router, 'beforeEach'>): void {
+  router.beforeEach((to) => {
+    const name = sourceBackedLibraryRouteName(to.name)
+    return name ? normalizeSourceBackedLibraryRoute(to, name) : undefined
+  })
+}
+
+function normalizeLegacyCatalogMediaType(mediaType: unknown): WarehouseMediaType {
+  const value = firstText(mediaType)?.toLowerCase()
+  if (value === 'comic' || value === 'comics') return 'comic'
+  return value === 'audiobook' || value === 'audiobooks' ? 'audiobook' : 'ebook'
 }
 
 function resolveReaderTitle(to: RouteLocationNormalizedLoaded): string {
@@ -170,6 +232,12 @@ export const routes: RouteRecordRaw[] = [
             redirect: (to) => ({ name: 'settings-integrations', query: { ...to.query, tab: 'storygraph' } }),
           },
           {
+            path: 'warehouse',
+            name: 'settings-warehouse',
+            component: () => import('@/features/warehouse/components/WarehouseAdminSettings.vue'),
+            meta: { maxWidth: 'max-w-6xl', title: 'Book Warehouse', permission: 'manage_app_settings' },
+          },
+          {
             path: 'email',
             name: 'settings-email',
             component: () => import('@/features/email/components/EmailSettings.vue'),
@@ -231,6 +299,11 @@ export const routes: RouteRecordRaw[] = [
             redirect: () => ({ name: 'settings-admin', query: { tab: 'oidc' } }),
           },
           {
+            path: 'admin/warehouse',
+            name: 'settings-admin-warehouse',
+            redirect: () => ({ name: 'settings-warehouse' }),
+          },
+          {
             path: 'system',
             name: 'settings-system',
             component: () => import('@/features/settings/SystemAllSettings.vue'),
@@ -268,7 +341,7 @@ export const routes: RouteRecordRaw[] = [
         path: '/book-dock',
         name: 'book-dock',
         component: () => import('@/views/BookDockView.vue'),
-        meta: { title: () => t('titles.bookDock') },
+        meta: { title: () => t('titles.bookDock'), permission: 'book_dock_access' },
       },
       {
         path: '/whats-new',
@@ -300,6 +373,46 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: () => t('titles.achievements') },
       },
       {
+        path: '/requests',
+        name: 'requests',
+        component: () => import('@/features/warehouse/views/CatalogRequestsView.vue'),
+        meta: { title: 'Requests' },
+      },
+      {
+        path: '/catalog/ebooks',
+        name: 'catalog-ebooks',
+        redirect: libraryRouteForId(CLOUD_EBOOK_LIBRARY_ID),
+        meta: { title: 'Books' },
+      },
+      {
+        path: '/catalog/audiobooks',
+        name: 'catalog-audiobooks',
+        redirect: libraryRouteForId(CLOUD_AUDIO_LIBRARY_ID),
+        meta: { title: 'Audiobooks' },
+      },
+      {
+        path: '/catalog/comics',
+        name: 'catalog-comics',
+        redirect: libraryRouteForId(CLOUD_COMIC_LIBRARY_ID),
+        meta: { title: 'Comics' },
+      },
+      {
+        path: '/catalog/:mediaType/:remoteId',
+        name: 'catalog-item-detail',
+        redirect: (to) => ({
+          ...catalogLibraryItemRoute(normalizeLegacyCatalogMediaType(to.params.mediaType), firstText(to.params.remoteId) ?? ''),
+          query: to.query,
+          hash: to.hash,
+        }),
+      },
+      {
+        path: '/library/:id/items/:remoteId',
+        name: 'library-item-detail',
+        component: () => import('@/features/warehouse/views/CatalogItemDetailView.vue'),
+        meta: { title: 'Library Item' },
+        beforeEnter: (to) => normalizeSourceBackedLibraryRoute(to, 'library-item-detail'),
+      },
+      {
         path: '/libraries',
         name: 'libraries',
         component: () => import('@/features/library/views/LibrariesView.vue'),
@@ -321,7 +434,8 @@ export const routes: RouteRecordRaw[] = [
         path: '/library/:id',
         name: 'library',
         component: () => import('@/views/HomeView.vue'),
-        meta: { title: (to) => fallbackById('titles.library', numericParam(to, 'id')) },
+        meta: { title: resolveLibraryTitle },
+        beforeEnter: (to) => normalizeSourceBackedLibraryRoute(to, 'library'),
       },
       {
         path: '/smart-scope/:id',
@@ -414,6 +528,22 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: (to) => `${t('titles.readPrefix')} · ${fallbackById('titles.book', numericParam(to, 'bookId'))}` },
   },
   {
+    path: '/read/catalog/:mediaType/:remoteId',
+    name: 'catalog-reader',
+    redirect: (to) => ({
+      ...catalogLibraryReaderRoute(normalizeLegacyCatalogMediaType(to.params.mediaType), firstText(to.params.remoteId) ?? ''),
+      query: to.query,
+      hash: to.hash,
+    }),
+  },
+  {
+    path: '/read/library/:id/items/:remoteId',
+    name: 'library-reader',
+    component: () => import('@/features/reader/ReaderView.vue'),
+    meta: { title: 'Read' },
+    beforeEnter: (to) => normalizeSourceBackedLibraryRoute(to, 'library-reader'),
+  },
+  {
     path: '/login',
     name: 'login',
     component: () => import('@/features/auth/LoginPage.vue'),
@@ -457,6 +587,7 @@ const router = createRouter({
   routes,
 })
 
+registerSourceBackedLibraryNormalizationGuard(router)
 registerAuthGuard(router)
 registerRouteTitleHook(router)
 

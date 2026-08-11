@@ -1,3 +1,6 @@
+import type { BookCard } from "./book";
+import type { DashboardCatalogItem } from "./dashboard";
+
 export type OrganizationMode = "book_per_file" | "book_per_folder";
 export type CoverAspectRatio = "2/3" | "1/1";
 
@@ -43,6 +46,9 @@ export const FORMAT_LABELS: Record<string, string> = {
   flac: "FLAC audio",
 };
 export type AccessLevel = "viewer" | "editor" | "owner";
+export const CLOUD_EBOOK_LIBRARY_ID = -1;
+export const CLOUD_AUDIO_LIBRARY_ID = -2;
+export const CLOUD_COMIC_LIBRARY_ID = -3;
 
 export interface LibraryFolder {
   id: number;
@@ -53,6 +59,7 @@ export interface LibraryFolder {
 export interface Library {
   id: number;
   name: string;
+  sourceKind?: "filesystem" | "source_backed";
   icon?: string | null;
   displayOrder: number;
   coverAspectRatio: CoverAspectRatio;
@@ -91,6 +98,22 @@ export interface LibraryStats {
   totalBooks: number;
   totalSizeBytes: number;
   formatCounts: Record<string, number>;
+}
+
+export interface CatalogLibraryItemsPage {
+  items: DashboardCatalogItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export type LibraryBookItem = BookCard | DashboardCatalogItem;
+
+export interface LibraryBooksPage {
+  items: LibraryBookItem[];
+  total: number;
+  page: number;
+  size: number;
 }
 
 export interface PrescanPathResult {

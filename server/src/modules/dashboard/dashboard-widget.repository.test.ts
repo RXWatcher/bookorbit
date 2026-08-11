@@ -1,4 +1,29 @@
+import { sql } from 'drizzle-orm';
+
+import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
+import { bookFiles, books, readingSessions, userReadingDailyStats } from '../../db/schema';
 import { computeLongestStreak, computeStreakData, formatDay } from './dashboard-widget.calculations';
+import { DashboardWidgetRepository } from './dashboard-widget.repository';
+
+vi.mock('../../common/utils/content-filter-sql.utils', () => ({
+  buildContentFilterClauses: vi.fn(() => []),
+}));
+
+function makeSelectDb(rows: unknown[]) {
+  const query = {
+    from: vi.fn(() => query),
+    innerJoin: vi.fn(() => query),
+    where: vi.fn(() => query),
+    groupBy: vi.fn(() => query),
+    orderBy: vi.fn(() => rows),
+  };
+  const db = {
+    select: vi.fn(() => query),
+  };
+
+  return { db, query };
+}
 
 describe('formatDay', () => {
   it('formats a UTC date as YYYY-MM-DD', () => {
@@ -119,5 +144,43 @@ describe('computeStreakData', () => {
 
     expect(result.currentStreak).toBe(4);
     expect(result.longestStreak).toBe(4);
+  });
+});
+
+describe('DashboardWidgetRepository.getReadingStreakDays', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(buildContentFilterClauses).mockReturnValue([]);
+  });
+
+  it('uses daily reading stats when no content filters are active', async () => {
+    const { db, query } = makeSelectDb([
+      { day: '2026-06-04', totalSeconds: 900 },
+      { day: '2026-06-03', totalSeconds: 0 },
+    ]);
+    const repo = new DashboardWidgetRepository(db as never);
+
+    await expect(repo.getReadingStreakDays(42, [1, 2])).resolves.toEqual(['2026-06-04']);
+
+    expect(query.from).toHaveBeenCalledWith(userReadingDailyStats);
+    expect(query.innerJoin).not.toHaveBeenCalled();
+    expect(buildContentFilterClauses).not.toHaveBeenCalled();
+  });
+
+  it('uses session book joins so local reading days respect content filters', async () => {
+    const filters = { ...EMPTY_CONTENT_FILTER_RULES, includeTagIds: [7] };
+    vi.mocked(buildContentFilterClauses).mockReturnValue([sql`content_filter_marker`]);
+    const { db, query } = makeSelectDb([
+      { day: '2026-06-04', totalSeconds: 900 },
+      { day: '2026-06-03', totalSeconds: 0 },
+    ]);
+    const repo = new DashboardWidgetRepository(db as never);
+
+    await expect(repo.getReadingStreakDays(42, [1, 2], filters)).resolves.toEqual(['2026-06-04']);
+
+    expect(buildContentFilterClauses).toHaveBeenCalledWith(filters, db);
+    expect(query.from).toHaveBeenCalledWith(readingSessions);
+    expect(query.innerJoin).toHaveBeenCalledWith(bookFiles, expect.anything());
+    expect(query.innerJoin).toHaveBeenCalledWith(books, expect.anything());
   });
 });

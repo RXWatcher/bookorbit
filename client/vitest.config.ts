@@ -7,9 +7,14 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
-      setupFiles: ['./src/test-setup.ts'],
       exclude: [...configDefaults.exclude, 'e2e/**'],
       root: fileURLToPath(new URL('./', import.meta.url)),
+      // Both: upstream's installs vue-i18n globally for component tests, this
+      // fork's provides the localStorage polyfill the sidebar/reader tests need.
+      setupFiles: [
+        fileURLToPath(new URL('./src/test-setup.ts', import.meta.url)),
+        fileURLToPath(new URL('./src/test/setup.ts', import.meta.url)),
+      ],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'html', 'lcov'],

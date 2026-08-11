@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 
 import { UpdateUserSessionTimelineSessionDto } from './update-user-session-timeline-session.dto';
 import { UserDailyReadingQueryDto } from './user-daily-reading-query.dto';
@@ -14,6 +15,13 @@ describe('User statistics DTOs', () => {
     const dto = plainToInstance(UserStatisticsFilterQueryDto, { libraryIds: '7' });
 
     expect(dto.libraryIds).toEqual([7]);
+    expect(await validate(dto)).toEqual([]);
+  });
+
+  it('transforms source-backed library aliases for user statistics filters', async () => {
+    const dto = plainToInstance(UserStatisticsFilterQueryDto, { libraryIds: ['ebooks', 'audiobooks', 'comics'] });
+
+    expect(dto.libraryIds).toEqual([CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID]);
     expect(await validate(dto)).toEqual([]);
   });
 
@@ -32,6 +40,13 @@ describe('User statistics DTOs', () => {
     expect(valid.comparePrevious).toBe(true);
     expect(await validate(valid)).toEqual([]);
     expect((await validate(invalid)).length).toBeGreaterThan(0);
+
+    const sourceBacked = plainToInstance(UserDailyReadingQueryDto, {
+      libraryIds: ['ebooks', 'audiobooks', 'comics'],
+      days: '30',
+    });
+    expect(sourceBacked.libraryIds).toEqual([CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID]);
+    expect(await validate(sourceBacked)).toEqual([]);
   });
 
   it('enforces goal trajectory and session timeline bounds', async () => {

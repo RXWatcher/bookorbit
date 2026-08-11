@@ -1,6 +1,6 @@
 import { computed, ref, type Ref } from 'vue'
 
-import type { BookCard, SeriesDetail } from '@bookorbit/types'
+import type { SeriesDetail, SeriesLibraryItem } from '@bookorbit/types'
 import { fetchSeriesBooks } from '../api/series'
 import type { SeriesBookSort, SortDirection } from '../types/series'
 
@@ -12,7 +12,7 @@ type LoadOptions = {
 
 export function useSeriesDetail(seriesId: Ref<number | null>) {
   const seriesInfo = ref<SeriesDetail | null>(null)
-  const items = ref<BookCard[]>([])
+  const items = ref<SeriesLibraryItem[]>([])
   const total = ref(0)
   const loading = ref(false)
   const error = ref<string | null>(null)

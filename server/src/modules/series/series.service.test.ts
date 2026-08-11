@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 
 import { SeriesService } from './series.service';
 
@@ -7,9 +7,19 @@ function reqUser(id = 7, superuser = false) {
   return { id, isSuperuser: superuser, permissions: [], contentFilters: undefined } as any;
 }
 
+function syntheticSeriesId(name: string): number {
+  let hash = 0;
+  const normalized = name.trim().toLowerCase();
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) | 0;
+  }
+  return -Math.max(1, Math.abs(hash));
+}
+
 describe('SeriesService', () => {
   const seriesRepo = {
     findPage: vi.fn(),
+    findSummaries: vi.fn(),
     findDetail: vi.fn(),
     findBookIds: vi.fn(),
     countSeries: vi.fn(),
@@ -24,12 +34,23 @@ describe('SeriesService', () => {
     findAccessibleLibraryIds: vi.fn(),
   };
 
+  const warehouseCatalogService = {
+    listSeriesSummaries: vi.fn(),
+    listSeriesSummaryPage: vi.fn(),
+    listSeriesItems: vi.fn(),
+    listSeriesBooks: vi.fn(),
+  };
+
   let service: SeriesService;
 
   beforeEach(() => {
     vi.resetAllMocks();
-    service = new SeriesService(seriesRepo as any, bookReadService as any, libraryService as any);
+    service = new (SeriesService as any)(seriesRepo as any, bookReadService as any, libraryService as any, warehouseCatalogService as any);
     libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+    warehouseCatalogService.listSeriesSummaries.mockResolvedValue([]);
+    warehouseCatalogService.listSeriesSummaryPage.mockResolvedValue({ rows: [], total: 0, page: 0, size: 50 });
+    warehouseCatalogService.listSeriesItems.mockResolvedValue({ items: [], total: 0 });
+    warehouseCatalogService.listSeriesBooks.mockResolvedValue({ items: [], total: 0 });
     libraryService.findAccessibleLibraryIds.mockResolvedValue([1, 2]);
   });
 
@@ -54,20 +75,22 @@ describe('SeriesService', () => {
       libraryService.findAll.mockResolvedValue([]);
       const result = await service.findAll(reqUser(), { page: 0, size: 50 });
       expect(result).toEqual({ items: [], total: 0, page: 0, size: 50 });
-      expect(seriesRepo.findPage).not.toHaveBeenCalled();
+      expect(seriesRepo.findSummaries).not.toHaveBeenCalled();
+      expect(warehouseCatalogService.listSeriesSummaries).not.toHaveBeenCalled();
+      expect(libraryService.findAll).toHaveBeenCalledWith(reqUser(), { includeSourceBacked: true });
     });
 
-    it('delegates to repository with correct params', async () => {
-      seriesRepo.findPage.mockResolvedValue({
-        items: [
+    it('still lists warehouse-backed series when the user has only source-backed libraries', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+      warehouseCatalogService.listSeriesSummaryPage.mockResolvedValue({
+        rows: [
           {
-            id: 42,
-            name: 'Harry Potter',
-            bookCount: 7,
-            readCount: 3,
-            authors: ['J.K. Rowling'],
-            coverBookIds: [1, 2, 3, 4],
-            lastAddedAt: '2024-01-01 00:00:00',
+            name: 'Cloud Only',
+            bookCount: 2,
+            readCount: 0,
+            authors: ['Orbit Author'],
+            coverBookIds: [],
+            lastAddedAt: '2026-04-01 00:00:00',
           },
         ],
         total: 1,
@@ -75,12 +98,55 @@ describe('SeriesService', () => {
         size: 50,
       });
 
+      const result = await service.findAll(reqUser(), { page: 0, size: 50 });
+
+      expect(seriesRepo.findSummaries).not.toHaveBeenCalled();
+      expect(warehouseCatalogService.listSeriesSummaryPage).toHaveBeenCalledWith({
+        q: undefined,
+        author: undefined,
+        userId: 7,
+        contentFilters: undefined,
+        mediaType: 'ebook',
+        page: 0,
+        size: 50,
+        sort: 'name',
+        order: 'asc',
+        completionStatus: undefined,
+      });
+      expect(result).toEqual({
+        items: [
+          {
+            id: expect.any(Number),
+            name: 'Cloud Only',
+            bookCount: 2,
+            readCount: 0,
+            authors: ['Orbit Author'],
+            coverBookIds: [],
+            lastAddedAt: '2026-04-01 00:00:00',
+          },
+        ],
+        total: 1,
+        page: 0,
+        size: 50,
+      });
+    });
+
+    it('delegates to repository with correct params', async () => {
+      seriesRepo.findSummaries.mockResolvedValue([
+        {
+          name: 'Harry Potter',
+          bookCount: 7,
+          readCount: 3,
+          authors: ['J.K. Rowling'],
+          coverBookIds: [1, 2, 3, 4],
+          lastAddedAt: '2024-01-01 00:00:00',
+        },
+      ]);
+
       const result = await service.findAll(reqUser(), { sort: 'bookCount', order: 'desc' });
 
-      expect(seriesRepo.findPage).toHaveBeenCalledWith(
+      expect(seriesRepo.findSummaries).toHaveBeenCalledWith(
         expect.objectContaining({
-          sort: 'bookCount',
-          order: 'desc',
           libraryIds: [1, 2],
           userId: 7,
           contentFilters: undefined,
@@ -92,9 +158,33 @@ describe('SeriesService', () => {
     });
 
     it('scopes to specific library when libraryId provided', async () => {
-      seriesRepo.findPage.mockResolvedValue({ items: [], total: 0, page: 0, size: 50 });
+      seriesRepo.findSummaries.mockResolvedValue([]);
       await service.findAll(reqUser(), { libraryId: 2 });
-      expect(seriesRepo.findPage).toHaveBeenCalledWith(expect.objectContaining({ libraryIds: [2], contentFilters: undefined }));
+      expect(seriesRepo.findSummaries).toHaveBeenCalledWith(expect.objectContaining({ libraryIds: [2], contentFilters: undefined }));
+      expect(warehouseCatalogService.listSeriesSummaries).not.toHaveBeenCalled();
+    });
+
+    it('scopes virtual ebook library filters to warehouse ebook rows', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+      warehouseCatalogService.listSeriesSummaryPage.mockResolvedValue({
+        rows: [{ name: 'Cloud Series', bookCount: 1, readCount: 0, authors: [], coverBookIds: [], lastAddedAt: null }],
+        total: 1,
+        page: 0,
+        size: 50,
+      });
+
+      const result = await service.findAll(reqUser(), { libraryId: CLOUD_EBOOK_LIBRARY_ID });
+
+      expect(seriesRepo.findSummaries).not.toHaveBeenCalled();
+      expect(warehouseCatalogService.listSeriesSummaryPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaType: 'ebook',
+          userId: 7,
+          page: 0,
+          size: 50,
+        }),
+      );
+      expect(result.total).toBe(1);
     });
 
     it('returns empty when scoped library is inaccessible', async () => {
@@ -107,15 +197,112 @@ describe('SeriesService', () => {
     });
 
     it('converts null lastAddedAt to null', async () => {
-      seriesRepo.findPage.mockResolvedValue({
-        items: [{ id: 42, name: 'Test', bookCount: 1, readCount: 0, authors: [], coverBookIds: [], lastAddedAt: null }],
-        total: 1,
-        page: 0,
-        size: 50,
-      });
+      seriesRepo.findSummaries.mockResolvedValue([{ name: 'Test', bookCount: 1, readCount: 0, authors: [], coverBookIds: [], lastAddedAt: null }]);
 
       const result = await service.findAll(reqUser(), {});
       expect(result.items[0]!.lastAddedAt).toBeNull();
+    });
+
+    it('includes warehouse-backed series in the normal series page', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findSummaries.mockResolvedValue([
+        {
+          name: 'Dune',
+          bookCount: 2,
+          readCount: 1,
+          authors: ['Herbert, Frank'],
+          coverBookIds: [10, 11],
+          lastAddedAt: '2026-01-01 00:00:00',
+        },
+      ]);
+      warehouseCatalogService.listSeriesSummaries.mockResolvedValue([
+        {
+          name: 'Dune',
+          bookCount: 1,
+          readCount: 0,
+          authors: ['Frank Herbert'],
+          coverBookIds: [],
+          lastAddedAt: '2026-02-01 00:00:00',
+        },
+        {
+          name: 'The Murderbot Diaries',
+          bookCount: 2,
+          readCount: 1,
+          authors: ['Martha Wells'],
+          coverBookIds: [],
+          lastAddedAt: '2026-03-01 00:00:00',
+        },
+      ]);
+
+      const result = await service.findAll(reqUser(), { page: 0, size: 10, sort: 'name', order: 'asc' });
+
+      expect(warehouseCatalogService.listSeriesSummaries).toHaveBeenCalledWith({
+        q: undefined,
+        author: undefined,
+        userId: 7,
+        contentFilters: undefined,
+        mediaType: 'ebook',
+      });
+      expect(result.total).toBe(2);
+      expect(result.items).toEqual([
+        {
+          id: syntheticSeriesId('Dune'),
+          name: 'Dune',
+          bookCount: 3,
+          readCount: 1,
+          authors: ['Herbert, Frank'],
+          coverBookIds: [10, 11],
+          lastAddedAt: '2026-02-01 00:00:00',
+        },
+        {
+          id: syntheticSeriesId('The Murderbot Diaries'),
+          name: 'The Murderbot Diaries',
+          bookCount: 2,
+          readCount: 1,
+          authors: ['Martha Wells'],
+          coverBookIds: [],
+          lastAddedAt: '2026-03-01 00:00:00',
+        },
+      ]);
+    });
+
+    it('filters completion status after local and warehouse series are merged', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findSummaries.mockResolvedValue([
+        {
+          name: 'Shared',
+          bookCount: 1,
+          readCount: 1,
+          authors: [],
+          coverBookIds: [],
+          lastAddedAt: null,
+        },
+      ]);
+      warehouseCatalogService.listSeriesSummaries.mockResolvedValue([
+        {
+          name: 'Shared',
+          bookCount: 1,
+          readCount: 0,
+          authors: [],
+          coverBookIds: [],
+          lastAddedAt: null,
+        },
+      ]);
+
+      const result = await service.findAll(reqUser(), { completionStatus: 'in_progress' });
+
+      expect(seriesRepo.findSummaries).toHaveBeenCalledWith(expect.not.objectContaining({ completionStatus: expect.anything() }));
+      expect(result.items).toEqual([
+        {
+          id: syntheticSeriesId('Shared'),
+          name: 'Shared',
+          bookCount: 2,
+          readCount: 1,
+          authors: [],
+          coverBookIds: [],
+          lastAddedAt: null,
+        },
+      ]);
     });
   });
 
@@ -129,6 +316,241 @@ describe('SeriesService', () => {
       seriesRepo.findDetail.mockResolvedValue(null);
       seriesRepo.findBookIds.mockResolvedValue({ bookIds: [], total: 0 });
       await expect(service.findBooks(reqUser(), 42, {})).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('returns warehouse-backed items for a warehouse-only series', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findDetail.mockResolvedValue(null);
+      seriesRepo.findBookIds.mockResolvedValue({ bookIds: [], total: 0 });
+      warehouseCatalogService.listSeriesSummaries.mockResolvedValue([
+        {
+          name: 'Dune',
+          bookCount: 1,
+          readCount: 0,
+          authors: ['Frank Herbert'],
+          coverBookIds: [],
+          lastAddedAt: null,
+        },
+      ]);
+      const bookCard = {
+        id: -1000000001,
+        status: 'present',
+        title: 'Dune',
+        seriesName: 'Dune',
+        authors: ['Frank Herbert'],
+        hasCover: true,
+        addedAt: '2026-01-01T00:00:00.000Z',
+      };
+      warehouseCatalogService.listSeriesBooks.mockResolvedValue({
+        items: [bookCard],
+        total: 1,
+      });
+
+      const result = await service.findBooks(reqUser(), syntheticSeriesId('Dune'), {});
+
+      expect(warehouseCatalogService.listSeriesBooks).toHaveBeenCalledWith({
+        seriesName: 'Dune',
+        userId: 7,
+        page: 0,
+        size: 50,
+        sort: 'seriesIndex',
+        order: 'asc',
+        contentFilters: undefined,
+        mediaType: 'ebook',
+      });
+      expect(result.seriesInfo).toEqual({
+        id: syntheticSeriesId('Dune'),
+        name: 'Dune',
+        bookCount: 1,
+        readCount: 0,
+        authors: ['Frank Herbert'],
+        expectedBookCount: null,
+        possibleGaps: [],
+      });
+      expect(result.items).toEqual([bookCard]);
+      expect(result.total).toBe(1);
+    });
+
+    it('detects possible gaps from warehouse-backed series indices', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findDetail.mockResolvedValue(null);
+      seriesRepo.findBookIds.mockResolvedValue({ bookIds: [], total: 0 });
+      warehouseCatalogService.listSeriesSummaries.mockResolvedValue([
+        {
+          name: 'Cloud Sequence',
+          bookCount: 2,
+          readCount: 0,
+          authors: ['Ada Writer'],
+          coverBookIds: [],
+          lastAddedAt: null,
+        },
+      ]);
+      warehouseCatalogService.listSeriesBooks.mockResolvedValue({
+        items: [
+          {
+            id: -1000000001,
+            status: 'present',
+            title: 'Cloud Volume One',
+            seriesName: 'Cloud Sequence',
+            seriesIndex: 1,
+            authors: ['Ada Writer'],
+            hasCover: false,
+          },
+          {
+            id: -1000000003,
+            status: 'present',
+            title: 'Cloud Volume Three',
+            seriesName: 'Cloud Sequence',
+            seriesIndex: 3,
+            authors: ['Ada Writer'],
+            hasCover: false,
+          },
+        ],
+        total: 2,
+      });
+
+      const result = await service.findBooks(reqUser(), syntheticSeriesId('Cloud Sequence'), {});
+
+      expect(result.seriesInfo.possibleGaps).toEqual([2]);
+    });
+
+    it('merges local and warehouse-backed series detail into one sorted page', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: CLOUD_EBOOK_LIBRARY_ID }, { id: CLOUD_AUDIO_LIBRARY_ID }]);
+      seriesRepo.findDetail.mockResolvedValue({
+        id: 42,
+        name: 'Mixed',
+        bookCount: 2,
+        readCount: 0,
+        authors: ['Burrell, Teresa'],
+        indices: [],
+      });
+      seriesRepo.findBookIds.mockResolvedValue({ bookIds: [10, 11], total: 2 });
+      bookReadService.findCardsByBookIds.mockResolvedValue({
+        rows: [
+          {
+            id: 10,
+            status: 'present',
+            folderPath: '/a',
+            addedAt: new Date('2026-01-02T00:00:00.000Z'),
+            title: 'Beta',
+            seriesName: 'Mixed',
+            seriesIndex: null,
+            publishedYear: null,
+            language: null,
+            rating: null,
+            coverSource: null,
+            lockedFields: null,
+          },
+          {
+            id: 11,
+            status: 'present',
+            folderPath: '/b',
+            addedAt: new Date('2026-01-04T00:00:00.000Z'),
+            title: 'Delta',
+            seriesName: 'Mixed',
+            seriesIndex: null,
+            publishedYear: null,
+            language: null,
+            rating: null,
+            coverSource: null,
+            lockedFields: null,
+          },
+        ],
+        authorRows: [],
+        fileRows: [],
+        genreRows: [],
+        progressRows: [],
+        statusRows: [],
+        total: 2,
+      });
+      warehouseCatalogService.listSeriesBooks.mockResolvedValue({
+        items: [
+          {
+            id: -1000000101,
+            status: 'present',
+            title: 'Alpha',
+            seriesName: 'Mixed',
+            authors: ['Teresa Burrell'],
+            hasCover: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: -2000000102,
+            status: 'present',
+            title: 'Charlie',
+            seriesName: 'Mixed',
+            authors: ['Teresa Burrell'],
+            hasCover: false,
+            addedAt: '2026-01-03T00:00:00.000Z',
+          },
+        ],
+        total: 2,
+      });
+
+      const result = await service.findBooks(reqUser(), 42, { page: 0, size: 2, sort: 'title', order: 'asc' });
+
+      expect(seriesRepo.findBookIds).toHaveBeenCalledWith(expect.objectContaining({ page: 0, size: 2 }));
+      expect(warehouseCatalogService.listSeriesBooks).toHaveBeenCalledWith(expect.objectContaining({ page: 0, size: 2 }));
+      expect(result.total).toBe(4);
+      expect(result.items).toHaveLength(2);
+      expect(result.items.map((item: any) => item.title)).toEqual(['Alpha', 'Beta']);
+      expect(result.seriesInfo.authors).toEqual(['Burrell, Teresa']);
+    });
+
+    it('sorts source-backed series items by native series index alongside local books', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findDetail.mockResolvedValue({
+        id: 42,
+        name: 'Mixed',
+        bookCount: 1,
+        readCount: 0,
+        authors: ['Local Author'],
+        indices: [2],
+      });
+      seriesRepo.findBookIds.mockResolvedValue({ bookIds: [10], total: 1 });
+      bookReadService.findCardsByBookIds.mockResolvedValue({
+        rows: [
+          {
+            id: 10,
+            status: 'present',
+            folderPath: '/a',
+            addedAt: new Date('2026-01-02T00:00:00.000Z'),
+            title: 'Local Volume Two',
+            seriesName: 'Mixed',
+            seriesIndex: 2,
+            publishedYear: null,
+            language: null,
+            rating: null,
+            coverSource: null,
+            lockedFields: null,
+          },
+        ],
+        authorRows: [],
+        fileRows: [],
+        genreRows: [],
+        progressRows: [],
+        statusRows: [],
+        total: 1,
+      });
+      warehouseCatalogService.listSeriesBooks.mockResolvedValue({
+        items: [
+          {
+            id: -1000000001,
+            status: 'present',
+            title: 'Cloud Volume One',
+            seriesName: 'Mixed',
+            seriesIndex: 1,
+            authors: ['Cloud Author'],
+            hasCover: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+          } as any,
+        ],
+        total: 1,
+      });
+
+      const result = await service.findBooks(reqUser(), 42, { page: 0, size: 2, sort: 'seriesIndex', order: 'asc' });
+
+      expect(result.items.map((item: any) => item.title)).toEqual(['Cloud Volume One', 'Local Volume Two']);
     });
 
     it('returns books with series info and gap detection', async () => {
@@ -264,20 +686,26 @@ describe('SeriesService', () => {
   });
 
   describe('content filter enforcement', () => {
-    it('passes contentFilters to findPage for non-superuser', async () => {
-      seriesRepo.findPage.mockResolvedValue({ items: [], total: 0, page: 0, size: 50 });
+    it('passes contentFilters to findSummaries for non-superuser', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findSummaries.mockResolvedValue([]);
 
       await service.findAll({ ...reqUser(), contentFilters: EMPTY_CONTENT_FILTER_RULES }, {});
 
-      expect(seriesRepo.findPage).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: EMPTY_CONTENT_FILTER_RULES }));
+      expect(seriesRepo.findSummaries).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: EMPTY_CONTENT_FILTER_RULES }));
+      expect(warehouseCatalogService.listSeriesSummaries).toHaveBeenCalledWith(
+        expect.objectContaining({ contentFilters: EMPTY_CONTENT_FILTER_RULES }),
+      );
     });
 
-    it('passes undefined to findPage for superuser', async () => {
-      seriesRepo.findPage.mockResolvedValue({ items: [], total: 0, page: 0, size: 50 });
+    it('passes undefined to findSummaries for superuser', async () => {
+      libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      seriesRepo.findSummaries.mockResolvedValue([]);
 
       await service.findAll({ ...reqUser(7, true), contentFilters: EMPTY_CONTENT_FILTER_RULES }, {});
 
-      expect(seriesRepo.findPage).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: undefined }));
+      expect(seriesRepo.findSummaries).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: undefined }));
+      expect(warehouseCatalogService.listSeriesSummaries).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: undefined }));
     });
 
     it('passes contentFilters to findDetail and findBookIds for non-superuser', async () => {

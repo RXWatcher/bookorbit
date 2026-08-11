@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { BOOK_METADATA_LOCK_FIELDS, type BookCard, type UserBookStatus } from '@bookorbit/types'
+import { BOOK_METADATA_LOCK_FIELDS, CLOUD_EBOOK_LIBRARY_ID, type BookCard, type UserBookStatus } from '@bookorbit/types'
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: boolean }>>(),
@@ -75,7 +75,7 @@ function makeReadStatus(overrides: Partial<UserBookStatus> = {}): UserBookStatus
 }
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -104,8 +104,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function makeQuerySelection(overrides: Partial<QuerySelectionState> = {}): QuerySelectionState {
@@ -297,6 +298,26 @@ describe('useBookBulkActions', () => {
       }),
     )
     expect(mocks.toastSuccess).toHaveBeenCalledWith('Updated status for 500 books')
+  })
+
+  it('serializes source-backed query selection library ids as friendly aliases', async () => {
+    mocks.api.mockResolvedValue({ ok: true })
+    const selectedIds = ref(new Set<number>())
+    const querySelection = ref<QuerySelectionState | null>(makeQuerySelection({ libraryId: CLOUD_EBOOK_LIBRARY_ID }))
+
+    const { handleBulkSetStatus } = useBookBulkActions(selectedIds, vi.fn(), undefined, undefined, querySelection)
+
+    await handleBulkSetStatus('read')
+
+    expect(mocks.api).toHaveBeenCalledWith(
+      '/api/v1/books/bulk-set-status',
+      expect.objectContaining({
+        body: JSON.stringify({
+          query: { libraryId: 'ebooks', filter: { type: 'group', join: 'AND', rules: [] }, q: 'space opera' },
+          status: 'read',
+        }),
+      }),
+    )
   })
 
   it('forwards query sort specs in bulk payloads', async () => {

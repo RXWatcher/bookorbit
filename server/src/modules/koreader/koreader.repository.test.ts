@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { sqlChunkText } from '../../common/test-utils/sql-chunk-text';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { KoreaderRepository } from './koreader.repository';
+import * as schema from '../../db/schema';
+
+const dialect = new PgDialect();
+
+function renderSql(sql: SQL | undefined) {
+  if (!sql) return undefined;
+  return dialect.sqlToQuery(sql);
+}
+
+function sqlChunkText(value: unknown): string {
+  return renderSql(value as SQL | undefined)?.sql ?? '';
+}
 
 function makeQueryChain(result: unknown) {
   const chain: Record<string, unknown> = {
@@ -15,6 +28,8 @@ function makeQueryChain(result: unknown) {
   chain.orderBy = vi.fn().mockReturnValue(chain);
   chain.limit = vi.fn().mockResolvedValue(result);
   chain.returning = vi.fn().mockResolvedValue(result);
+  chain.values = vi.fn().mockReturnValue(chain);
+  chain.onConflictDoUpdate = vi.fn().mockResolvedValue(result);
   return chain;
 }
 
@@ -773,6 +788,151 @@ describe('KoreaderRepository', () => {
 
       const conflictArg = onConflictDoUpdate.mock.calls[0]?.[0] as { set?: Record<string, unknown> } | undefined;
       expect(conflictArg?.set?.['updatedAt']).toBeDefined();
+    });
+  });
+
+  describe('catalog document bridge', () => {
+    it('records a catalog document hash after resolving cached Ebook Library inventory', async () => {
+      const ownedCatalogRow = { catalogItemId: 42 };
+      const selectChain = makeQueryChain([ownedCatalogRow]);
+      db.select.mockReturnValue(selectChain);
+      const insertChain = makeQueryChain([]);
+      db.insert.mockReturnValue(insertChain);
+
+      await repo.recordCatalogDocumentHash(7, 'remote/book-42', 'ABCDEF0123456789ABCDEF0123456789');
+
+      expect(db.select).toHaveBeenCalledTimes(1);
+      expect(selectChain.from).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+      expect(selectChain.innerJoin).not.toHaveBeenCalled();
+      expect(db.insert).toHaveBeenCalledTimes(1);
+      expect(insertChain.values).toHaveBeenCalledWith({
+        userId: 7,
+        catalogItemId: 42,
+        documentHash: 'abcdef0123456789abcdef0123456789',
+      });
+      expect(insertChain.onConflictDoUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: expect.any(Array),
+          set: expect.objectContaining({
+            catalogItemId: 42,
+          }),
+        }),
+      );
+    });
+
+    it('does not record invalid hashes or missing cached catalog ebooks', async () => {
+      await repo.recordCatalogDocumentHash(7, 'remote/book-42', 'not-a-document-hash');
+      expect(db.select).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+
+      db.select.mockReturnValue(makeQueryChain([]));
+      await repo.recordCatalogDocumentHash(7, 'remote/book-42', 'abcdef0123456789abcdef0123456789');
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('resolves catalog document hashes through current user document mapping and cached inventory', async () => {
+      const selectChain = makeQueryChain([
+        {
+          catalogDocumentId: 9,
+          catalogItemId: 42,
+          remoteId: 'remote/book-42',
+        },
+      ]);
+      db.select.mockReturnValue(selectChain);
+
+      await expect(repo.resolveCatalogDocumentByHash(7, 'ABCDEF0123456789ABCDEF0123456789')).resolves.toEqual({
+        catalogDocumentId: 9,
+        catalogItemId: 42,
+        remoteId: 'remote/book-42',
+      });
+      expect(selectChain.innerJoin).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads cached catalog reading progress without requiring a membership row', async () => {
+      const stateRow = { progressPercent: 44, updatedAt: new Date('2026-06-04T10:00:00.000Z') };
+      const selectChain = makeQueryChain([stateRow]);
+      db.select.mockReturnValue(selectChain);
+
+      await expect(repo.getCatalogReadingProgress(7, 'remote/book-42')).resolves.toEqual(stateRow);
+
+      expect(selectChain.from).toHaveBeenCalledWith(schema.warehouseUserState);
+      expect(selectChain.innerJoin).not.toHaveBeenCalled();
+    });
+
+    it('upserts catalog device progress and native catalog reading progress', async () => {
+      const deviceInsert = makeQueryChain([]);
+      const stateInsert = makeQueryChain([]);
+      db.insert.mockReturnValueOnce(deviceInsert).mockReturnValueOnce(stateInsert);
+
+      await repo.upsertCatalogDeviceProgress({
+        catalogDocumentId: 9,
+        userId: 7,
+        device: 'KOReader',
+        deviceId: 'device-9',
+        percentage: 0.44,
+        progress: '/body/DocFragment[5]/body',
+        chapterIndex: 4,
+        syncTimestamp: 1700000200,
+      });
+      await repo.upsertCatalogReadingProgress(7, 'remote/book-42', 44);
+
+      expect(deviceInsert.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          catalogDocumentId: 9,
+          userId: 7,
+          device: 'KOReader',
+          deviceId: 'device-9',
+          percentage: 0.44,
+          progress: '/body/DocFragment[5]/body',
+          chapterIndex: 4,
+          syncTimestamp: 1700000200,
+        }),
+      );
+      expect(stateInsert.values).toHaveBeenCalledWith({
+        userId: 7,
+        mediaType: 'ebook',
+        remoteId: 'remote/book-42',
+        progressPercent: 44,
+        readStatus: 'reading',
+        finishedAt: null,
+      });
+      expect(deviceInsert.onConflictDoUpdate).toHaveBeenCalled();
+      expect(stateInsert.onConflictDoUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: expect.any(Array),
+          set: expect.objectContaining({
+            progressPercent: 44,
+            readStatus: 'reading',
+            finishedAt: null,
+          }),
+        }),
+      );
+    });
+
+    it('stamps source-backed KOReader completions using the synced timestamp', async () => {
+      const stateInsert = makeQueryChain([]);
+      db.insert.mockReturnValueOnce(stateInsert);
+      const syncedAt = new Date('2026-06-04T10:00:00.000Z');
+
+      await repo.upsertCatalogReadingProgress(7, 'remote/book-42', 100, syncedAt);
+
+      expect(stateInsert.values).toHaveBeenCalledWith({
+        userId: 7,
+        mediaType: 'ebook',
+        remoteId: 'remote/book-42',
+        progressPercent: 100,
+        readStatus: 'read',
+        finishedAt: syncedAt,
+        updatedAt: syncedAt,
+      });
+      const set = stateInsert.onConflictDoUpdate.mock.calls[0]?.[0].set;
+      expect(set).toMatchObject({
+        progressPercent: 100,
+        readStatus: 'read',
+        updatedAt: syncedAt,
+      });
+      expect(renderSql(set.finishedAt)?.sql).toContain('coalesce');
+      expect(renderSql(set.finishedAt)?.sql).toContain('"warehouse_user_state"."finished_at"');
     });
   });
 

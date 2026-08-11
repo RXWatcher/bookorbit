@@ -6,6 +6,8 @@ export type FooterDisplayMode = 0 | 1 | 2
 
 export interface ReaderProgressOptions {
   trackingEnabled?: MaybeRef<boolean>
+  loadProgress?: () => Promise<{ cfi?: string | null; pageNumber?: number | null; percentage?: number | null }>
+  saveProgress?: (payload: { cfi: string | null; pageNumber: number | null; percentage: number }) => Promise<void>
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -95,6 +97,13 @@ export function useReaderProgress(
 
   async function load() {
     if (!unref(trackingEnabled)) return
+    if (options.loadProgress) {
+      const data = await options.loadProgress()
+      cfi.value = data.cfi ?? null
+      pageNumber.value = data.pageNumber ?? null
+      percentage.value = data.percentage ?? 0
+      return
+    }
     const res = await api(`/api/v1/books/files/${fileId}/progress`)
     if (!res.ok) return
     const data = await res.json()
@@ -141,6 +150,10 @@ export function useReaderProgress(
   async function save() {
     if (!unref(trackingEnabled)) return
     const safePercentage = updatePercentage(percentage.value)
+    if (options.saveProgress) {
+      await options.saveProgress({ cfi: cfi.value, pageNumber: pageNumber.value, percentage: safePercentage })
+      return
+    }
     await api(`/api/v1/books/files/${fileId}/progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

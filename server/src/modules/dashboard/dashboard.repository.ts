@@ -9,7 +9,8 @@ import { audiobookProgress, bookFiles, bookMetadata, books, readingProgress, use
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
 
 type Db = NodePgDatabase<typeof schema>;
-type UpNextInSeriesRow = { id: number };
+export type UpNextInSeriesRow = { id: number; previousCompletionUpdatedAt: Date | null };
+export type ContinueReadingRow = { id: number; lastActivityAt: Date | null };
 type RandomCandidateRow = { sampleIndex: number; id: number };
 const AUDIO_FORMATS = BOOK_FORMATS.filter(isAudioFormat);
 const CONTINUE_READING_EXCLUDED_READ_STATUSES = ['unread', 'read', 'skimmed', 'abandoned'] as const satisfies readonly ReadStatus[];
@@ -38,17 +39,18 @@ export class DashboardRepository {
     return rows.map((row) => row.id);
   }
 
-  async findContinueReadingBookIds(
+  async findContinueReadingBooks(
     accessibleLibraryIds: number[],
     userId: number,
     limit: number,
     contentFilters?: ContentFilterRules,
-  ): Promise<number[]> {
+  ): Promise<ContinueReadingRow[]> {
     if (accessibleLibraryIds.length === 0) return [];
 
     const cfClauses = contentFilters ? buildContentFilterClauses(contentFilters, this.db) : [];
+    const mergedUpdatedAt = sql<Date | null>`coalesce(${readingProgress.updatedAt}, ${books.updatedAt})`;
     const rows = await this.db
-      .select({ id: books.id })
+      .select({ id: books.id, lastActivityAt: mergedUpdatedAt })
       .from(books)
       .leftJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
       .leftJoin(readingProgress, and(eq(readingProgress.bookFileId, bookFiles.id), eq(readingProgress.userId, userId)))
@@ -66,7 +68,7 @@ export class DashboardRepository {
       .orderBy(desc(readingProgress.updatedAt), desc(books.id))
       .limit(limit);
 
-    return rows.map((row) => row.id);
+    return rows;
   }
 
   async findContinueListeningBookIds(
@@ -122,12 +124,32 @@ export class DashboardRepository {
     return rows.map((row) => row.id);
   }
 
+  async findContinueReadingBookIds(
+    accessibleLibraryIds: number[],
+    userId: number,
+    limit: number,
+    contentFilters?: ContentFilterRules,
+  ): Promise<number[]> {
+    const rows = await this.findContinueReadingBooks(accessibleLibraryIds, userId, limit, contentFilters);
+    return rows.map((row) => row.id);
+  }
+
   async findUpNextInSeriesBookIds(
     accessibleLibraryIds: number[],
     userId: number,
     limit: number,
     contentFilters?: ContentFilterRules,
   ): Promise<number[]> {
+    const rows = await this.findUpNextInSeriesBooks(accessibleLibraryIds, userId, limit, contentFilters);
+    return rows.map((row) => row.id);
+  }
+
+  async findUpNextInSeriesBooks(
+    accessibleLibraryIds: number[],
+    userId: number,
+    limit: number,
+    contentFilters?: ContentFilterRules,
+  ): Promise<UpNextInSeriesRow[]> {
     if (accessibleLibraryIds.length === 0) return [];
     if (limit <= 0) return [];
 
@@ -223,13 +245,13 @@ export class DashboardRepository {
           and os.current_progress = 0
 	        order by os.library_id, os.series_id, os.series_index asc, os.added_at asc, os.id asc
       )
-      select nc.id
+      select nc.id, nc.previous_completion_updated_at as "previousCompletionUpdatedAt"
       from next_candidates nc
       order by nc.previous_completion_updated_at desc nulls last, nc.id desc
       limit ${limit}
     `);
 
-    return rows.rows.map((row) => row.id);
+    return rows.rows;
   }
 
   async findRandomBookIds(accessibleLibraryIds: number[], userId: number, limit: number, contentFilters?: ContentFilterRules): Promise<number[]> {
@@ -348,5 +370,26 @@ export class DashboardRepository {
     this.randomIdBounds.set(cacheKey, bounds);
     if (this.randomIdBounds.size > 100) this.randomIdBounds.delete(this.randomIdBounds.keys().next().value!);
     return bounds;
+  }
+
+  async countRandomBookCandidates(accessibleLibraryIds: number[], userId: number, contentFilters?: ContentFilterRules): Promise<number> {
+    if (accessibleLibraryIds.length === 0) return 0;
+
+    const cfClauses = contentFilters ? buildContentFilterClauses(contentFilters, this.db) : [];
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(books)
+      .leftJoin(bookFiles, eq(bookFiles.id, books.primaryFileId))
+      .leftJoin(readingProgress, and(eq(readingProgress.bookFileId, bookFiles.id), eq(readingProgress.userId, userId)))
+      .where(
+        and(
+          inArray(books.libraryId, accessibleLibraryIds),
+          eq(books.status, 'present'),
+          or(isNull(readingProgress.bookFileId), eq(readingProgress.percentage, 0)),
+          ...cfClauses,
+        ),
+      );
+
+    return Number(row?.count ?? 0);
   }
 }

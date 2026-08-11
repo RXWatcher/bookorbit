@@ -12,6 +12,7 @@ import { useRefreshingBooks } from '@/features/book/composables/useRefreshingBoo
 import { detectChangedColumns, mergeBookCardWithDetail } from '@/features/book/lib/book-card-mapper'
 import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import type { BookCard } from '@bookorbit/types'
+import { bookDetailRoute, isSourceBackedBook } from '@/features/book/lib/source-backed-book'
 
 const props = defineProps<{
   book: BookCard
@@ -32,8 +33,13 @@ const refreshFeedback = useBookRefreshFeedback()
 const { isRefreshing } = useRefreshingBooks()
 const showSendDialog = ref(false)
 const anyRefreshing = computed(() => refreshing.value || isRefreshing(props.book.id))
+const canUseLocalBookActions = computed(() => !isSourceBackedBook(props.book))
 
 function handleAction(type: BookActionType) {
+  if (type === 'quick-view' && !canUseLocalBookActions.value) {
+    router.push(bookDetailRoute(props.book))
+    return
+  }
   emit('action', type)
 }
 
@@ -63,33 +69,33 @@ async function handleRefresh() {
           <BookOpen :size="13" class="mr-2" />
           {{ t('book.table.actions.quickView') }}
         </DropdownMenuItem>
-        <DropdownMenuItem @click="router.push({ name: 'book-detail', params: { bookId: book.id } })">
+        <DropdownMenuItem @click="router.push(bookDetailRoute(book))">
           <ExternalLink :size="13" class="mr-2" />
           {{ t('book.table.actions.bookDetails') }}
         </DropdownMenuItem>
-        <DropdownMenuSeparator v-if="hasPermission('library_edit_metadata')" />
+        <DropdownMenuSeparator v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')" />
         <DropdownMenuItem
-          v-if="hasPermission('library_edit_metadata')"
+          v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
           @click="router.push({ name: 'book-detail', params: { bookId: book.id }, query: { tab: 'edit' } })"
         >
           <Pencil :size="13" class="mr-2" />
           {{ t('book.table.actions.editMetadata') }}
         </DropdownMenuItem>
-        <DropdownMenuItem v-if="hasPermission('library_edit_metadata')" :disabled="anyRefreshing" @click="handleRefresh">
+        <DropdownMenuItem v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')" :disabled="anyRefreshing" @click="handleRefresh">
           <RefreshCw :size="13" class="mr-2" :class="{ 'animate-spin': anyRefreshing }" />
           {{ t('book.table.actions.refreshMetadata') }}
         </DropdownMenuItem>
-        <DropdownMenuItem v-if="hasPermission('library_edit_metadata')" @click="handleAction('add-to-collection')">
+        <DropdownMenuItem v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')" @click="handleAction('add-to-collection')">
           <FolderPlus :size="13" class="mr-2" />
           {{ t('book.table.actions.addToCollection') }}
         </DropdownMenuItem>
-        <DropdownMenuItem v-if="hasPermission('email_send')" @click="showSendDialog = true">
+        <DropdownMenuItem v-if="canUseLocalBookActions && hasPermission('email_send')" @click="showSendDialog = true">
           <Send :size="13" class="mr-2" />
           {{ t('book.table.actions.sendToDevice') }}
         </DropdownMenuItem>
-        <DropdownMenuSeparator v-if="hasPermission('library_delete_books')" />
+        <DropdownMenuSeparator v-if="canUseLocalBookActions && hasPermission('library_delete_books')" />
         <DropdownMenuItem
-          v-if="hasPermission('library_delete_books')"
+          v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
           class="text-destructive focus:text-destructive"
           @click="handleAction('delete')"
         >
@@ -101,7 +107,7 @@ async function handleRefresh() {
   </div>
 
   <SendBookDialog
-    v-if="showSendDialog"
+    v-if="showSendDialog && canUseLocalBookActions"
     :selection-payload="{ bookIds: [book.id] }"
     :selected-count="1"
     :open="showSendDialog"

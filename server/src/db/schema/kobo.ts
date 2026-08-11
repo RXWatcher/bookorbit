@@ -18,6 +18,7 @@ import {
 
 import { books } from './books';
 import { users } from './auth';
+import { warehouseCatalogItems } from './warehouse';
 
 export const koboDevices = pgTable(
   'kobo_devices',
@@ -155,6 +156,27 @@ export const koboSnapshotBooks = pgTable(
   ],
 );
 
+export const koboCatalogSnapshotBooks = pgTable(
+  'kobo_catalog_snapshot_books',
+  {
+    snapshotId: integer('snapshot_id')
+      .notNull()
+      .references(() => koboLibrarySnapshots.id, { onDelete: 'cascade' }),
+    catalogItemId: integer('catalog_item_id')
+      .notNull()
+      .references(() => warehouseCatalogItems.id, { onDelete: 'cascade' }),
+    synced: boolean('synced').notNull().default(false),
+    pendingDelete: boolean('pending_delete').notNull().default(false),
+    isNew: boolean('is_new').notNull().default(true),
+    removedByDevice: boolean('removed_by_device').notNull().default(false),
+    metadataHash: varchar('metadata_hash', { length: 64 }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.snapshotId, t.catalogItemId] }),
+    index('kobo_catalog_snapshot_books_snapshot_synced_item_idx').on(t.snapshotId, t.synced, t.catalogItemId),
+  ],
+);
+
 export const koboBookEntitlements = pgTable(
   'kobo_book_entitlements',
   {
@@ -242,6 +264,7 @@ export type NewKoboDevice = typeof koboDevices.$inferInsert;
 export type KoboSyncSetting = typeof koboSyncSettings.$inferSelect;
 export type KoboLibrarySnapshot = typeof koboLibrarySnapshots.$inferSelect;
 export type KoboSnapshotBook = typeof koboSnapshotBooks.$inferSelect;
+export type KoboCatalogSnapshotBook = typeof koboCatalogSnapshotBooks.$inferSelect;
 export type KoboBookEntitlement = typeof koboBookEntitlements.$inferSelect;
 export type KoboReadingState = typeof koboReadingStates.$inferSelect;
 export type KoboSyncHistory = typeof koboSyncHistory.$inferSelect;

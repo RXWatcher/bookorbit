@@ -2,20 +2,48 @@
 import { Highlighter, ExternalLink } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import type { CatalogHighlightOfTheDayWidgetData, HighlightOfTheDayWidgetData } from '@bookorbit/types'
 
 import { useCoverVersions } from '@/features/book/composables/useCoverVersions'
 import BookCoverArtwork from '@/features/book/components/BookCoverArtwork.vue'
 import BookCoverSurface from '@/features/book/components/BookCoverSurface.vue'
 import { useHighlightOfTheDayWidget } from '../../composables/useHighlightOfTheDayWidget'
+import {
+  catalogSourceAudiobookCoverUrl,
+  catalogSourceComicPageImageUrl,
+  catalogSourceEbookCoverUrl,
+} from '@/features/warehouse/api/catalog-source.api'
+import { catalogLibraryItemRoute } from '@/features/warehouse/lib/catalog-item-route'
 
 const { data, loading, error } = useHighlightOfTheDayWidget()
 const { t } = useI18n()
 const router = useRouter()
 const { coverUrl } = useCoverVersions()
 
+function isCatalogHighlight(item: HighlightOfTheDayWidgetData): item is CatalogHighlightOfTheDayWidgetData {
+  return item.type === 'catalog-item'
+}
+
 function goToBook() {
   if (!data.value) return
+  if (isCatalogHighlight(data.value)) {
+    void router.push(catalogLibraryItemRoute(data.value.mediaType, data.value.remoteId))
+    return
+  }
   void router.push({ name: 'book-detail', params: { bookId: data.value.bookId } })
+}
+
+function highlightCoverUrl(item: HighlightOfTheDayWidgetData): string | null {
+  if (!item.hasCover) return null
+  if (!isCatalogHighlight(item)) return coverUrl(item.bookId)
+  if (item.mediaType === 'audiobook') return catalogSourceAudiobookCoverUrl(item.remoteId)
+  if (item.mediaType === 'comic') return catalogSourceComicPageImageUrl(item.remoteId)
+  return catalogSourceEbookCoverUrl(item.remoteId, 'medium')
+}
+
+function highlightSeed(item: HighlightOfTheDayWidgetData): string {
+  if (item.bookTitle) return item.bookTitle
+  return isCatalogHighlight(item) ? item.remoteId : String(item.bookId)
 }
 </script>
 
@@ -55,12 +83,12 @@ function goToBook() {
       <button class="flex cursor-pointer items-center gap-2 rounded-lg pb-1 pl-1 text-left transition-colors hover:bg-muted/40" @click="goToBook">
         <BookCoverSurface size="mini" class="book-cover-surface--spine-fitted h-9 w-6 shrink-0 overflow-hidden rounded">
           <BookCoverArtwork
-            :src="coverUrl(data.bookId)"
+            :src="highlightCoverUrl(data)"
             :has-cover="data.hasCover"
             :title="data.bookTitle"
             :author-line="null"
-            :is-audio="false"
-            :seed="data.bookTitle ?? String(data.bookId)"
+            :is-audio="isCatalogHighlight(data) && data.mediaType === 'audiobook'"
+            :seed="highlightSeed(data)"
             :alt="data.bookTitle ?? t('dashboard.common.cover')"
             frame-aspect-ratio="2/3"
           />

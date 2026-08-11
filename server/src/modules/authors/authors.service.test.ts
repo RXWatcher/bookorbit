@@ -1,5 +1,11 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+
+vi.mock('../book/utils/assemble-book-cards', () => ({
+  assembleBookCards: vi.fn(),
+}));
+
+import { assembleBookCards } from '../book/utils/assemble-book-cards';
 
 import { AUTHOR_ENRICHMENT_REASONS } from './author-enrichment-reasons';
 import { AuthorsService } from './authors.service';
@@ -8,37 +14,10 @@ function reqUser(id = 7, superuser = false) {
   return { id, isSuperuser: superuser, permissions: [], contentFilters: undefined } as any;
 }
 
-function makeBookRow(id: number, title: string) {
-  return {
-    id,
-    status: 'ready',
-    coverAspectRatio: '2/3',
-    primaryFileId: null,
-    folderPath: `/books/${id}`,
-    addedAt: new Date('2026-08-01T00:00:00.000Z'),
-    title,
-    seriesId: null,
-    seriesName: null,
-    seriesIndex: null,
-    publishedDate: null,
-    publishedYear: null,
-    language: null,
-    rating: null,
-    metadataScore: null,
-    coverSource: null,
-    lockedFields: null,
-    subtitle: null,
-    publisher: null,
-    pageCount: null,
-    isbn13: null,
-    hardcoverId: null,
-    hardcoverEditionId: null,
-  };
-}
-
 describe('AuthorsService', () => {
   const authorsRepo = {
     findPage: vi.fn(),
+    findSummaries: vi.fn(),
     findById: vi.fn(),
     findBookIdsPage: vi.fn(),
     updateAuthorById: vi.fn(),
@@ -53,13 +32,22 @@ describe('AuthorsService', () => {
     countAuthors: vi.fn(),
   };
 
-  const bookReadService = {
+  const bookRepo = {
+    findCards: vi.fn(),
     findCardsByBookIds: vi.fn(),
   };
 
   const libraryService = {
     findAll: vi.fn(),
     findAccessibleLibraryIds: vi.fn(),
+  };
+
+  const warehouseCatalogService = {
+    listAuthorSummaries: vi.fn(),
+    listAuthorSummaryPage: vi.fn(),
+    findAuthorSummaryById: vi.fn(),
+    listAuthorItems: vi.fn(),
+    listAuthorBooks: vi.fn(),
   };
 
   const authorMetadataFetchService = {
@@ -102,16 +90,22 @@ describe('AuthorsService', () => {
     vi.resetAllMocks();
     service = new AuthorsService(
       authorsRepo as any,
-      bookReadService as any,
+      bookRepo as any,
       libraryService as any,
       appSettings as any,
       authorMetadataFetchService as any,
       authorImageStorage as any,
       enrichmentExecutor as any,
       enrichmentOrchestrator as any,
+      warehouseCatalogService as any,
       metadataScoreService as any,
     );
     libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+    warehouseCatalogService.listAuthorSummaries.mockResolvedValue([]);
+    warehouseCatalogService.listAuthorSummaryPage.mockResolvedValue({ rows: [], total: 0, page: 0, size: 50 });
+    warehouseCatalogService.findAuthorSummaryById.mockResolvedValue(null);
+    warehouseCatalogService.listAuthorItems.mockResolvedValue({ items: [], total: 0 });
+    warehouseCatalogService.listAuthorBooks.mockResolvedValue({ items: [], total: 0 });
     libraryService.findAccessibleLibraryIds.mockResolvedValue([1, 2]);
     authorImageStorage.getThumbnailUrlIfExists.mockResolvedValue(null);
     authorImageStorage.getImageUrlIfExists.mockResolvedValue(null);
@@ -119,6 +113,7 @@ describe('AuthorsService', () => {
     enrichmentOrchestrator.backfillLinkedAuthors.mockResolvedValue(8);
     appSettings.getAuthorsAutoEnrichmentWriteMode.mockResolvedValue('missing_only');
     metadataScoreService.calculateAndSaveMany.mockResolvedValue(undefined);
+    vi.mocked(assembleBookCards).mockReturnValue([]);
   });
 
   it('countAll counts authors across the accessible libraries', async () => {
@@ -303,37 +298,31 @@ describe('AuthorsService', () => {
 
     expect(page).toEqual({ items: [], total: 0, page: 0, size: 50 });
     expect(authorsRepo.findPage).not.toHaveBeenCalled();
+    expect(authorsRepo.findSummaries).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.listAuthorSummaries).not.toHaveBeenCalled();
+    expect(libraryService.findAll).toHaveBeenCalledWith(reqUser(), { includeSourceBacked: true });
   });
 
   it('findAll applies defaults and appends thumbnail urls', async () => {
-    authorsRepo.findPage.mockResolvedValue({
-      items: [
-        {
-          id: 10,
-          name: 'Alpha',
-          sortName: null,
-          description: null,
-          bookCount: 3,
-          lastAddedAt: null,
-        },
-      ],
-      total: 1,
-      page: 0,
-      size: 50,
-    });
+    libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    authorsRepo.findSummaries.mockResolvedValue([
+      {
+        id: 10,
+        name: 'Alpha',
+        sortName: null,
+        description: null,
+        bookCount: 3,
+        lastAddedAt: null,
+      },
+    ]);
     authorImageStorage.getThumbnailUrlIfExists.mockResolvedValue('https://cdn.example.com/a10-thumb.jpg');
 
     const page = await service.findAll(reqUser(), {});
 
-    expect(authorsRepo.findPage).toHaveBeenCalledWith({
+    expect(authorsRepo.findSummaries).toHaveBeenCalledWith({
       q: undefined,
-      page: 0,
-      size: 50,
-      sort: 'name',
-      order: 'asc',
       libraryIds: [1, 2],
       hasPhoto: undefined,
-      minBookCount: undefined,
       contentFilters: undefined,
     });
     expect(page.items[0]).toEqual(
@@ -343,6 +332,302 @@ describe('AuthorsService', () => {
         imageUrl: 'https://cdn.example.com/a10-thumb.jpg',
       }),
     );
+  });
+
+  it('findAll includes cloud-only authors as native author summaries', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+    warehouseCatalogService.listAuthorSummaryPage.mockResolvedValue({
+      rows: [
+        {
+          id: -3001,
+          name: 'Cloud Author',
+          sortName: null,
+          description: null,
+          bookCount: 4,
+          lastAddedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      total: 1,
+      page: 0,
+      size: 50,
+    });
+
+    const page = await service.findAll(reqUser(), { libraryId: CLOUD_EBOOK_LIBRARY_ID });
+
+    expect(authorsRepo.findPage).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.listAuthorSummaryPage).toHaveBeenCalledWith({
+      userId: 7,
+      q: undefined,
+      contentFilters: undefined,
+      mediaType: 'ebook',
+      page: 0,
+      size: 50,
+      sort: 'name',
+      order: 'asc',
+      minBookCount: undefined,
+    });
+    expect(page).toEqual({
+      items: [
+        {
+          id: -3001,
+          name: 'Cloud Author',
+          sortName: null,
+          description: null,
+          bookCount: 4,
+          lastAddedAt: '2026-06-01T00:00:00.000Z',
+          imageUrl: null,
+        },
+      ],
+      total: 1,
+      page: 0,
+      size: 50,
+    });
+  });
+
+  it('findAll deduplicates local and source-backed comma-form authors', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    authorsRepo.findSummaries.mockResolvedValue([
+      {
+        id: 42,
+        name: 'Burrell, Teresa',
+        sortName: 'Burrell, Teresa',
+        description: 'Local bio',
+        bookCount: 3,
+        lastAddedAt: '2026-05-01T00:00:00.000Z',
+      },
+    ]);
+    warehouseCatalogService.listAuthorSummaries.mockResolvedValue([
+      {
+        id: -3001,
+        name: 'Teresa Burrell',
+        sortName: null,
+        description: null,
+        bookCount: 2,
+        lastAddedAt: '2026-06-01T00:00:00.000Z',
+      },
+    ]);
+
+    const page = await service.findAll(reqUser(), { libraryId: undefined });
+
+    expect(page).toEqual({
+      items: [
+        {
+          id: 42,
+          name: 'Burrell, Teresa',
+          sortName: 'Burrell, Teresa',
+          description: 'Local bio',
+          bookCount: 5,
+          lastAddedAt: '2026-06-01T00:00:00.000Z',
+          imageUrl: null,
+        },
+      ],
+      total: 1,
+      page: 0,
+      size: 50,
+    });
+  });
+
+  it('findAll excludes cloud-only authors from the hasPhoto=true filter', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+
+    const page = await service.findAll(reqUser(), { libraryId: CLOUD_EBOOK_LIBRARY_ID, hasPhoto: true });
+
+    expect(warehouseCatalogService.listAuthorSummaries).not.toHaveBeenCalled();
+    expect(page).toEqual({ items: [], total: 0, page: 0, size: 50 });
+  });
+
+  it('findOne resolves a cloud-only author by virtual id', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+    warehouseCatalogService.findAuthorSummaryById.mockResolvedValue({
+      id: -3001,
+      name: 'Cloud Author',
+      sortName: null,
+      description: null,
+      bookCount: 4,
+      lastAddedAt: '2026-06-01T00:00:00.000Z',
+    });
+
+    await expect(service.findOne(reqUser(), -3001)).resolves.toEqual({
+      id: -3001,
+      name: 'Cloud Author',
+      sortName: null,
+      description: null,
+      bookCount: 4,
+      lastAddedAt: '2026-06-01T00:00:00.000Z',
+      imageUrl: null,
+    });
+    expect(authorsRepo.findById).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.findAuthorSummaryById).toHaveBeenCalledWith(-3001, 7, undefined);
+  });
+
+  it('findOne merges matching source-backed summary counts for local author detail', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    authorsRepo.findById.mockResolvedValue({
+      id: 42,
+      name: 'Burrell, Teresa',
+      sortName: 'Burrell, Teresa',
+      description: 'Local bio',
+      bookCount: 3,
+      lastAddedAt: '2026-05-01T00:00:00.000Z',
+    });
+    warehouseCatalogService.listAuthorSummaries.mockResolvedValue([
+      {
+        id: -3001,
+        name: 'Teresa Burrell',
+        sortName: null,
+        description: null,
+        bookCount: 2,
+        lastAddedAt: '2026-06-01T00:00:00.000Z',
+      },
+      {
+        id: -3002,
+        name: 'Other Author',
+        sortName: null,
+        description: null,
+        bookCount: 9,
+        lastAddedAt: '2026-06-03T00:00:00.000Z',
+      },
+    ]);
+
+    await expect(service.findOne(reqUser(), 42)).resolves.toEqual({
+      id: 42,
+      name: 'Burrell, Teresa',
+      sortName: 'Burrell, Teresa',
+      description: 'Local bio',
+      bookCount: 5,
+      lastAddedAt: '2026-06-01T00:00:00.000Z',
+      imageUrl: null,
+    });
+    expect(warehouseCatalogService.listAuthorSummaries).toHaveBeenCalledWith({
+      userId: 7,
+      q: undefined,
+      contentFilters: undefined,
+      mediaType: 'ebook',
+    });
+  });
+
+  it('findOne rejects a cloud-only author when source-backed libraries are inaccessible', async () => {
+    libraryService.findAll.mockResolvedValue([]);
+    warehouseCatalogService.findAuthorSummaryById.mockResolvedValue({
+      id: -3001,
+      name: 'Cloud Author',
+      sortName: null,
+      description: null,
+      bookCount: 4,
+      lastAddedAt: '2026-06-01T00:00:00.000Z',
+    });
+
+    await expect(service.findOne(reqUser(), -3001)).rejects.toBeInstanceOf(NotFoundException);
+    expect(warehouseCatalogService.findAuthorSummaryById).not.toHaveBeenCalled();
+  });
+
+  it('findBooks returns source-backed library items for cloud-only author detail', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+    warehouseCatalogService.findAuthorSummaryById.mockResolvedValue({
+      id: -3001,
+      name: 'Cloud Author',
+      sortName: null,
+      description: null,
+      bookCount: 4,
+      lastAddedAt: '2026-06-01T00:00:00.000Z',
+    });
+    const bookCard = {
+      id: -1000000001,
+      status: 'present',
+      title: 'Cloud Book',
+      authors: ['Cloud Author'],
+      addedAt: '2026-06-01T00:00:00.000Z',
+      hasCover: true,
+    };
+    warehouseCatalogService.listAuthorBooks.mockResolvedValue({ items: [bookCard], total: 1 });
+
+    await expect(service.findBooks(reqUser(), -3001, { libraryId: CLOUD_EBOOK_LIBRARY_ID })).resolves.toEqual({
+      items: [bookCard],
+      total: 1,
+      page: 0,
+      size: 50,
+    });
+    expect(authorsRepo.findBookIdsPage).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.findAuthorSummaryById).toHaveBeenCalledWith(-3001, 7, undefined);
+    expect(warehouseCatalogService.listAuthorBooks).toHaveBeenCalledWith({
+      userId: 7,
+      authorId: -3001,
+      page: 0,
+      size: 50,
+      sort: 'addedAt',
+      order: 'desc',
+      contentFilters: undefined,
+      mediaType: 'ebook',
+    });
+  });
+
+  it('findBooks filters a local author to source-backed Ebook Library items by author name', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    const bookCard = {
+      id: -1000000002,
+      status: 'present',
+      title: 'Matched Cloud Book',
+      authors: ['Local Author'],
+      addedAt: '2026-06-02T00:00:00.000Z',
+      hasCover: true,
+    };
+    authorsRepo.findById.mockResolvedValue({ id: 42, name: 'Local Author', bookCount: 3 });
+    warehouseCatalogService.listAuthorBooks.mockResolvedValue({ items: [bookCard], total: 1 });
+
+    await expect(service.findBooks(reqUser(), 42, { libraryId: CLOUD_EBOOK_LIBRARY_ID })).resolves.toEqual({
+      items: [bookCard],
+      total: 1,
+      page: 0,
+      size: 50,
+    });
+
+    expect(authorsRepo.findBookIdsPage).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.listAuthorBooks).toHaveBeenCalledWith({
+      userId: 7,
+      authorName: 'Local Author',
+      page: 0,
+      size: 50,
+      sort: 'addedAt',
+      order: 'desc',
+      contentFilters: undefined,
+      mediaType: 'ebook',
+    });
+  });
+
+  it('sorts source-backed author detail items by cached published year alongside local books', async () => {
+    libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    const localBook = { id: 11, title: 'Earlier Local Book', publishedYear: 2001, addedAt: '2026-06-01T00:00:00.000Z' } as any;
+    const bookCard = {
+      id: -1000002024,
+      status: 'present',
+      title: 'Newer Cloud Book',
+      authors: ['Local Author'],
+      hasCover: true,
+      publishedYear: 2024,
+      addedAt: '2026-06-02T00:00:00.000Z',
+    };
+    authorsRepo.findById.mockResolvedValue({ id: 42, name: 'Local Author', bookCount: 2 });
+    authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [11], total: 1, page: 0, size: 50 });
+    bookRepo.findCardsByBookIds.mockResolvedValue({
+      rows: [],
+      authorRows: [],
+      fileRows: [],
+      genreRows: [],
+      progressRows: [],
+      statusRows: [],
+      narratorRows: [],
+      tagRows: [],
+      seriesMembershipRows: [],
+    });
+    vi.mocked(assembleBookCards).mockReturnValue([localBook]);
+    warehouseCatalogService.listAuthorBooks.mockResolvedValue({ items: [bookCard], total: 1 });
+
+    await expect(service.findBooks(reqUser(), 42, { sort: 'publishedYear', order: 'desc' })).resolves.toEqual({
+      items: [bookCard, localBook],
+      total: 2,
+      page: 0,
+      size: 50,
+    });
   });
 
   it('findAll rejects excessively deep offsets', async () => {
@@ -375,7 +660,7 @@ describe('AuthorsService', () => {
     const result = await service.findBooks(reqUser(), 10, {});
 
     expect(result).toEqual({ items: [], total: 0, page: 0, size: 50 });
-    expect(bookReadService.findCardsByBookIds).not.toHaveBeenCalled();
+    expect(bookRepo.findCardsByBookIds).not.toHaveBeenCalled();
   });
 
   it('findBooks passes sort, order, size, and libraryId to findBookIdsPage', async () => {
@@ -398,10 +683,14 @@ describe('AuthorsService', () => {
   });
 
   it('findBooks assembles and returns books in bookIds page order', async () => {
+    const book1 = { id: 1, title: 'A' } as any;
+    const book3 = { id: 3, title: 'C' } as any;
+    const book2 = { id: 2, title: 'B' } as any;
+
     authorsRepo.findById.mockResolvedValue({ id: 5, name: 'Author', bookCount: 3 });
     authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [3, 1, 2], total: 3, page: 0, size: 50 });
-    bookReadService.findCardsByBookIds.mockResolvedValue({
-      rows: [makeBookRow(1, 'A'), makeBookRow(2, 'B'), makeBookRow(3, 'C')],
+    bookRepo.findCardsByBookIds.mockResolvedValue({
+      rows: [],
       authorRows: [],
       fileRows: [],
       genreRows: [],
@@ -410,82 +699,13 @@ describe('AuthorsService', () => {
       narratorRows: [],
       tagRows: [],
       seriesMembershipRows: [],
-      total: 3,
     });
+    vi.mocked(assembleBookCards).mockReturnValue([book1, book2, book3]);
 
     const result = await service.findBooks(reqUser(), 5, {});
 
-    expect(bookReadService.findCardsByBookIds).toHaveBeenCalledWith([3, 1, 2], 7);
     expect(result.total).toBe(3);
     expect(result.items.map((b) => b.id)).toEqual([3, 1, 2]);
-  });
-
-  it('findBooks preserves per-user status and all card enrichments', async () => {
-    const updatedAt = new Date('2026-08-05T12:00:00.000Z');
-    const startedAt = new Date('2026-08-01T08:30:00.000Z');
-    const expectedFinishedAt = new Date('2026-08-04T18:45:00.000Z');
-
-    authorsRepo.findById.mockResolvedValue({ id: 5, name: 'Author', bookCount: 1 });
-    authorsRepo.findBookIdsPage.mockResolvedValue({ bookIds: [11], total: 1, page: 0, size: 50 });
-    bookReadService.findCardsByBookIds.mockResolvedValue({
-      rows: [{ ...makeBookRow(11, 'Enriched Book'), primaryFileId: 101 }],
-      authorRows: [{ bookId: 11, name: 'Author' }],
-      fileRows: [{ bookId: 11, id: 101, format: 'epub', role: 'content', sizeBytes: 2048 }],
-      genreRows: [{ bookId: 11, name: 'Fantasy' }],
-      progressRows: [{ bookFileId: 101, percentage: 100 }],
-      statusRows: [
-        {
-          bookId: 11,
-          status: 'read',
-          source: 'manual',
-          startedAt,
-          finishedAt: expectedFinishedAt,
-          updatedAt,
-        },
-      ],
-      narratorRows: [{ bookId: 11, name: 'Narrator' }],
-      tagRows: [{ bookId: 11, name: 'Favorite' }],
-      seriesMembershipRows: [
-        {
-          bookId: 11,
-          seriesId: 4,
-          seriesName: 'Saga',
-          seriesIndex: 2,
-          displayOrder: 0,
-          expectedBookCount: 3,
-        },
-      ],
-      total: 1,
-    });
-
-    const result = await service.findBooks(reqUser(), 5, {});
-
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0]).toMatchObject({
-      id: 11,
-      authors: ['Author'],
-      files: [{ id: 101, format: 'epub', role: 'primary', sizeBytes: 2048 }],
-      genres: ['Fantasy'],
-      readingProgress: 100,
-      readStatus: {
-        status: 'read',
-        source: 'manual',
-        startedAt: startedAt.toISOString(),
-        finishedAt: expectedFinishedAt.toISOString(),
-        updatedAt: updatedAt.toISOString(),
-      },
-      narrators: ['Narrator'],
-      tags: ['Favorite'],
-      seriesMemberships: [
-        {
-          seriesId: 4,
-          seriesName: 'Saga',
-          seriesIndex: 2,
-          displayOrder: 0,
-          expectedBookCount: 3,
-        },
-      ],
-    });
   });
 
   it('findBooks uses defaults when dto fields are omitted', async () => {

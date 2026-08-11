@@ -17,8 +17,10 @@ type MigrationJournal = {
 };
 
 const migrationsDirUrl = new URL('./migrations/', import.meta.url);
+const warehouseMigrationsDirUrl = new URL('./warehouse-migrations/', import.meta.url);
 const journalPath = fileURLToPath(new URL('./meta/_journal.json', migrationsDirUrl));
 const migrationsDir = fileURLToPath(migrationsDirUrl);
+const warehouseMigrationsDir = fileURLToPath(warehouseMigrationsDirUrl);
 
 function readJournal(): MigrationJournal {
   return JSON.parse(readFileSync(journalPath, 'utf8')) as MigrationJournal;
@@ -47,6 +49,20 @@ describe('Drizzle migration journal', () => {
       if (previous) {
         expect(entry.when, `${entry.tag} must have a later journal timestamp than ${previous.tag}`).toBeGreaterThan(previous.when);
       }
+    }
+  });
+
+  it('keeps warehouse-owned migrations out of the main journal', () => {
+    const journal = readJournal();
+    const warehouseMigrationTags = readdirSync(warehouseMigrationsDir)
+      .filter((file) => file.endsWith('.sql'))
+      .map((file) => basename(file, '.sql'));
+
+    for (const tag of warehouseMigrationTags) {
+      expect(
+        journal.entries.some((entry) => entry.tag === tag),
+        `${tag} should stay out of the main journal`,
+      ).toBe(false);
     }
   });
 

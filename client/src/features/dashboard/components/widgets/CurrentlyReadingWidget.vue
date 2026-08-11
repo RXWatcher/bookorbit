@@ -2,31 +2,65 @@
 import { BookOpen, Play } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { FORMAT_TO_GROUP } from '@bookorbit/types'
+import { FORMAT_TO_GROUP, type CurrentlyReadingCatalogItem, type CurrentlyReadingItem } from '@bookorbit/types'
 
 import { useCoverVersions } from '@/features/book/composables/useCoverVersions'
 import BookCoverArtwork from '@/features/book/components/BookCoverArtwork.vue'
 import BookCoverSurface from '@/features/book/components/BookCoverSurface.vue'
 import { useCurrentlyReadingWidget } from '../../composables/useCurrentlyReadingWidget'
+import {
+  catalogSourceAudiobookCoverUrl,
+  catalogSourceComicPageImageUrl,
+  catalogSourceEbookCoverUrl,
+} from '@/features/warehouse/api/catalog-source.api'
+import { catalogLibraryItemRoute, catalogLibraryReaderRoute } from '@/features/warehouse/lib/catalog-item-route'
 
 const { data, loading, error } = useCurrentlyReadingWidget()
 const { t } = useI18n()
 const router = useRouter()
 const { coverUrl } = useCoverVersions()
 
-function goToBook(bookId: number) {
-  void router.push({ name: 'book-detail', params: { bookId } })
+function isCatalogItem(item: CurrentlyReadingItem): item is CurrentlyReadingCatalogItem {
+  return item.type === 'catalog-item'
+}
+
+function itemKey(item: CurrentlyReadingItem): string {
+  return isCatalogItem(item) ? `${item.mediaType}:${item.remoteId}` : `book:${item.bookId}`
+}
+
+function goToBook(item: CurrentlyReadingItem) {
+  if (isCatalogItem(item)) {
+    void router.push(catalogLibraryItemRoute(item.mediaType, item.remoteId))
+    return
+  }
+  void router.push({ name: 'book-detail', params: { bookId: item.bookId } })
 }
 
 function isComic(fileFormat: string | null): boolean {
   return fileFormat != null && FORMAT_TO_GROUP[fileFormat] === 'cbx'
 }
 
-function continueReading(bookId: number, fileId: number | null, fileFormat: string | null) {
-  if (fileId) {
-    void router.push({ name: 'reader', params: { bookId, fileId }, query: { format: fileFormat ?? 'epub' } })
+function itemIsComic(item: CurrentlyReadingItem): boolean {
+  return isCatalogItem(item) ? item.mediaType === 'comic' : isComic(item.fileFormat)
+}
+
+function itemCoverUrl(item: CurrentlyReadingItem): string | null {
+  if (!item.hasCover) return null
+  if (!isCatalogItem(item)) return coverUrl(item.bookId)
+  if (item.mediaType === 'audiobook') return catalogSourceAudiobookCoverUrl(item.remoteId)
+  if (item.mediaType === 'comic') return catalogSourceComicPageImageUrl(item.remoteId)
+  return catalogSourceEbookCoverUrl(item.remoteId, 'medium')
+}
+
+function continueReading(item: CurrentlyReadingItem) {
+  if (isCatalogItem(item)) {
+    void router.push({ ...catalogLibraryReaderRoute(item.mediaType, item.remoteId), query: { format: item.fileFormat ?? 'epub' } })
+    return
+  }
+  if (item.fileId) {
+    void router.push({ name: 'reader', params: { bookId: item.bookId, fileId: item.fileId }, query: { format: item.fileFormat ?? 'epub' } })
   } else {
-    void router.push({ name: 'book-detail', params: { bookId } })
+    void router.push({ name: 'book-detail', params: { bookId: item.bookId } })
   }
 }
 </script>
@@ -68,26 +102,26 @@ function continueReading(bookId: number, fileId: number | null, fileFormat: stri
       <div class="flex flex-col gap-2">
         <div
           v-for="book in data.books"
-          :key="book.bookId"
+          :key="itemKey(book)"
           class="group/book relative flex min-w-0 cursor-pointer gap-2.5 rounded-lg bg-muted/20 p-1.5 transition-colors hover:bg-muted/40"
-          @click="goToBook(book.bookId)"
+          @click="goToBook(book)"
         >
           <!-- Cover thumbnail -->
           <BookCoverSurface
             size="mini"
             class="book-cover-surface--spine-fitted h-14 w-9 shrink-0 overflow-hidden rounded"
-            :is-comic="isComic(book.fileFormat)"
+            :is-comic="itemIsComic(book)"
           >
             <BookCoverArtwork
-              :src="coverUrl(book.bookId)"
+              :src="itemCoverUrl(book)"
               :has-cover="book.hasCover"
               :title="book.title"
               :author-line="book.authors.length > 0 ? book.authors.join(', ') : null"
-              :is-audio="false"
-              :seed="book.title ?? String(book.bookId)"
+              :is-audio="isCatalogItem(book) && book.mediaType === 'audiobook'"
+              :seed="book.title ?? itemKey(book)"
               :alt="book.title ?? t('dashboard.common.bookCover')"
               frame-aspect-ratio="9/14"
-              :is-comic="isComic(book.fileFormat)"
+              :is-comic="itemIsComic(book)"
             />
           </BookCoverSurface>
 
@@ -110,7 +144,7 @@ function continueReading(bookId: number, fileId: number | null, fileFormat: stri
           <button
             class="absolute right-2 top-1/3 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-opacity group-hover/book:opacity-100"
             :title="t('dashboard.widgets.currentlyReading.continueReading')"
-            @click.stop="continueReading(book.bookId, book.fileId, book.fileFormat)"
+            @click.stop="continueReading(book)"
           >
             <Play :size="11" class="translate-x-px" />
           </button>

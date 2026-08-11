@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { ConfigService } from '@nestjs/config';
 import { Permission } from '@bookorbit/types';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import { createCoverToken } from '../src/modules/opds/opds-auth.guard';
 import * as schema from '../src/db/schema';
@@ -655,6 +655,11 @@ describe('Authorization matrix (e2e)', () => {
           path: '/koreader/credentials',
           token: 'allPerms',
         },
+        [Permission.ManageIcons]: {
+          method: 'POST',
+          path: '/custom-icons/stage',
+          token: 'allPerms',
+        },
         [Permission.HardcoverSync]: {
           method: 'GET',
           path: '/hardcover/settings',
@@ -934,19 +939,13 @@ describe('Authorization matrix (e2e)', () => {
       expect(response.statusCode).toBe(200);
       const entitlements = response.json() as unknown[];
       const syncedEntitlementIds = extractKoboEntitlementIds(entitlements);
-      const identities = await ctx.db
-        .select({ bookId: schema.koboBookEntitlements.bookId, entitlementId: schema.koboBookEntitlements.entitlementId })
-        .from(schema.koboBookEntitlements)
-        .where(
-          and(
-            eq(schema.koboBookEntitlements.userId, personas.koboActive.userId),
-            inArray(schema.koboBookEntitlements.bookId, [bookA.bookId, bookB.bookId]),
-          ),
-        );
-      const entitlementByBookId = new Map(identities.map((identity) => [identity.bookId, identity.entitlementId]));
-      expect(syncedEntitlementIds).toContain(entitlementByBookId.get(bookA.bookId));
-      const inaccessibleEntitlementId = entitlementByBookId.get(bookB.bookId);
-      if (inaccessibleEntitlementId) expect(syncedEntitlementIds).not.toContain(inaccessibleEntitlementId);
+      const bookAEntitlementId = await resolveKoboEntitlementId(bookA.bookId);
+      const bookBEntitlementId = await resolveKoboEntitlementId(bookB.bookId, { required: false });
+      expect(syncedEntitlementIds).toContain(bookAEntitlementId);
+      if (bookBEntitlementId) {
+        expect(syncedEntitlementIds).not.toContain(bookBEntitlementId);
+      }
+      expect(syncedEntitlementIds).not.toContain(String(bookB.bookId));
     });
 
     it('does not expose metadata for books outside active library access', async () => {
@@ -999,15 +998,11 @@ describe('Authorization matrix (e2e)', () => {
         url: `/api/v1/kobo/${koboActiveDeviceToken}/v1/library/${bookA.bookId}/state`,
       });
       expect(readState.statusCode).toBe(200);
-      const [identity] = await ctx.db
-        .select({ entitlementId: schema.koboBookEntitlements.entitlementId })
-        .from(schema.koboBookEntitlements)
-        .where(and(eq(schema.koboBookEntitlements.userId, personas.koboActive.userId), eq(schema.koboBookEntitlements.bookId, bookA.bookId)))
-        .limit(1);
+      const bookAEntitlementId = await resolveKoboEntitlementId(bookA.bookId);
       expect(readState.json()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            EntitlementId: identity.entitlementId,
+            EntitlementId: bookAEntitlementId,
           }),
         ]),
       );
@@ -1481,6 +1476,18 @@ describe('Authorization matrix (e2e)', () => {
     if (scope !== 'Permission' || !key) return null;
     const asRecord = Permission as unknown as Record<string, Permission>;
     return asRecord[key] ?? null;
+  }
+
+  async function resolveKoboEntitlementId(bookId: number, options: { required?: boolean } = {}): Promise<string | undefined> {
+    const [identity] = await ctx.db
+      .select({ entitlementId: schema.koboBookEntitlements.entitlementId })
+      .from(schema.koboBookEntitlements)
+      .where(and(eq(schema.koboBookEntitlements.userId, personas.koboActive.userId), eq(schema.koboBookEntitlements.bookId, bookId)))
+      .limit(1);
+    if (!identity && options.required !== false) {
+      throw new Error(`Kobo entitlement for book ${bookId} not found`);
+    }
+    return identity?.entitlementId;
   }
 
   function extractKoboEntitlementIds(entitlements: unknown[]): string[] {

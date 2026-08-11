@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 
 import {
   AuthorAutoEnrichmentWriteMode,
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
   type DefaultLibraryAccessConfig,
   DEFAULT_DOWNLOAD_PATTERN,
   DEFAULT_UPLOAD_PATTERN_BOOK_PER_FILE,
@@ -24,6 +27,7 @@ import { AppSettingsRepository } from './app-settings.repository';
 
 const OIDC_TEST_TIMEOUT_MS = 10_000;
 const RUNTIME_SETTING_CACHE_TTL_MS = 30_000;
+const SOURCE_BACKED_LIBRARY_IDS = new Set([CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID]);
 
 function parseSafe<T>(key: string, val: string | undefined, fallback: T, logger: Logger): T {
   if (!val) return fallback;
@@ -167,8 +171,10 @@ export class AppSettingsService {
     const stored = parseSafe<unknown>(APP_SETTING_KEYS.DEFAULT_LIBRARY_ACCESS, row?.value, DEFAULT_LIBRARY_ACCESS_CONFIG, this.logger);
     const normalized = normalizeDefaultLibraryAccess(stored);
     if (normalized.libraryIds.length === 0) return normalized;
-    const existingIds = await this.repo.findExistingLibraryIds(normalized.libraryIds);
-    return { libraryIds: normalized.libraryIds.filter((id) => existingIds.includes(id)) };
+    const localLibraryIds = normalized.libraryIds.filter((id) => id > 0);
+    const existingIds = localLibraryIds.length > 0 ? await this.repo.findExistingLibraryIds(localLibraryIds) : [];
+    const existingSet = new Set(existingIds);
+    return { libraryIds: normalized.libraryIds.filter((id) => SOURCE_BACKED_LIBRARY_IDS.has(id) || existingSet.has(id)) };
   }
 
   async getDefaultLibraryAccessLibraryIds(): Promise<number[]> {
@@ -184,9 +190,12 @@ export class AppSettingsService {
 
   private async assertKnownLibraryIds(libraryIds: number[]): Promise<void> {
     if (libraryIds.length === 0) return;
-    const existingIds = await this.repo.findExistingLibraryIds(libraryIds);
+    const localLibraryIds = libraryIds.filter((id) => id > 0);
+    const existingIds = localLibraryIds.length > 0 ? await this.repo.findExistingLibraryIds(localLibraryIds) : [];
     const existingSet = new Set(existingIds);
-    const missing = libraryIds.filter((id) => !existingSet.has(id));
+    const missing = libraryIds
+      .filter((id) => id <= 0 && !SOURCE_BACKED_LIBRARY_IDS.has(id))
+      .concat(localLibraryIds.filter((id) => !existingSet.has(id)));
     if (missing.length > 0) {
       throw new BadRequestException(`Unknown library IDs: ${missing.join(', ')}`);
     }
@@ -335,7 +344,7 @@ function normalizeDefaultLibraryAccess(value: unknown): DefaultLibraryAccessConf
   }
 
   const libraryIds = (value as { libraryIds: unknown[] }).libraryIds.filter(
-    (id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0,
+    (id): id is number => typeof id === 'number' && Number.isInteger(id) && (id > 0 || SOURCE_BACKED_LIBRARY_IDS.has(id)),
   );
   return { libraryIds: Array.from(new Set(libraryIds)) };
 }

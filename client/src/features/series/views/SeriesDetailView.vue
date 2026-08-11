@@ -32,6 +32,7 @@ import { fetchSeriesBooks } from '../api/series'
 import { groupSeriesBooksByMedia } from '../composables/useSeriesBookMediaGroups'
 import { useSeriesDetail } from '../composables/useSeriesDetail'
 import { useCoverStack, MAX_VISIBLE as MAX_STACK_VISIBLE } from '../composables/useCoverStack'
+import { bookCoverUrl, bookDetailRoute, isSourceBackedBook } from '@/features/book/lib/source-backed-book'
 import {
   PORTRAIT_STACK_FRAME_ASPECT_RATIO,
   centeredBottomScaleTransform,
@@ -58,7 +59,7 @@ const { libraries, fetchLibraries } = useLibraries()
 const seriesId = computed(() => {
   const raw = route.params.seriesId
   const value = typeof raw === 'string' ? Number(raw) : NaN
-  return Number.isInteger(value) && value > 0 ? value : null
+  return Number.isInteger(value) && value !== 0 ? value : null
 })
 
 const {
@@ -87,7 +88,7 @@ const loadingLeadBook = ref(false)
 const leadBookError = ref<string | null>(null)
 const leadDescriptionExpanded = ref(false)
 const leadGenresExpanded = ref(false)
-const leadCoverBookIds = ref<number[]>([])
+const leadCoverBooks = ref<BookCard[]>([])
 const failedLeadCovers = ref(new Set<number>())
 const leadCoverRatios = ref(new Map<number, number>())
 const leadBook = ref<{
@@ -114,7 +115,9 @@ const leadFallbackStyle = computed(() => {
   return bookCoverStyle(name || 'Series')
 })
 const leadInitial = computed(() => (seriesInfo.value?.name ?? 'Series').trim().charAt(0).toUpperCase() || '?')
-const activeCoverIds = computed(() => leadCoverBookIds.value.filter((id) => !failedLeadCovers.value.has(id)))
+const activeCoverBooks = computed(() => leadCoverBooks.value.filter((book) => !failedLeadCovers.value.has(book.id)))
+const activeCoverIds = computed(() => activeCoverBooks.value.map((book) => book.id))
+const leadCoverBookById = computed(() => new Map(leadCoverBooks.value.map((book) => [book.id, book])))
 const { visibleCovers: visibleLeadCoverBookIds, baseStyles: leadCoverStyles } = useCoverStack(activeCoverIds)
 const displayedLeadGenres = computed(() => {
   const genres = leadBook.value?.genres ?? []
@@ -163,6 +166,7 @@ function saveGroupByMediaPreference(value: boolean) {
 
 const groupByMedia = ref(loadGroupByMediaPreference())
 const nonEmptyMediaGroups = computed(() => groupSeriesBooksByMedia(books.value).filter((group) => group.books.length > 0))
+const localEditableBooks = computed(() => books.value.filter((book) => !isSourceBackedBook(book)))
 const quickViewBookId = ref<number | null>(null)
 const quickViewOpen = ref(false)
 
@@ -178,6 +182,10 @@ const {
 
 function handleBookAction(book: BookCard, action: BookActionType) {
   if (action === 'quick-view') {
+    if (isSourceBackedBook(book)) {
+      void router.push(bookDetailRoute(book))
+      return
+    }
     addToCollectionOpen.value = false
     addToCollectionBookId.value = null
     quickViewBookId.value = book.id
@@ -245,6 +253,11 @@ function leadCoverRatioAt(index: number): number | null {
   return bookId == null ? null : (leadCoverRatios.value.get(bookId) ?? null)
 }
 
+function leadCoverSrc(bookId: number): string {
+  const book = leadCoverBookById.value.get(bookId)
+  return book ? bookCoverUrl(book, coverUrl, 'thumbnail') : coverUrl(bookId)
+}
+
 const leadCoverFrameAspectRatios = computed(() =>
   visibleLeadCoverBookIds.value.map((_, index) => resolveCoverStackFrameAspectRatio(leadCoverRatioAt(index))),
 )
@@ -276,7 +289,7 @@ async function loadLeadBookPreview(preserveCurrent = false) {
     leadBook.value = null
     leadBookError.value = null
     loadingLeadBook.value = false
-    leadCoverBookIds.value = []
+    leadCoverBooks.value = []
     leadCoverRatios.value = new Map<number, number>()
     return
   }
@@ -285,7 +298,7 @@ async function loadLeadBookPreview(preserveCurrent = false) {
   leadBookError.value = null
   if (!preserveCurrent) {
     leadBook.value = null
-    leadCoverBookIds.value = []
+    leadCoverBooks.value = []
     failedLeadCovers.value = new Set<number>()
     leadCoverRatios.value = new Map<number, number>()
   }
@@ -302,10 +315,7 @@ async function loadLeadBookPreview(preserveCurrent = false) {
     })
 
     if (token !== leadBookRequestToken) return
-    leadCoverBookIds.value = firstPage.items
-      .filter((book) => book.hasCover)
-      .map((book) => book.id)
-      .slice(0, MAX_STACK_VISIBLE)
+    leadCoverBooks.value = firstPage.items.filter((book) => book.hasCover).slice(0, MAX_STACK_VISIBLE)
     const firstBook = firstPage.items[0]
 
     if (!firstBook) {
@@ -324,6 +334,8 @@ async function loadLeadBookPreview(preserveCurrent = false) {
       description: null,
     }
     leadBook.value = baseLeadBook
+
+    if (isSourceBackedBook(firstBook)) return
 
     const detailResponse = await api(`/api/v1/books/${firstBook.id}`)
     if (token !== leadBookRequestToken) return
@@ -360,7 +372,7 @@ function toggleLeadDescriptionExpanded() {
 async function editSeriesMetadata() {
   if (!canEditMetadata.value || openingSeriesEditor.value || loadingBooks.value) return
 
-  if (books.value.length === 0) {
+  if (localEditableBooks.value.length === 0) {
     toast.error(t('series.detail.noBooksToEdit'))
     return
   }
@@ -378,7 +390,7 @@ async function editSeriesMetadata() {
       return
     }
 
-    const ids = books.value.map((book) => book.id)
+    const ids = localEditableBooks.value.map((book) => book.id)
     if (ids.length === 0) {
       toast.error(t('series.detail.noBooksToEdit'))
       return
@@ -502,7 +514,7 @@ defineOptions({ name: 'SeriesDetailView' })
                   }"
                 >
                   <BookCoverArtwork
-                    :src="coverUrl(bookId)"
+                    :src="leadCoverSrc(bookId)"
                     :has-cover="true"
                     :title="seriesInfo.name"
                     :seed="`${seriesInfo.name}-${bookId}`"
@@ -541,7 +553,7 @@ defineOptions({ name: 'SeriesDetailView' })
                 </div>
 
                 <button
-                  v-if="canEditMetadata && books.length > 0"
+                  v-if="canEditMetadata && localEditableBooks.length > 0"
                   class="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-input bg-background px-2.5 text-sm transition-colors hover:bg-muted disabled:opacity-40 sm:px-3 md:w-auto"
                   :disabled="openingSeriesEditor || loadingBooks"
                   @click="editSeriesMetadata"

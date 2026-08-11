@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { WarehouseEbookCatalogItem } from '@bookorbit/types';
 
 import type { BookFile } from '../../db/schema';
 import type { TemplateContext } from './email-template-renderer';
@@ -51,6 +52,37 @@ export class EmailTemplateContextService {
       senderName,
       appUrl,
       coverUrl,
+    };
+  }
+
+  buildForCatalogEbook(
+    item: WarehouseEbookCatalogItem,
+    file: { contentLength: number | null; contentType: string },
+    senderName: string,
+  ): TemplateContext {
+    const appUrl = (this.config.get<string>('app.appUrl') ?? '').replace(/\/+$/, '');
+    const authors = item.authors.join(', ');
+    const identifiers = item.identifiers ?? {};
+
+    return {
+      title: item.title,
+      subtitle: item.subtitle ?? '',
+      author: authors,
+      authors,
+      series: item.series ?? '',
+      seriesName: item.series ?? '',
+      seriesIndex: null,
+      format: item.format?.toUpperCase() ?? '',
+      fileSize: formatFileSize(file.contentLength),
+      pageCount: null,
+      publisher: item.publisher ?? '',
+      publishedYear: null,
+      isbn: identifiers.isbn13 ?? identifiers.isbn ?? identifiers.isbn10 ?? '',
+      tags: '',
+      language: item.language ?? '',
+      senderName,
+      appUrl,
+      coverUrl: item.hasCover ? `${appUrl}/api/v1/catalog/ebooks/${encodeURIComponent(item.remoteId)}/cover/medium` : '',
     };
   }
 }

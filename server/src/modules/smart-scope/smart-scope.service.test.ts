@@ -71,16 +71,24 @@ function makeService() {
     executeBooksQuery: vi.fn(),
     executeBookIdsQuery: vi.fn(),
     executeJumpBucketsQuery: vi.fn(),
+    globalQuery: vi.fn(),
+  };
+  // Fork-only dependency: smart scopes can span warehouse-backed catalog items.
+  const warehouseRepo = {
+    queryUserCatalogItems: vi.fn().mockResolvedValue({ rows: [], total: 0, page: 0, limit: 50 }),
   };
 
+  // Argument order matches this fork's constructor, which inserts
+  // warehouseRepo and keeps bookService ahead of bookReadService.
   const service = new SmartScopeService(
     smartScopeRepo as never,
+    bookService as never,
     bookReadService as never,
     queryBuilder as never,
+    warehouseRepo as never,
     libraryService as never,
-    bookService as never,
   );
-  return { service, smartScopeRepo, bookReadService, queryBuilder, libraryService, bookService };
+  return { service, smartScopeRepo, bookReadService, queryBuilder, libraryService, bookService, warehouseRepo };
 }
 
 describe('SmartScopeService', () => {

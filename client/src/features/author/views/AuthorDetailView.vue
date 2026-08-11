@@ -33,6 +33,7 @@ import { useAuthorBooks } from '../composables/useAuthorBooks'
 import { useAuthorDetail } from '../composables/useAuthorDetail'
 import { useAuthorMetadataPreview } from '../composables/useAuthorMetadataPreview'
 import EntityNotFound from '@/components/EntityNotFound.vue'
+import { bookDetailRoute } from '@/features/book/lib/source-backed-book'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -174,11 +175,8 @@ function toggleMerge() {
 
 function handleBookAction(book: BookCard, action: BookActionType) {
   if (action === 'quick-view') {
-    void router.push({ name: 'book-detail', params: { bookId: book.id } })
-    return
-  }
-
-  if (action === 'delete') {
+    void router.push(bookDetailRoute(book))
+  } else if (action === 'delete') {
     promptDelete(book.id)
   }
 }

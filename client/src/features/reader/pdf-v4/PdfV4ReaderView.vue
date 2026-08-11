@@ -27,19 +27,40 @@ import { LoaderCircle } from '@lucide/vue'
 import type { PdfReaderSettings } from '@bookorbit/types'
 import { api } from '@/lib/api'
 import { useReaderProgress } from '../shared/composables/useReaderProgress'
+import type { ReaderProgressOptions } from '../shared/composables/useReaderProgress'
 import { useReadingSession } from '../shared/composables/useReadingSession'
+import type { ReadingSessionOptions } from '../shared/composables/useReadingSession'
 import { useReaderSettings } from '../shared/composables/useReaderSettings'
 import PdfReaderContent from './components/PdfReaderContent.vue'
 import { toRotation, toScrollStrategy, toSpreadMode, toZoomLevel } from './pdf-viewer-utils'
 
 const { t } = useI18n()
 
-const props = defineProps<{ bookId: number; fileId: number; peekMode?: boolean }>()
+const props = defineProps<{
+  bookId: number
+  fileId: number
+  peekMode?: boolean
+  documentUrl?: string
+  settingsStorageKey?: string
+  loadProgress?: ReaderProgressOptions['loadProgress']
+  saveProgress?: ReaderProgressOptions['saveProgress']
+  saveSession?: ReadingSessionOptions['saveSession']
+  readerRouteName?: 'reader' | 'catalog-reader' | 'library-reader'
+}>()
 const route = useRoute()
 const router = useRouter()
 const trackingEnabled = computed(() => !props.peekMode)
 
-const bookSettings = useReaderSettings(props.fileId, 'pdf')
+const bookSettings = useReaderSettings(
+  props.fileId,
+  'pdf',
+  props.settingsStorageKey
+    ? {
+        bookStorageKey: props.settingsStorageKey,
+        syncBookPreferences: false,
+      }
+    : undefined,
+)
 const effectiveSettings = computed(() => bookSettings.effective.value as PdfReaderSettings)
 const { onActivity, elapsedMinutes } = useReadingSession(
   props.fileId,
@@ -47,9 +68,16 @@ const { onActivity, elapsedMinutes } = useReadingSession(
     percentage: progress.percentage.value,
     pageNumber: progress.pageNumber.value,
   }),
-  { trackingEnabled },
+  {
+    trackingEnabled,
+    ...(props.saveSession ? { saveSession: props.saveSession } : {}),
+  },
 )
-const progress = useReaderProgress(props.bookId, props.fileId, elapsedMinutes, 0, { trackingEnabled })
+const progress = useReaderProgress(props.bookId, props.fileId, elapsedMinutes, 0, {
+  trackingEnabled,
+  ...(props.loadProgress ? { loadProgress: props.loadProgress } : {}),
+  ...(props.saveProgress ? { saveProgress: props.saveProgress } : {}),
+})
 const absolutePdfiumWasmUrl = new URL(pdfiumWasmUrl, window.location.href).href
 
 const {
@@ -160,7 +188,7 @@ function handleSettingsChange(patch: Partial<PdfReaderSettings>) {
 async function handleStartReading() {
   const query = { ...route.query }
   delete query.mode
-  await router.replace({ name: 'reader', params: route.params, query })
+  await router.replace({ name: props.readerRouteName ?? 'reader', params: route.params, query })
   applyPendingProgress()
   await progress.save()
   onActivity()
@@ -182,7 +210,7 @@ async function loadReader() {
     const [, , response] = await Promise.all([
       bookSettings.load(),
       progress.load(),
-      api(`/api/v1/books/files/${props.fileId}/serve`, { signal: abortController.signal }),
+      api(props.documentUrl ?? `/api/v1/books/files/${props.fileId}/serve`, { signal: abortController.signal }),
     ])
     if (!response.ok) throw new Error(`The PDF request failed with status ${response.status}.`)
     const buffer = await response.arrayBuffer()

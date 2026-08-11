@@ -60,6 +60,6 @@ import { OidcTokenValidatorService } from './oidc/oidc-token-validator.service';
     OidcCleanupService,
     OidcCleanupJob,
   ],
-  exports: [AuthService],
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

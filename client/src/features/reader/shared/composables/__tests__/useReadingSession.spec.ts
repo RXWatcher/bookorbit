@@ -107,4 +107,22 @@ describe('useReadingSession - elapsedMinutes', () => {
     expect(elapsedMinutes.value).toBe(0)
     expect(apiMock).not.toHaveBeenCalled()
   })
+
+  it('uses a custom session saver instead of the local file session endpoint', async () => {
+    const saveSession = vi.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined)
+    const { onActivity, endSession } = useReadingSession(0, () => ({ percentage: 42 }), { saveSession })
+
+    onActivity()
+    await vi.advanceTimersByTimeAsync(15 * 1000)
+    endSession()
+
+    expect(saveSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        durationSeconds: 15,
+        endProgress: 42,
+      }),
+      { useBeacon: false },
+    )
+    expect(apiMock).not.toHaveBeenCalledWith('/api/v1/books/files/0/sessions', expect.anything())
+  })
 })

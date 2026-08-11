@@ -1,7 +1,8 @@
-import { index, boolean, integer, pgTable, primaryKey, serial, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { index, boolean, integer, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import { books } from './books';
 import { users } from './auth';
+import { warehouseMediaTypeEnum } from './warehouse';
 
 export const collections = pgTable(
   'collections',
@@ -39,4 +40,20 @@ export const collectionBooks = pgTable(
     addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [primaryKey({ columns: [table.collectionId, table.bookId] }), index('collection_books_book_id_idx').on(table.bookId)],
+);
+
+export const collectionCatalogItems = pgTable(
+  'collection_catalog_items',
+  {
+    collectionId: integer('collection_id')
+      .notNull()
+      .references(() => collections.id, { onDelete: 'cascade' }),
+    mediaType: warehouseMediaTypeEnum('media_type').notNull(),
+    remoteId: varchar('remote_id', { length: 128 }).notNull(),
+    addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.collectionId, table.mediaType, table.remoteId] }),
+    index('collection_catalog_items_media_remote_idx').on(table.mediaType, table.remoteId),
+  ],
 );

@@ -1,16 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
-import type { Library, LibraryStats } from '@bookorbit/types'
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, type Library, type LibraryStats } from '@bookorbit/types'
 
 // --- Mocks (must be before imports that use them) ---
 
+const useLibrariesMock = vi.fn<(options?: unknown) => unknown>()
+const fetchLibrariesMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+const refreshLibrariesMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+const syncWarehouseEbooksMock = vi.fn<() => Promise<unknown>>().mockResolvedValue({})
+const syncWarehouseAudiobooksMock = vi.fn<() => Promise<unknown>>().mockResolvedValue({})
+const syncWarehouseComicsMock = vi.fn<() => Promise<unknown>>().mockResolvedValue({})
+const hasPermissionMock = vi.fn<(permission: string) => boolean>().mockReturnValue(true)
+
 vi.mock('@/features/library/composables/useLibraries', () => ({
-  useLibraries: () => ({
-    libraries: librariesRef,
-    fetchLibraries: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    refreshLibraries: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  }),
+  useLibraries: (options?: unknown) => useLibrariesMock(options),
 }))
 
 vi.mock('@/features/library/composables/useLibraryCreationRedirect', () => ({
@@ -34,7 +38,7 @@ vi.mock('@/features/scanner/composables/useScanProgress', () => ({
 }))
 
 vi.mock('@/features/auth/composables/usePermissions', () => ({
-  usePermissions: () => ({ hasPermission: vi.fn<() => boolean>().mockReturnValue(true) }),
+  usePermissions: () => ({ hasPermission: hasPermissionMock }),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -43,6 +47,12 @@ vi.mock('@/lib/api', () => ({
 
 vi.mock('vue-sonner', () => ({
   toast: { success: vi.fn<() => void>(), error: vi.fn<() => void>() },
+}))
+
+vi.mock('@/features/warehouse/api/warehouse-admin.api', () => ({
+  syncWarehouseEbooks: () => syncWarehouseEbooksMock(),
+  syncWarehouseAudiobooks: () => syncWarehouseAudiobooksMock(),
+  syncWarehouseComics: () => syncWarehouseComicsMock(),
 }))
 
 vi.mock('./SettingsPageHeader.vue', () => ({
@@ -133,6 +143,17 @@ describe('LibrariesSettings - feature badges', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     librariesRef.value = []
+    useLibrariesMock.mockReturnValue({
+      libraries: librariesRef,
+      fetchLibraries: fetchLibrariesMock,
+      refreshLibraries: refreshLibrariesMock,
+    })
+    fetchLibrariesMock.mockResolvedValue(undefined)
+    refreshLibrariesMock.mockResolvedValue(undefined)
+    syncWarehouseEbooksMock.mockResolvedValue({})
+    syncWarehouseAudiobooksMock.mockResolvedValue({})
+    syncWarehouseComicsMock.mockResolvedValue({})
+    hasPermissionMock.mockReturnValue(true)
     apiMock.mockResolvedValue({
       ok: false,
       json: async () => ({ totalBooks: 0, totalSizeBytes: 0, formatCounts: {} }),
@@ -336,6 +357,132 @@ describe('LibrariesSettings - feature badges', () => {
       await flushPromises()
       expect(wrapper.text()).toContain('File write')
       expect(wrapper.text()).toContain('File rename')
+    })
+  })
+
+  describe('source-backed library links', () => {
+    it('uses library-neutral settings copy instead of scanner-only copy', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed', folders: [] }),
+      ]
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Manage your media libraries and keep contents up to date.')
+      expect(wrapper.text()).not.toContain('trigger content scans')
+    })
+
+    it('loads source-backed library rows through the real settings library query path', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed' }),
+        makeLibrary({ id: CLOUD_AUDIO_LIBRARY_ID, name: 'Audio Library', icon: 'Headphones', sourceKind: 'source_backed' }),
+        makeLibrary({ id: CLOUD_COMIC_LIBRARY_ID, name: 'Comic Library', icon: 'PanelsTopLeft', sourceKind: 'source_backed' }),
+      ]
+
+      mountComponent()
+      await flushPromises()
+
+      expect(useLibrariesMock).toHaveBeenCalledWith({ includeSourceBacked: true })
+      expect(fetchLibrariesMock).toHaveBeenCalled()
+    })
+
+    it('uses friendly Ebook and Audio Library URLs instead of internal virtual ids', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed' }),
+        makeLibrary({ id: CLOUD_AUDIO_LIBRARY_ID, name: 'Audio Library', icon: 'Headphones', sourceKind: 'source_backed' }),
+      ]
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      const hrefs = wrapper.findAll('a').map((link) => link.attributes('href'))
+      expect(hrefs).toContain('/library/ebooks')
+      expect(hrefs).toContain('/library/audiobooks')
+      expect(hrefs).not.toContain('/library/-1')
+      expect(hrefs).not.toContain('/library/-2')
+    })
+
+    it('does not expose filesystem-only actions for source-backed libraries', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed', folders: [] }),
+      ]
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Ebook Library')
+      expect(wrapper.text()).toContain('Sync')
+      expect(wrapper.text()).not.toContain('Edit library')
+      expect(wrapper.text()).not.toContain('Refresh covers')
+      expect(wrapper.text()).not.toContain('Sync metadata to files')
+      expect(wrapper.text()).not.toContain('Delete library')
+    })
+
+    it('syncs source-backed libraries through their catalog sync actions', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed', folders: [] }),
+        makeLibrary({ id: CLOUD_AUDIO_LIBRARY_ID, name: 'Audio Library', icon: 'Headphones', sourceKind: 'source_backed', folders: [] }),
+        makeLibrary({ id: CLOUD_COMIC_LIBRARY_ID, name: 'Comic Library', icon: 'PanelsTopLeft', sourceKind: 'source_backed', folders: [] }),
+      ]
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      const buttons = wrapper.findAll('button').filter((button) => button.text() === 'Sync')
+      expect(buttons).toHaveLength(3)
+
+      await buttons[0]?.trigger('click')
+      await buttons[1]?.trigger('click')
+      await buttons[2]?.trigger('click')
+
+      expect(syncWarehouseEbooksMock).toHaveBeenCalledTimes(1)
+      expect(syncWarehouseAudiobooksMock).toHaveBeenCalledTimes(1)
+      expect(syncWarehouseComicsMock).toHaveBeenCalledTimes(1)
+      expect(apiMock).not.toHaveBeenCalledWith('/api/v1/scanner/libraries/-1/scan', expect.anything())
+      expect(apiMock).not.toHaveBeenCalledWith('/api/v1/scanner/libraries/-2/scan', expect.anything())
+      expect(apiMock).not.toHaveBeenCalledWith('/api/v1/scanner/libraries/-3/scan', expect.anything())
+    })
+
+    it('keeps source-backed sync disabled without app settings permission', async () => {
+      hasPermissionMock.mockImplementation((permission: string) => permission === 'manage_libraries')
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed', folders: [] }),
+      ]
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      const syncButton = wrapper.findAll('button').find((button) => button.text() === 'Sync')
+      expect(syncButton?.attributes('disabled')).toBeDefined()
+      await syncButton?.trigger('click')
+
+      expect(syncWarehouseEbooksMock).not.toHaveBeenCalled()
+    })
+
+    it('excludes source-backed libraries from Scan All', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: 7, name: 'Filesystem Library' }),
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed', folders: [] }),
+        makeLibrary({ id: CLOUD_AUDIO_LIBRARY_ID, name: 'Audio Library', icon: 'Headphones', sourceKind: 'source_backed', folders: [] }),
+      ]
+      apiMock.mockResolvedValue({ ok: true, json: async () => ({ totalBooks: 0, totalSizeBytes: 0, formatCounts: {} }) })
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      const scanAllButton = wrapper.findAll('button').find((button) => button.text() === 'Scan All')
+      await scanAllButton?.trigger('click')
+
+      expect(apiMock).toHaveBeenCalledWith('/api/v1/scanner/libraries/7/scan', { method: 'POST' })
+      expect(apiMock).not.toHaveBeenCalledWith('/api/v1/scanner/libraries/-1/scan', expect.anything())
+      expect(apiMock).not.toHaveBeenCalledWith('/api/v1/scanner/libraries/-2/scan', expect.anything())
+    })
+
+    it('disables Scan All when only source-backed libraries are listed', async () => {
+      librariesRef.value = [
+        makeLibrary({ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library', icon: 'BookOpen', sourceKind: 'source_backed', folders: [] }),
+        makeLibrary({ id: CLOUD_AUDIO_LIBRARY_ID, name: 'Audio Library', icon: 'Headphones', sourceKind: 'source_backed', folders: [] }),
+      ]
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      const scanAllButton = wrapper.findAll('button').find((button) => button.text() === 'Scan All')
+      expect(scanAllButton?.attributes('disabled')).toBeDefined()
     })
   })
 })

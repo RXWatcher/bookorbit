@@ -61,12 +61,80 @@ describe('useDashboardConfig', () => {
       ['continue-listening', 'Continue Listening', true, 4],
       ['want-to-read', 'Want to Read', false, 5],
       ['up-next-in-series', 'Up Next in Series', false, 6],
+      ['catalog-additions', 'Library Additions', true, 7],
+      ['catalog-discovery', 'Explore Libraries', true, 8],
     ])
 
     addScroller('smart-scope')
 
-    expect(scrollers.value).toHaveLength(7)
-    expect(DEFAULT_SCROLLERS).toHaveLength(6)
+    expect(scrollers.value).toHaveLength(8)
+    expect(DEFAULT_SCROLLERS).toHaveLength(8)
+  })
+
+  it('supports catalog additions as a configurable dashboard shelf', async () => {
+    const { DEFAULT_SCROLLERS, SCROLLER_LABELS, useDashboardConfig } = await import('../useDashboardConfig')
+    const { scrollers, saveScrollers } = useDashboardConfig()
+
+    expect(DEFAULT_SCROLLERS).toContainEqual({
+      id: '7',
+      type: 'catalog-additions',
+      label: 'Library Additions',
+      enabled: true,
+      order: 7,
+      limit: 20,
+    })
+    expect((SCROLLER_LABELS as Record<string, string>)['catalog-additions']).toBe('Library Additions')
+    expect(DEFAULT_SCROLLERS).toContainEqual({
+      id: '8',
+      type: 'catalog-discovery',
+      label: 'Explore Libraries',
+      enabled: true,
+      order: 8,
+      limit: 20,
+    })
+    expect((SCROLLER_LABELS as Record<string, string>)['catalog-discovery']).toBe('Explore Libraries')
+
+    saveScrollers([
+      {
+        id: 'catalog',
+        type: 'catalog-additions',
+        label: '   ',
+        enabled: true,
+        order: 1,
+        limit: 12,
+      },
+    ] as ScrollerConfig[])
+
+    expect(scrollers.value).toEqual([
+      {
+        id: 'catalog',
+        type: 'catalog-additions',
+        label: 'Library Additions',
+        enabled: true,
+        order: 1,
+        limit: 12,
+      },
+    ])
+  })
+
+  it('upgrades legacy default catalog shelf labels to native library labels without changing custom labels', async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: '5', type: 'catalog-additions', label: 'Catalog Additions', enabled: true, order: 1, limit: 20 },
+        { id: '6', type: 'catalog-discovery', label: 'Explore Catalog', enabled: true, order: 2, limit: 20 },
+        { id: '7', type: 'catalog-additions', label: 'Wishlist Drops', enabled: true, order: 3, limit: 20 },
+      ]),
+    )
+
+    const { useDashboardConfig } = await import('../useDashboardConfig')
+    const { scrollers } = useDashboardConfig()
+
+    expect(scrollers.value).toEqual([
+      { id: '5', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 1, limit: 20 },
+      { id: '6', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 2, limit: 20 },
+      { id: '7', type: 'catalog-additions', label: 'Wishlist Drops', enabled: true, order: 3, limit: 20 },
+    ])
   })
 
   it('prunes shelves that reference deleted smart scopes', async () => {

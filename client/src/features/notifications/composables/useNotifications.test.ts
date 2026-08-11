@@ -92,7 +92,8 @@ describe('useNotifications', () => {
       subscribe()
 
       const notificationNewHandler = mockSocket.on.mock.calls.find(([event]: unknown[]) => event === 'notification:new')?.[1] as
-        ((item: NotificationItem) => void) | undefined
+        | ((item: NotificationItem) => void)
+        | undefined
 
       expect(notificationNewHandler).toBeDefined()
 

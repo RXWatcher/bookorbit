@@ -32,6 +32,19 @@ export function useInfiniteScrollSentinel(opts: UseInfiniteScrollSentinelOptions
     window.addEventListener('resize', checkSentinel, { passive: true })
   })
 
+  watch(
+    sentinel,
+    (element, previousElement) => {
+      if (!observer) return
+      if (previousElement) observer.unobserve(previousElement)
+      if (element) {
+        observer.observe(element)
+        checkSentinel()
+      }
+    },
+    { flush: 'post' },
+  )
+
   onUnmounted(() => {
     observer?.disconnect()
     window.removeEventListener('resize', checkSentinel)

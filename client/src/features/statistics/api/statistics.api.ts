@@ -1,4 +1,5 @@
 import { api } from '@/lib/api'
+import { libraryRouteQueryValueForId } from '@/features/library/lib/library-route'
 import type {
   AcquisitionLagPoint,
   BooksAddedDataPoint,
@@ -58,7 +59,10 @@ function coalesceRequest<T>(key: string, request: () => Promise<T>): Promise<T> 
 
 function buildParams(filters: StatisticsFilterConfig, extra?: Record<string, string>): string {
   const params = new URLSearchParams()
-  filters.libraryIds.forEach((id) => params.append('libraryIds', String(id)))
+  filters.libraryIds.forEach((id) => {
+    const value = libraryRouteQueryValueForId(id)
+    if (value) params.append('libraryIds', value)
+  })
   if (extra) Object.entries(extra).forEach(([k, v]) => params.set(k, v))
   const str = params.toString()
   return str ? `?${str}` : ''

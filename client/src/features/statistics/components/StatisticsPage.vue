@@ -35,7 +35,7 @@ const {
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const { libraries, fetchLibraries } = useLibraries()
+const { libraries, fetchLibraries } = useLibraries({ includeSourceBacked: true })
 const configOpen = ref(false)
 
 type StatisticsTab = 'library' | 'user'

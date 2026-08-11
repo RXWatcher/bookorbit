@@ -1,10 +1,10 @@
 import { Transform, Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { transformLibraryIdsQueryValue } from '../../../common/utils/library-query-id-transform';
 
 export class UserDailyReadingQueryDto {
   @IsOptional()
-  @Transform(({ value }) => (Array.isArray(value) ? value : value != null ? [value] : []))
-  @Type(() => Number)
+  @Transform(({ value }) => transformLibraryIdsQueryValue(value))
   @IsArray()
   @IsInt({ each: true })
   libraryIds?: number[];

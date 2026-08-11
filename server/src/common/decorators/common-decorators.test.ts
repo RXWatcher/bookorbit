@@ -8,6 +8,7 @@ import { ForbidPermission, FORBIDDEN_PERMISSION_KEY } from './forbid-permission.
 import { Public, IS_PUBLIC_KEY } from './public.decorator';
 import { RequireLibraryAccess, LIBRARY_ACCESS_KEY } from './require-library-access.decorator';
 import { RequirePermission, PERMISSION_KEY } from './require-permission.decorator';
+import { RequireSuperuser, SUPERUSER_KEY } from './require-superuser.decorator';
 
 describe('common decorators', () => {
   it('stores metadata for auth, permission, library access, and audit options', () => {
@@ -27,6 +28,9 @@ describe('common decorators', () => {
       @RequirePermission(Permission.ManageUsers)
       withPermission() {}
 
+      @RequireSuperuser()
+      withSuperuser() {}
+
       @ForbidPermission(Permission.DemoRestricted, 'Demo-restricted account cannot perform bulk edits')
       withoutPermission() {}
 
@@ -40,6 +44,7 @@ describe('common decorators', () => {
     expect(Reflect.getMetadata(IS_PUBLIC_KEY, DecoratedController.prototype.open)).toBe(true);
     expect(Reflect.getMetadata(ALLOW_DEFAULT_PASSWORD_KEY, DecoratedController.prototype.allowDefaultPassword)).toBe(true);
     expect(Reflect.getMetadata(PERMISSION_KEY, DecoratedController.prototype.withPermission)).toBe(Permission.ManageUsers);
+    expect(Reflect.getMetadata(SUPERUSER_KEY, DecoratedController.prototype.withSuperuser)).toBe(true);
     expect(Reflect.getMetadata(FORBIDDEN_PERMISSION_KEY, DecoratedController.prototype.withoutPermission)).toEqual({
       permission: Permission.DemoRestricted,
       message: 'Demo-restricted account cannot perform bulk edits',

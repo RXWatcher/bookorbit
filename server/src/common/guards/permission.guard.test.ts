@@ -4,6 +4,7 @@ import { Permission } from '@bookorbit/types';
 import { FORBIDDEN_PERMISSION_KEY } from '../decorators/forbid-permission.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { PERMISSION_KEY } from '../decorators/require-permission.decorator';
+import { SUPERUSER_KEY } from '../decorators/require-superuser.decorator';
 import type { RequestUser } from '../types/request-user';
 import { PermissionGuard } from './permission.guard';
 import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
@@ -61,6 +62,42 @@ describe('PermissionGuard', () => {
     expect(guard.canActivate(makeContext(makeUser()))).toBe(true);
     expect(permissionService.userHas).not.toHaveBeenCalled();
     expect(permissionService.userHasExplicit).not.toHaveBeenCalled();
+  });
+
+  it('rejects superuser-only routes for non-admin users even when they have app settings permission', () => {
+    const reflector = {
+      getAllAndOverride: vi.fn((key: string) => {
+        if (key === IS_PUBLIC_KEY) return false;
+        if (key === SUPERUSER_KEY) return true;
+        if (key === PERMISSION_KEY) return Permission.ManageAppSettings;
+        return undefined;
+      }),
+    };
+    const permissionService = {
+      userHas: vi.fn().mockReturnValue(true),
+      userHasExplicit: vi.fn().mockReturnValue(false),
+    };
+    const guard = new PermissionGuard(reflector as never, permissionService as never);
+
+    expect(() => guard.canActivate(makeContext(makeUser({ permissions: [Permission.ManageAppSettings] })))).toThrow(ForbiddenException);
+    expect(permissionService.userHas).not.toHaveBeenCalled();
+  });
+
+  it('allows superuser-only routes for admins', () => {
+    const reflector = {
+      getAllAndOverride: vi.fn((key: string) => {
+        if (key === IS_PUBLIC_KEY) return false;
+        if (key === SUPERUSER_KEY) return true;
+        return undefined;
+      }),
+    };
+    const permissionService = {
+      userHas: vi.fn(),
+      userHasExplicit: vi.fn().mockReturnValue(false),
+    };
+    const guard = new PermissionGuard(reflector as never, permissionService as never);
+
+    expect(guard.canActivate(makeContext(makeUser({ isSuperuser: true })))).toBe(true);
   });
 
   it('throws ForbiddenException when forbidden marker permission is present', () => {

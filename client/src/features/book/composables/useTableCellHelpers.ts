@@ -2,6 +2,7 @@ import type { BookCard } from '@bookorbit/types'
 import { isAudioFormat } from '@bookorbit/types'
 import { COLUMN_DEF_MAP, isCustomColumnId, parseCustomFieldId, type ColumnDef } from './tableColumnSchema'
 import type { useTableLocks } from './useTableLocks'
+import { isSourceBackedBook } from '@/features/book/lib/source-backed-book'
 
 export function useTableCellHelpers(
   locks: ReturnType<typeof useTableLocks>,
@@ -26,6 +27,7 @@ export function useTableCellHelpers(
 
   function isCellReadOnly(book: BookCard, col: { id: string; isEditable: boolean }): boolean {
     if (!col.isEditable) return true
+    if (isSourceBackedBook(book)) return true
     if (col.id === 'narrators' && !isBookAudio(book)) return true
     if (isCellLocked(book, col.id)) return true
     // Custom fields: block editing when the book has no entry for this field.

@@ -2,14 +2,18 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { Observable } from 'rxjs';
 
 import type {
+  AuthorBooksPage,
   AuthorDetail,
+  AuthorLibraryItem,
   AuthorMetadataCandidate,
   AuthorMetadataProviderInfo,
   AuthorSummary,
   AuthorsPage,
-  BooksPage,
+  ContentFilterRules,
   MergeAuthorsResult,
+  WarehouseMediaType,
 } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 import { assembleBookCards } from '../book/utils/assemble-book-cards';
 import { MAX_OFFSET_ROWS, isOffsetWithinLimit } from '../../common/constants/pagination.constants';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
@@ -32,6 +36,22 @@ import { LookupAuthorMetadataDto } from './dto/lookup-author-metadata.dto';
 import { MergeAuthorsDto } from './dto/merge-authors.dto';
 import { UpdateAuthorDto } from './dto/update-author.dto';
 import { AuthorMetadataFetchService } from './metadata/author-metadata-fetch.service';
+import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service';
+
+type AuthorSummarySourceRow = {
+  id: number;
+  name: string;
+  sortName: string | null;
+  description: string | null;
+  bookCount: number;
+  lastAddedAt: Date | string | null;
+};
+
+type ResolvedReadableLibraryScope = {
+  localLibraryIds: number[];
+  includeWarehouse: boolean;
+  warehouseMediaType?: WarehouseMediaType;
+};
 
 @Injectable()
 export class AuthorsService {
@@ -49,6 +69,7 @@ export class AuthorsService {
     private readonly authorImageStorage: AuthorImageStorageService,
     private readonly enrichmentExecutor: AuthorEnrichmentExecutorService,
     private readonly enrichmentOrchestrator: AuthorEnrichmentOrchestratorService,
+    private readonly warehouseCatalogService: WarehouseCatalogService,
     private readonly metadataScoreService: MetadataScoreService,
   ) {}
 
@@ -59,27 +80,91 @@ export class AuthorsService {
   }
 
   async findAll(user: RequestUser, dto: ListAuthorsDto): Promise<AuthorsPage> {
-    this.assertPaginationWindow(dto.page ?? 0, dto.size ?? 50);
-    const libraryIds = await this.resolveLibraryIds(user, dto.libraryId);
-    if (libraryIds.length === 0) {
-      return { items: [], total: 0, page: dto.page ?? 0, size: dto.size ?? 50 };
+    const page = dto.page ?? 0;
+    const size = dto.size ?? 50;
+    this.assertPaginationWindow(page, size);
+    const libraryScope = this.resolveLibraryScope(dto.libraryId);
+    const readableScope = await this.resolveReadableLibraryScope(user, libraryScope);
+    const libraryIds = readableScope.localLibraryIds;
+    const includeWarehouseLibraries = readableScope.includeWarehouse;
+    if (libraryIds.length === 0 && !includeWarehouseLibraries) {
+      return { items: [], total: 0, page, size };
     }
 
-    const page = await this.authorsRepo.findPage({
+    const contentFilters = user.isSuperuser ? undefined : user.contentFilters;
+
+    if (includeWarehouseLibraries) {
+      if (libraryIds.length === 0) {
+        if (dto.hasPhoto === true) {
+          return { items: [], total: 0, page, size };
+        }
+
+        const warehousePage = await this.warehouseCatalogService.listAuthorSummaryPage({
+          userId: user.id,
+          q: dto.q,
+          contentFilters,
+          mediaType: readableScope.warehouseMediaType,
+          page,
+          size,
+          sort: dto.sort ?? 'name',
+          order: dto.order ?? 'asc',
+          minBookCount: dto.minBookCount,
+        });
+
+        return {
+          items: await this.withAuthorImageUrls(warehousePage.rows.map((item) => this.mapAuthorSummary(item))),
+          total: warehousePage.total,
+          page,
+          size,
+        };
+      }
+
+      const [localRows, warehouseRows] = await Promise.all([
+        libraryIds.length > 0
+          ? this.authorsRepo.findSummaries({
+              q: dto.q,
+              libraryIds,
+              hasPhoto: dto.hasPhoto,
+              contentFilters,
+            })
+          : [],
+        dto.hasPhoto === true
+          ? []
+          : this.warehouseCatalogService.listAuthorSummaries({
+              userId: user.id,
+              q: dto.q,
+              contentFilters,
+              mediaType: readableScope.warehouseMediaType,
+            }),
+      ]);
+      const merged = this.mergeAuthorSummaries([...localRows, ...warehouseRows])
+        .filter((row) => dto.minBookCount === undefined || row.bookCount >= dto.minBookCount)
+        .sort((a, b) => this.compareAuthorRows(a, b, dto.sort ?? 'name', dto.order ?? 'asc'));
+      const items = merged.slice(page * size, page * size + size).map((item) => this.mapAuthorSummary(item));
+
+      return {
+        items: await this.withAuthorImageUrls(items),
+        total: merged.length,
+        page,
+        size,
+      };
+    }
+
+    const authorPage = await this.authorsRepo.findPage({
       q: dto.q,
-      page: dto.page ?? 0,
-      size: dto.size ?? 50,
+      page,
+      size,
       sort: dto.sort ?? 'name',
       order: dto.order ?? 'asc',
       libraryIds,
       hasPhoto: dto.hasPhoto,
       minBookCount: dto.minBookCount,
-      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
+      contentFilters,
     });
 
-    const mapped = page.items.map((item) => this.mapAuthorSummary(item));
+    const mapped = authorPage.items.map((item) => this.mapAuthorSummary(item));
     return {
-      ...page,
+      ...authorPage,
       items: await this.withAuthorImageUrls(mapped),
     };
   }
@@ -92,51 +177,123 @@ export class AuthorsService {
   }
 
   async findOne(user: RequestUser, authorId: number): Promise<AuthorDetail> {
-    const libraryIds = await this.resolveLibraryIds(user);
-    const row = await this.authorsRepo.findById(authorId, libraryIds, user.isSuperuser ? undefined : user.contentFilters);
+    if (this.isWarehouseAuthorId(authorId)) {
+      const readableScope = await this.resolveReadableLibraryScope(user, this.resolveLibraryScope());
+      if (!readableScope.includeWarehouse) throw new NotFoundException('Author not found');
+      const row = await this.warehouseCatalogService.findAuthorSummaryById(authorId, user.id, user.isSuperuser ? undefined : user.contentFilters);
+      if (!row) throw new NotFoundException('Author not found');
+      return this.withAuthorImageUrl(this.mapAuthorSummary(row) as AuthorDetail, 'full');
+    }
+
+    const readableScope = await this.resolveReadableLibraryScope(user, this.resolveLibraryScope());
+    const contentFilters = user.isSuperuser ? undefined : user.contentFilters;
+    const row = await this.authorsRepo.findById(authorId, readableScope.localLibraryIds, contentFilters);
     if (!row) throw new NotFoundException('Author not found');
-    return this.withAuthorImageUrl(this.mapAuthorSummary(row) as AuthorDetail, 'full');
+    const mergedRow = await this.mergeSourceBackedAuthorSummaryIntoLocalDetail(user, row, readableScope, contentFilters);
+    return this.withAuthorImageUrl(this.mapAuthorSummary(mergedRow) as AuthorDetail, 'full');
   }
 
-  async findBooks(user: RequestUser, authorId: number, dto: ListAuthorBooksDto): Promise<BooksPage> {
-    this.assertPaginationWindow(dto.page ?? 0, dto.size ?? 50);
-    const libraryIds = await this.resolveLibraryIds(user, dto.libraryId);
-    if (libraryIds.length === 0) {
-      return { items: [], total: 0, page: dto.page ?? 0, size: dto.size ?? 50 };
+  async findBooks(user: RequestUser, authorId: number, dto: ListAuthorBooksDto): Promise<AuthorBooksPage> {
+    const page = dto.page ?? 0;
+    const size = dto.size ?? 50;
+    const pageStart = page * size;
+    const pageEnd = pageStart + size;
+    const windowSize = pageEnd;
+    const emptyBookPage: { bookIds: number[]; total: number; page: number; size: number } = { bookIds: [], total: 0, page: 0, size: windowSize };
+    this.assertPaginationWindow(page, size);
+
+    const libraryScope = this.resolveLibraryScope(dto.libraryId);
+    const readableScope = await this.resolveReadableLibraryScope(user, libraryScope);
+    const contentFilters = user.isSuperuser ? undefined : user.contentFilters;
+    if (this.isWarehouseAuthorId(authorId)) {
+      const row = await this.warehouseCatalogService.findAuthorSummaryById(authorId, user.id, contentFilters);
+      if (!row) throw new NotFoundException('Author not found');
+      if (!readableScope.includeWarehouse) {
+        return { items: [], total: 0, page, size };
+      }
+      const warehousePage = await this.warehouseCatalogService.listAuthorBooks({
+        authorId,
+        userId: user.id,
+        page: 0,
+        size: windowSize,
+        sort: dto.sort ?? 'addedAt',
+        order: dto.order ?? 'desc',
+        contentFilters,
+        mediaType: readableScope.warehouseMediaType,
+      });
+      return {
+        items: warehousePage.items.slice(pageStart, pageEnd),
+        total: warehousePage.total,
+        page,
+        size,
+      };
     }
 
-    const author = await this.authorsRepo.findById(authorId, libraryIds, user.isSuperuser ? undefined : user.contentFilters);
+    const visibleLibraryIds = await this.resolveLibraryIds(user);
+    const libraryIds = readableScope.localLibraryIds;
+    if (visibleLibraryIds.length === 0 && !readableScope.includeWarehouse) {
+      return { items: [], total: 0, page, size };
+    }
+    if (libraryIds.length === 0 && !libraryScope.includeWarehouse) {
+      return { items: [], total: 0, page, size };
+    }
+
+    const author = await this.authorsRepo.findById(authorId, libraryIds.length > 0 ? libraryIds : visibleLibraryIds, contentFilters);
     if (!author) throw new NotFoundException('Author not found');
 
-    const page = await this.authorsRepo.findBookIdsPage({
-      authorId,
-      page: dto.page ?? 0,
-      size: dto.size ?? 50,
-      sort: dto.sort ?? 'addedAt',
-      order: dto.order ?? 'desc',
-      libraryIds,
-      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
-    });
+    const [localPage, warehousePage] = await Promise.all([
+      libraryIds.length > 0
+        ? this.authorsRepo.findBookIdsPage({
+            authorId,
+            page: 0,
+            size: windowSize,
+            sort: dto.sort ?? 'addedAt',
+            order: dto.order ?? 'desc',
+            libraryIds,
+            contentFilters,
+          })
+        : emptyBookPage,
+      readableScope.includeWarehouse
+        ? this.warehouseCatalogService.listAuthorBooks({
+            authorName: author.name,
+            userId: user.id,
+            page: 0,
+            size: windowSize,
+            sort: dto.sort ?? 'addedAt',
+            order: dto.order ?? 'desc',
+            contentFilters,
+            mediaType: readableScope.warehouseMediaType,
+          })
+        : Promise.resolve({ items: [] as AuthorLibraryItem[], total: 0 }),
+    ]);
 
-    if (page.bookIds.length === 0) {
-      return { items: [], total: page.total, page: page.page, size: page.size };
+    let localItems: AuthorLibraryItem[] = [];
+    if (localPage.bookIds.length > 0) {
+      const orderMap = new Map(localPage.bookIds.map((id, index) => [id, index]));
+      const cardData = await this.bookReadService.findCardsByBookIds(localPage.bookIds, user.id);
+
+      localItems = assembleBookCards(
+        cardData.rows,
+        cardData.authorRows,
+        cardData.fileRows,
+        cardData.genreRows,
+        cardData.progressRows,
+        cardData.statusRows,
+        cardData.narratorRows,
+        cardData.tagRows,
+        cardData.seriesMembershipRows,
+      ).sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
     }
 
-    const orderMap = new Map(page.bookIds.map((id, index) => [id, index]));
-    const cardData = await this.bookReadService.findCardsByBookIds(page.bookIds, user.id);
-    const items = assembleBookCards(
-      cardData.rows,
-      cardData.authorRows,
-      cardData.fileRows,
-      cardData.genreRows,
-      cardData.progressRows,
-      cardData.statusRows,
-      cardData.narratorRows,
-      cardData.tagRows,
-      cardData.seriesMembershipRows,
-    ).sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+    if (warehousePage.items.length === 0) {
+      return { items: localItems.slice(pageStart, pageEnd), total: localPage.total, page, size };
+    }
+    if (localItems.length === 0) {
+      return { items: warehousePage.items.slice(pageStart, pageEnd), total: warehousePage.total, page, size };
+    }
 
-    return { items, total: page.total, page: page.page, size: page.size };
+    const allItems = this.sortAuthorLibraryItems([...localItems, ...warehousePage.items], dto.sort ?? 'addedAt', dto.order ?? 'desc');
+    return { items: allItems.slice(pageStart, pageEnd), total: localPage.total + warehousePage.total, page, size };
   }
 
   listMetadataProviders(): AuthorMetadataProviderInfo[] {
@@ -523,6 +680,64 @@ export class AuthorsService {
     return accessibleIds.includes(scopedLibraryId) ? [scopedLibraryId] : [];
   }
 
+  private async resolveReadableLibraryScope(
+    user: RequestUser,
+    libraryScope: {
+      localLibraryId?: number;
+      includeLocal: boolean;
+      includeWarehouse: boolean;
+      mediaType?: WarehouseMediaType;
+    },
+  ): Promise<ResolvedReadableLibraryScope> {
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    const accessibleIds = libraries.map((library) => library.id);
+    const localLibraryIds = libraryScope.includeLocal
+      ? libraryScope.localLibraryId
+        ? accessibleIds.includes(libraryScope.localLibraryId)
+          ? [libraryScope.localLibraryId]
+          : []
+        : accessibleIds.filter((id) => id > 0)
+      : [];
+
+    const warehouseMediaTypes: WarehouseMediaType[] = [];
+    if (libraryScope.includeWarehouse) {
+      if (libraryScope.mediaType) {
+        const requiredLibraryId = sourceBackedLibraryIdForMediaType(libraryScope.mediaType);
+        if (accessibleIds.includes(requiredLibraryId)) warehouseMediaTypes.push(libraryScope.mediaType);
+      } else {
+        if (accessibleIds.includes(CLOUD_EBOOK_LIBRARY_ID)) warehouseMediaTypes.push('ebook');
+        if (accessibleIds.includes(CLOUD_AUDIO_LIBRARY_ID)) warehouseMediaTypes.push('audiobook');
+        if (accessibleIds.includes(CLOUD_COMIC_LIBRARY_ID)) warehouseMediaTypes.push('comic');
+      }
+    }
+
+    return {
+      localLibraryIds,
+      includeWarehouse: warehouseMediaTypes.length > 0,
+      warehouseMediaType: warehouseMediaTypes.length === 1 ? warehouseMediaTypes[0] : undefined,
+    };
+  }
+
+  private resolveLibraryScope(libraryId?: number): {
+    localLibraryId?: number;
+    includeLocal: boolean;
+    includeWarehouse: boolean;
+    mediaType?: WarehouseMediaType;
+  } {
+    switch (libraryId) {
+      case undefined:
+        return { includeLocal: true, includeWarehouse: true };
+      case CLOUD_EBOOK_LIBRARY_ID:
+        return { includeLocal: false, includeWarehouse: true, mediaType: 'ebook' };
+      case CLOUD_AUDIO_LIBRARY_ID:
+        return { includeLocal: false, includeWarehouse: true, mediaType: 'audiobook' };
+      case CLOUD_COMIC_LIBRARY_ID:
+        return { includeLocal: false, includeWarehouse: true, mediaType: 'comic' };
+      default:
+        return { includeLocal: true, includeWarehouse: false, localLibraryId: libraryId };
+    }
+  }
+
   private async assertAuthorReadable(user: RequestUser, authorIds: number[]) {
     const libraryIds = await this.resolveLibraryIds(user);
     const visible = await this.authorsRepo.findVisibleAuthorIds(authorIds, libraryIds);
@@ -550,21 +765,14 @@ export class AuthorsService {
     return user.isSuperuser;
   }
 
-  private mapAuthorSummary(row: {
-    id: number;
-    name: string;
-    sortName: string | null;
-    description: string | null;
-    bookCount: number;
-    lastAddedAt: Date | null;
-  }): AuthorSummary {
+  private mapAuthorSummary(row: AuthorSummarySourceRow): AuthorSummary {
     return {
       id: row.id,
       name: row.name,
       sortName: row.sortName,
       description: row.description,
       bookCount: row.bookCount,
-      lastAddedAt: row.lastAddedAt ? row.lastAddedAt.toISOString() : null,
+      lastAddedAt: this.serializeLastAddedAt(row.lastAddedAt),
     };
   }
 
@@ -573,6 +781,10 @@ export class AuthorsService {
   }
 
   private async withAuthorImageUrl<T extends AuthorSummary>(item: T, size: 'thumbnail' | 'full' = 'thumbnail'): Promise<T> {
+    if (this.isWarehouseAuthorId(item.id)) {
+      return { ...item, imageUrl: null };
+    }
+
     let imageUrl: string | null;
     if (size === 'full') {
       imageUrl = await this.authorImageStorage.getImageUrlIfExists(item.id);
@@ -587,6 +799,153 @@ export class AuthorsService {
       ...item,
       imageUrl,
     };
+  }
+
+  private async mergeSourceBackedAuthorSummaryIntoLocalDetail(
+    user: RequestUser,
+    row: AuthorSummarySourceRow,
+    readableScope: ResolvedReadableLibraryScope,
+    contentFilters: ContentFilterRules | undefined,
+  ): Promise<AuthorSummarySourceRow> {
+    if (!readableScope.includeWarehouse) return row;
+
+    const warehouseRows = await this.warehouseCatalogService.listAuthorSummaries({
+      userId: user.id,
+      q: undefined,
+      contentFilters,
+      mediaType: readableScope.warehouseMediaType,
+    });
+    const localKey = this.normalizeAuthorName(row.name);
+    const matches = warehouseRows.filter((warehouseRow) => this.normalizeAuthorName(warehouseRow.name) === localKey);
+    if (matches.length === 0) return row;
+
+    return this.mergeAuthorSummaries([row, ...matches]).find((mergedRow) => mergedRow.id === row.id) ?? row;
+  }
+
+  private mergeAuthorSummaries(rows: AuthorSummarySourceRow[]): AuthorSummarySourceRow[] {
+    const merged = new Map<string, AuthorSummarySourceRow>();
+
+    for (const row of rows) {
+      const key = this.normalizeAuthorName(row.name);
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, { ...row });
+        continue;
+      }
+
+      existing.bookCount += row.bookCount;
+      existing.lastAddedAt = this.maxLastAddedAt(existing.lastAddedAt, row.lastAddedAt);
+      if (existing.id < 0 && row.id > 0) {
+        existing.id = row.id;
+        existing.sortName = row.sortName;
+        existing.description = row.description;
+      }
+    }
+
+    return [...merged.values()];
+  }
+
+  private compareAuthorRows(
+    left: AuthorSummarySourceRow,
+    right: AuthorSummarySourceRow,
+    sort: ListAuthorsDto['sort'],
+    order: ListAuthorsDto['order'],
+  ): number {
+    const direction = order === 'desc' ? -1 : 1;
+    const byName = this.compareText(left.name, right.name);
+    let result = byName;
+
+    switch (sort) {
+      case 'bookCount':
+        result = left.bookCount - right.bookCount;
+        break;
+      case 'lastAddedAt':
+        result = this.timestamp(left.lastAddedAt) - this.timestamp(right.lastAddedAt);
+        break;
+      case 'sortName':
+        result = this.compareText(left.sortName ?? left.name, right.sortName ?? right.name);
+        break;
+      case 'lastEnrichedAt':
+      case 'name':
+      default:
+        break;
+    }
+
+    return result === 0 ? byName || left.id - right.id : result * direction;
+  }
+
+  private compareText(left: string, right: string): number {
+    return left.localeCompare(right, undefined, { sensitivity: 'base' });
+  }
+
+  private sortAuthorLibraryItems(
+    items: AuthorLibraryItem[],
+    sort: ListAuthorBooksDto['sort'],
+    order: ListAuthorBooksDto['order'],
+  ): AuthorLibraryItem[] {
+    const direction = order === 'asc' ? 1 : -1;
+    return [...items].sort((left, right) => {
+      const titleCompare = this.compareText(this.itemTitle(left), this.itemTitle(right));
+      let result = titleCompare;
+
+      switch (sort) {
+        case 'addedAt':
+          result = this.timestamp(this.itemAddedAt(left)) - this.timestamp(this.itemAddedAt(right));
+          break;
+        case 'publishedYear':
+          result = this.itemPublishedYear(left) - this.itemPublishedYear(right);
+          break;
+        case 'title':
+        default:
+          break;
+      }
+
+      return result === 0 ? titleCompare : result * direction;
+    });
+  }
+
+  private itemTitle(item: AuthorLibraryItem): string {
+    return item.title ?? '';
+  }
+
+  private itemAddedAt(item: AuthorLibraryItem): string | null {
+    return item.addedAt;
+  }
+
+  private itemPublishedYear(item: AuthorLibraryItem): number {
+    return item.publishedYear ?? 0;
+  }
+
+  private maxLastAddedAt(left: Date | string | null, right: Date | string | null): Date | string | null {
+    return this.timestamp(left) >= this.timestamp(right) ? left : right;
+  }
+
+  private serializeLastAddedAt(value: Date | string | null): string | null {
+    if (!value) return null;
+    if (value instanceof Date) return value.toISOString();
+    return value;
+  }
+
+  private timestamp(value: Date | string | null): number {
+    if (!value) return 0;
+    const date = value instanceof Date ? value : new Date(value);
+    const time = date.getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+
+  private normalizeAuthorName(name: string): string {
+    const trimmed = name.trim();
+    if (!trimmed) return '';
+    const commaIndex = trimmed.indexOf(',');
+    if (commaIndex <= 0) return trimmed.toLocaleLowerCase();
+
+    const family = trimmed.slice(0, commaIndex).trim();
+    const given = trimmed.slice(commaIndex + 1).trim();
+    return given && family ? `${given} ${family}`.toLocaleLowerCase() : trimmed.toLocaleLowerCase();
+  }
+
+  private isWarehouseAuthorId(authorId: number): boolean {
+    return authorId < 0;
   }
 
   private async refreshEnrichmentInternal(
@@ -638,4 +997,10 @@ export class AuthorsService {
       msg.includes('invalid')
     );
   }
+}
+
+function sourceBackedLibraryIdForMediaType(mediaType: WarehouseMediaType): number {
+  if (mediaType === 'audiobook') return CLOUD_AUDIO_LIBRARY_ID;
+  if (mediaType === 'comic') return CLOUD_COMIC_LIBRARY_ID;
+  return CLOUD_EBOOK_LIBRARY_ID;
 }

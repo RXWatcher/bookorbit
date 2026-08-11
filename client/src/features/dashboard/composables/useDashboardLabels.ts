@@ -31,6 +31,13 @@ const SHELF_NAME_KEYS: Record<ScrollerType, ShelfNameKey> = {
   'up-next-in-series': 'upNextInSeries',
   random: 'random',
   'smart-scope': 'smartScope',
+  // SCROLLER_TYPE gained these two; this map did not, so the lookup returned
+  // undefined and the shelves rendered the literal key
+  // "dashboard.settings.shelfNames.undefined". The Record<ScrollerType, …>
+  // above should have caught it at compile time — the image build runs
+  // vite build without vue-tsc, so nothing did.
+  'catalog-additions': 'catalogAdditions',
+  'catalog-discovery': 'catalogDiscovery',
 }
 
 export function useDashboardLabels() {

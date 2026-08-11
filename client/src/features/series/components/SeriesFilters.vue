@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { libraryRouteQueryValueForId, parseLibraryFilterRouteId } from '@/features/library/lib/library-route'
 import { useI18n } from 'vue-i18n'
 import type { CompletionStatus } from '../types/series'
 
@@ -30,7 +31,7 @@ function onClose() {
 
 function onLibraryChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
-  emit('update:libraryId', value ? Number(value) : null)
+  emit('update:libraryId', parseLibraryFilterRouteId(value))
 }
 
 function onCompletionChange(event: Event) {
@@ -63,12 +64,12 @@ function onCompletionChange(event: Event) {
 
     <div class="flex flex-wrap items-center gap-2">
       <select
-        :value="libraryId ?? ''"
+        :value="libraryRouteQueryValueForId(libraryId) ?? ''"
         class="h-9 rounded-md border border-input bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary/60"
         @change="onLibraryChange"
       >
         <option value="">{{ t('series.filters.allLibraries') }}</option>
-        <option v-for="library in libraries" :key="library.id" :value="library.id">{{ library.name }}</option>
+        <option v-for="library in libraries" :key="library.id" :value="libraryRouteQueryValueForId(library.id)">{{ library.name }}</option>
       </select>
 
       <select

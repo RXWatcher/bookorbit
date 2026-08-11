@@ -287,7 +287,6 @@ describe('VirtualBookGrid', () => {
       scrollParent.dispatchEvent(new Event('scroll'))
 
       expect(wrapper.emitted('first-visible-index')).toEqual([[0]])
-
       ;(wrapper.vm as unknown as { scrollToIndex: (index: number) => void }).scrollToIndex(3)
       scrollParent.dispatchEvent(new Event('scroll'))
 

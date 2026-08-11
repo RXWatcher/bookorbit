@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/i18n/formatters'
 import { formatBytes } from '@/lib/formatting'
@@ -23,12 +23,20 @@ import {
 import SettingsPageHeader from './SettingsPageHeader.vue'
 import { toast } from 'vue-sonner'
 import { api } from '@/lib/api'
-import type { Library as LibraryType, LibraryStats } from '@bookorbit/types'
+import {
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
+  type Library as LibraryType,
+  type LibraryStats,
+} from '@bookorbit/types'
 import LibraryCreatorModal from '@/features/library/components/LibraryCreatorModal.vue'
 import { useLibraries } from '@/features/library/composables/useLibraries'
 import { useLibraryCreationRedirect } from '@/features/library/composables/useLibraryCreationRedirect'
 import { useLibraryFileSync } from '@/features/library/composables/useLibraryFileSync'
+import { libraryRouteForId } from '@/features/library/lib/library-route'
 import { useScanProgress, getSocket } from '@/features/scanner/composables/useScanProgress'
+import { syncWarehouseAudiobooks, syncWarehouseComics, syncWarehouseEbooks } from '@/features/warehouse/api/warehouse-admin.api'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { parseCronToHuman } from '@/features/library/utils/cron'
@@ -44,9 +52,11 @@ if (!hasPermission('manage_libraries')) {
   router.replace({ name: 'settings-appearance' })
 }
 
-const { libraries, fetchLibraries, refreshLibraries } = useLibraries()
+const { libraries, fetchLibraries, refreshLibraries } = useLibraries({ includeSourceBacked: true })
 const { handleLibraryCreated } = useLibraryCreationRedirect()
 const { subscribeLibrary, getProgress, isScanning, progressMap, getCoverRefreshProgress, isRefreshingCovers } = useScanProgress()
+const canSyncSourceBackedLibraries = computed(() => hasPermission('manage_app_settings'))
+const filesystemLibraries = computed(() => libraries.value.filter((lib) => !isSourceBackedLibrary(lib)))
 
 const stats = ref<Record<number, LibraryStats>>({})
 const scanningAll = ref(false)
@@ -56,9 +66,22 @@ const deletingLibrary = ref<LibraryType | null>(null)
 const deleteConfirmName = ref('')
 const deleting = ref(false)
 const fileSyncingMap = ref<Record<number, boolean>>({})
+const sourceSyncingMap = ref<Record<number, boolean>>({})
 const confirmSyncLibrary = ref<LibraryType | null>(null)
 
 const { syncAll: syncAllFiles } = useLibraryFileSync()
+
+function isSourceBackedLibrary(lib: LibraryType): boolean {
+  return (
+    lib.sourceKind === 'source_backed' || lib.id === CLOUD_EBOOK_LIBRARY_ID || lib.id === CLOUD_AUDIO_LIBRARY_ID || lib.id === CLOUD_COMIC_LIBRARY_ID
+  )
+}
+
+function sourceBackedLibraryLabel(lib: LibraryType): string {
+  if (lib.id === CLOUD_AUDIO_LIBRARY_ID) return 'Audiobooks'
+  if (lib.id === CLOUD_COMIC_LIBRARY_ID) return 'Comics'
+  return 'Books'
+}
 
 function promptSyncFiles(lib: LibraryType) {
   confirmSyncLibrary.value = lib
@@ -94,7 +117,7 @@ async function loadAllStats() {
 }
 
 function subscribeAll() {
-  for (const lib of libraries.value) {
+  for (const lib of filesystemLibraries.value) {
     subscribeLibrary(lib.id)
   }
 }
@@ -121,6 +144,11 @@ watch(progressMap, (map) => {
 })
 
 async function scan(lib: LibraryType) {
+  if (isSourceBackedLibrary(lib)) {
+    await syncSourceBackedLibrary(lib)
+    return
+  }
+
   try {
     const res = await api(`/api/v1/scanner/libraries/${lib.id}/scan`, { method: 'POST' })
     if (res.ok) {
@@ -131,6 +159,31 @@ async function scan(lib: LibraryType) {
     }
   } catch {
     toast.error(t('settings.admin.libraries.scanStartFailed', { name: lib.name }))
+  }
+}
+
+async function syncSourceBackedLibrary(lib: LibraryType) {
+  if (!canSyncSourceBackedLibraries.value) {
+    toast.error('You do not have permission to sync this library')
+    return
+  }
+
+  sourceSyncingMap.value[lib.id] = true
+  try {
+    if (lib.id === CLOUD_AUDIO_LIBRARY_ID) {
+      await syncWarehouseAudiobooks()
+    } else if (lib.id === CLOUD_COMIC_LIBRARY_ID) {
+      await syncWarehouseComics()
+    } else {
+      await syncWarehouseEbooks()
+    }
+    toast.success(`${sourceBackedLibraryLabel(lib)} synced`)
+    await refreshLibraries()
+    loadAllStats()
+  } catch {
+    toast.error(`Failed to sync ${sourceBackedLibraryLabel(lib)}`)
+  } finally {
+    sourceSyncingMap.value[lib.id] = false
   }
 }
 
@@ -146,7 +199,7 @@ async function refreshCovers(lib: LibraryType) {
 async function scanAll() {
   scanningAll.value = true
   try {
-    const results = await Promise.all(libraries.value.map((lib) => api(`/api/v1/scanner/libraries/${lib.id}/scan`, { method: 'POST' })))
+    const results = await Promise.all(filesystemLibraries.value.map((lib) => api(`/api/v1/scanner/libraries/${lib.id}/scan`, { method: 'POST' })))
     const failed = results.filter((r) => !r.ok).length
     if (failed === 0) {
       toast.success(t('settings.admin.libraries.scanStartedAll'))
@@ -211,7 +264,7 @@ async function confirmDelete() {
       if (route.name === 'library' && Number(route.params.id) === deletedId) {
         const next = libraries.value[0]
         if (next) {
-          router.replace({ name: 'library', params: { id: next.id } })
+          router.replace(libraryRouteForId(next.id))
         } else {
           router.replace('/')
         }
@@ -263,7 +316,7 @@ function coverRefreshLabel(libraryId: number): string {
     class="md:hidden sticky top-0 z-20 mb-4 -mx-4 px-4 py-2 border-y border-border/70 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75"
   >
     <div class="grid grid-cols-2 gap-2">
-      <button class="settings-btn-outline w-full justify-center" :disabled="scanningAll || libraries.length === 0" @click="scanAll">
+      <button class="settings-btn-outline w-full justify-center" :disabled="scanningAll || filesystemLibraries.length === 0" @click="scanAll">
         <RefreshCw :size="14" :class="scanningAll ? 'animate-spin' : ''" />
         {{ scanningAll ? t('settings.admin.libraries.scanning') : t('settings.admin.libraries.scanAll') }}
       </button>
@@ -275,7 +328,7 @@ function coverRefreshLabel(libraryId: number): string {
   </div>
 
   <SettingsPageHeader :title="t('settings.admin.libraries.title')" :subtitle="t('settings.admin.libraries.subtitle')" class="hidden md:flex">
-    <button class="settings-btn-outline" :disabled="scanningAll || libraries.length === 0" @click="scanAll">
+    <button class="settings-btn-outline" :disabled="scanningAll || filesystemLibraries.length === 0" @click="scanAll">
       <RefreshCw :size="14" :class="scanningAll ? 'animate-spin' : ''" />
       {{ scanningAll ? t('settings.admin.libraries.scanning') : t('settings.admin.libraries.scanAll') }}
     </button>
@@ -293,7 +346,7 @@ function coverRefreshLabel(libraryId: number): string {
           <div class="flex items-center gap-3">
             <!-- Icon -->
             <RouterLink
-              :to="{ name: 'library', params: { id: lib.id } }"
+              :to="libraryRouteForId(lib.id)"
               class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 hover:bg-primary/15 transition-colors"
             >
               <AppIcon :icon="lib.icon || 'FolderOpen'" fallback="FolderOpen" :size="16" class="text-primary" />
@@ -301,10 +354,7 @@ function coverRefreshLabel(libraryId: number): string {
 
             <!-- Name + stats -->
             <div class="flex-1 min-w-0">
-              <RouterLink
-                :to="{ name: 'library', params: { id: lib.id } }"
-                class="settings-label hover:text-primary transition-colors truncate block leading-snug"
-              >
+              <RouterLink :to="libraryRouteForId(lib.id)" class="settings-label hover:text-primary transition-colors truncate block leading-snug">
                 {{ lib.name }}
               </RouterLink>
               <div class="grid grid-rows-4 grid-cols-2 md:grid-rows-2 md:grid-cols-[90px_100px_200px_96px] grid-flow-col gap-x-4 gap-y-1.5 mt-1.5">
@@ -331,7 +381,11 @@ function coverRefreshLabel(libraryId: number): string {
                 <span v-else class="min-w-0"></span>
 
                 <!-- Col 2 -->
-                <span class="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+                <span v-if="isSourceBackedLibrary(lib)" class="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+                  <BookOpen :size="11" class="shrink-0" />
+                  <span class="truncate">Read-only</span>
+                </span>
+                <span v-else class="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
                   <component :is="lib.organizationMode === 'book_per_file' ? FileText : Folder" :size="11" class="shrink-0" />
                   <span class="truncate">{{
                     lib.organizationMode === 'book_per_file' ? t('settings.admin.libraries.fileMode') : t('settings.admin.libraries.folderMode')
@@ -387,12 +441,21 @@ function coverRefreshLabel(libraryId: number): string {
 
             <!-- Actions -->
             <div class="flex items-center gap-2 shrink-0">
-              <button class="settings-btn-outline" :disabled="isScanning(lib.id)" @click="scan(lib)">
+              <button
+                v-if="isSourceBackedLibrary(lib)"
+                class="settings-btn-outline"
+                :disabled="!!sourceSyncingMap[lib.id] || !canSyncSourceBackedLibraries"
+                @click="syncSourceBackedLibrary(lib)"
+              >
+                <RefreshCw :size="14" :class="sourceSyncingMap[lib.id] ? 'animate-spin' : ''" />
+                {{ sourceSyncingMap[lib.id] ? 'Syncing...' : 'Sync' }}
+              </button>
+              <button v-else class="settings-btn-outline" :disabled="isScanning(lib.id)" @click="scan(lib)">
                 <RefreshCw :size="14" :class="isScanning(lib.id) ? 'animate-spin' : ''" />
                 {{ isScanning(lib.id) ? t('settings.admin.libraries.scanning') : t('settings.admin.libraries.scan') }}
               </button>
 
-              <DropdownMenu>
+              <DropdownMenu v-if="!isSourceBackedLibrary(lib)">
                 <DropdownMenuTrigger as-child>
                   <button
                     class="flex h-11 w-11 md:h-auto md:w-auto md:px-2 md:py-1.5 items-center justify-center rounded-md border border-border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"

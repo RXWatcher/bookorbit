@@ -1,4 +1,5 @@
 import type { GroupRule, SortSpec } from "./query";
+import type { DashboardCatalogItem } from "./dashboard";
 
 export interface SmartScope {
   id: number;
@@ -26,4 +27,11 @@ export interface CreateSmartScopePayload {
   defaultSort: SortSpec[];
   isPublic?: boolean;
   syncToKobo?: boolean;
+}
+
+export interface SmartScopeCatalogItemsPage {
+  items: DashboardCatalogItem[];
+  total: number;
+  page: number;
+  size: number;
 }

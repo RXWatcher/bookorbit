@@ -1,4 +1,4 @@
-export const ADMIN_TABS = ['users', 'account-activity', 'oidc', 'magic-links', 'server-fonts'] as const
+export const ADMIN_TABS = ['users', 'account-activity', 'oidc', 'magic-links', 'server-fonts', 'local-scan'] as const
 
 export type AdminTab = (typeof ADMIN_TABS)[number]
 
@@ -27,6 +27,10 @@ export const ADMIN_TAB_INFO: Record<AdminTab, AdminTabInfo> = {
   'server-fonts': {
     permission: 'manage_app_settings',
     titleKey: 'titles.admin.server-fonts',
+  },
+  'local-scan': {
+    permission: 'manage_libraries',
+    titleKey: 'titles.admin.local-scan',
   },
 }
 

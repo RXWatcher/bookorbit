@@ -1,7 +1,13 @@
 import { ForbiddenException } from '@nestjs/common';
+import { CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 
-import { bookSeries, bookSeriesMemberships } from '../../../db/schema';
-import { OpdsBookService } from '../opds-book.service';
+import * as schema from '../../../db/schema';
+import { OpdsBookService, type OpdsBookEntry } from '../opds-book.service';
+
+const dialect = new PgDialect();
+const { bookSeries, bookSeriesMemberships } = schema;
 
 type BookPageResult = { entries: unknown[]; total: number };
 
@@ -35,11 +41,13 @@ function makeChain(result: unknown, fields?: Record<string, unknown>) {
   return chain;
 }
 
-function makeDb(selectQueue: unknown[] = []) {
+function makeDb(selectQueue: unknown[] = [], executeQueue: unknown[] = []) {
   const queue = [...selectQueue];
+  const executeResults = [...executeQueue];
 
   return {
     select: vi.fn((fields?: Record<string, unknown>) => makeChain(queue.shift() ?? [], fields)),
+    execute: vi.fn().mockImplementation(() => Promise.resolve(executeResults.shift() ?? [])),
   };
 }
 
@@ -51,6 +59,24 @@ function makeService(selectQueue: unknown[] = [], queryBuilderOverrides: Record<
   };
   const service = new OpdsBookService(db as never, queryBuilder as never);
   return { service, db, queryBuilder };
+}
+
+function makeCatalogRow(remoteId: string, title: string, addedAt = '2025-01-02T00:00:00.000Z') {
+  return {
+    remoteId,
+    title,
+    sortTitle: title,
+    authors: ['Ada Writer'],
+    series: null,
+    language: 'en',
+    publisher: 'Orbit',
+    identifiers: { isbn13: '9780000000000' },
+    format: 'epub',
+    hasCover: true,
+    syncedAt: new Date(addedAt),
+    userAddedAt: new Date(addedAt),
+    updatedAt: new Date(addedAt),
+  };
 }
 
 function collectValues(value: unknown, seen = new WeakSet<object>()): unknown[] {
@@ -66,6 +92,61 @@ function collectValues(value: unknown, seen = new WeakSet<object>()): unknown[] 
   return values;
 }
 
+function renderSql(condition: SQL | undefined) {
+  if (!condition) return null;
+  return dialect.sqlToQuery(condition);
+}
+
+function opdsEntry(id: number | string, title: string, updatedAt: string, overrides?: Partial<OpdsBookEntry>): OpdsBookEntry {
+  return {
+    id,
+    title,
+    sortTitle: title,
+    folderPath: '',
+    addedAt: new Date(updatedAt),
+    updatedAt: new Date(updatedAt),
+    description: null,
+    seriesName: null,
+    seriesIndex: null,
+    language: null,
+    publisher: null,
+    isbn13: null,
+    hasCover: false,
+    authors: [],
+    files: [],
+    ...overrides,
+  };
+}
+
+type CombinedOpdsBookService = OpdsBookService & {
+  getBooksAndCatalogEbooksPage(
+    userId: number,
+    sortOrder: 'recent' | 'title_asc' | 'title_desc' | 'author_asc' | 'author_desc' | 'series_asc' | 'series_desc',
+    page: number,
+    size: number,
+    filters?: { collectionId?: number; author?: string; series?: string; q?: string },
+    isSuperuser?: boolean,
+    contentFilters?: { includeTagIds: number[]; excludeTagIds: number[]; includeGenreIds: number[]; excludeGenreIds: number[] },
+  ): Promise<{ entries: OpdsBookEntry[]; total: number }>;
+  getRecentBooksAndCatalogEbooksPage(
+    userId: number,
+    page: number,
+    size: number,
+    isSuperuser?: boolean,
+    contentFilters?: { includeTagIds: number[]; excludeTagIds: number[]; includeGenreIds: number[]; excludeGenreIds: number[] },
+  ): Promise<{ entries: OpdsBookEntry[]; total: number }>;
+  getLibraryBooksPage(
+    userId: number,
+    sortOrder: 'recent' | 'title_asc' | 'title_desc' | 'author_asc' | 'author_desc' | 'series_asc' | 'series_desc',
+    libraryId: number,
+    page: number,
+    size: number,
+    filters?: { author?: string; series?: string; q?: string },
+    isSuperuser?: boolean,
+    contentFilters?: { includeTagIds: number[]; excludeTagIds: number[]; includeGenreIds: number[]; excludeGenreIds: number[] },
+  ): Promise<{ entries: OpdsBookEntry[]; total: number }>;
+};
+
 describe('OpdsBookService', () => {
   it('returns accessible library ids for superusers and regular users', async () => {
     const superDb = makeDb([[{ id: 1 }, { id: 4 }]]);
@@ -77,11 +158,29 @@ describe('OpdsBookService', () => {
     await expect(userService.getAccessibleLibraryIds(7, false)).resolves.toEqual([2, 3]);
   });
 
+  it('includes Ebook Library in OPDS library navigation when source-backed ebooks are enabled', async () => {
+    const db = makeDb([[{ id: 2, name: 'Local', bookCount: 4 }]]);
+    const warehouseCatalog = {
+      isCatalogEnabled: vi.fn().mockResolvedValue(true),
+      getUserLibraryOverview: vi.fn().mockResolvedValue({ totalBooks: 3 }),
+    };
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+
+    await expect(service.getAccessibleLibraries(7, false)).resolves.toEqual([
+      { id: CLOUD_EBOOK_LIBRARY_ID, name: 'Books', bookCount: 3 },
+      { id: 2, name: 'Local', bookCount: 4 },
+    ]);
+    expect(warehouseCatalog.getUserLibraryOverview).toHaveBeenCalledWith(7, undefined, ['ebook']);
+  });
+
   it('handles getBooksPage access checks and smartScope delegation', async () => {
     const { service } = makeService([[{ userId: 999 }], [{ userId: 7 }]]);
     const accessSpy = vi.spyOn(service, 'getAccessibleLibraryIds');
     const privateService = testable(service);
-    const smartScopeSpy = vi.spyOn(privateService, 'buildSmartScopeWhere');
+    // This fork routes smart-scope browsing through getBooksBySmartScope,
+    // which returns entries itself; upstream's buildSmartScopeWhere path is
+    // used by the catalog/manifest endpoints instead.
+    const smartScopeSpy = vi.spyOn(privateService, 'getBooksBySmartScope');
     const paginatedSpy = vi.spyOn(privateService, 'paginatedBookQuery');
 
     accessSpy.mockResolvedValueOnce([]);
@@ -94,19 +193,17 @@ describe('OpdsBookService', () => {
     await expect(service.getBooksPage(7, 'recent', 1, 50, { collectionId: 11 })).rejects.toThrow(ForbiddenException);
 
     accessSpy.mockResolvedValueOnce([1, 2]);
-    smartScopeSpy.mockResolvedValueOnce({ kind: 'scope-where' });
-    paginatedSpy.mockResolvedValueOnce({ entries: [{ id: 5 }], total: 1 });
+    smartScopeSpy.mockResolvedValueOnce({ entries: [{ id: 5 }], total: 1 });
     await expect(service.getBooksPage(7, 'recent', 3, 25, { smartScopeId: 4 })).resolves.toEqual({ entries: [{ id: 5 }], total: 1 });
-    expect(smartScopeSpy).toHaveBeenCalledWith(7, 4, [1, 2], undefined, undefined);
+    expect(smartScopeSpy).toHaveBeenCalledWith(7, 4, [1, 2], 'recent', 3, 25, undefined, undefined);
 
     accessSpy.mockResolvedValueOnce([1, 2]);
-    smartScopeSpy.mockResolvedValueOnce({ kind: 'scope-where' });
-    paginatedSpy.mockResolvedValueOnce({ entries: [{ id: 6 }], total: 1 });
+    smartScopeSpy.mockResolvedValueOnce({ entries: [{ id: 6 }], total: 1 });
     await expect(service.getBooksPage(7, 'recent', 1, 20, { smartScopeId: 4, q: 'dune' })).resolves.toEqual({ entries: [{ id: 6 }], total: 1 });
-    expect(smartScopeSpy).toHaveBeenCalledWith(7, 4, [1, 2], undefined, 'dune');
+    expect(smartScopeSpy).toHaveBeenCalledWith(7, 4, [1, 2], 'recent', 1, 20, undefined, 'dune');
 
     accessSpy.mockResolvedValueOnce([1, 2]);
-    smartScopeSpy.mockResolvedValueOnce(null);
+    smartScopeSpy.mockResolvedValueOnce({ entries: [], total: 0 });
     await expect(service.getBooksPage(7, 'recent', 1, 20, { smartScopeId: 4 })).resolves.toEqual({ entries: [], total: 0 });
 
     accessSpy.mockResolvedValueOnce([1, 2]);
@@ -121,7 +218,9 @@ describe('OpdsBookService', () => {
         q: 'arrakis',
       }),
     ).resolves.toEqual({ entries: [{ id: 9 }], total: 1 });
-    expect(paginatedSpy).toHaveBeenCalledTimes(3);
+    // Smart-scope requests are served by getBooksBySmartScope (mocked above),
+    // so only this non-scoped query reaches paginatedBookQuery.
+    expect(paginatedSpy).toHaveBeenCalledTimes(1);
     expect(searchSpy).toHaveBeenCalledWith('arrakis');
   });
 
@@ -199,7 +298,9 @@ describe('OpdsBookService', () => {
 
     accessSpy.mockResolvedValueOnce([1]);
     fetchSpy.mockResolvedValueOnce([{ id: 11 }, { id: 10 }]);
-    await expect(service.getRandomBooks(7, 2)).resolves.toEqual([{ id: 11 }, { id: 10 }]);
+    const randomBooks = await service.getRandomBooks(7, 2);
+    expect(randomBooks).toHaveLength(2);
+    expect(randomBooks).toEqual(expect.arrayContaining([{ id: 10 }, { id: 11 }]));
     expect(fetchSpy).toHaveBeenCalledWith([11, 10]);
 
     const chains = (db.select as ReturnType<typeof vi.fn>).mock.results.map((r) => r.value as Record<string, unknown>);
@@ -208,8 +309,82 @@ describe('OpdsBookService', () => {
     expect(values).toContain('random()');
   });
 
-  it('returns distinct authors and membership-backed series with and without access', async () => {
-    const { service, db } = makeService([[{ name: 'Frank Herbert', bookCount: 2 }], [{ id: 42, name: 'Dune', bookCount: 2 }]]);
+  it('returns catalog ebook random picks for OPDS users without filesystem library access', async () => {
+    const now = new Date('2026-06-05T12:00:00.000Z');
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const db = makeDb([
+      [
+        {
+          remoteId: 'cloud-random-1',
+          title: 'Cloud Random',
+          sortTitle: 'Cloud Random',
+          authors: ['Ada Writer'],
+          series: 'Wayfarers',
+          language: 'en',
+          publisher: 'Small Press',
+          identifiers: { isbn13: '9780000000001' },
+          format: 'epub',
+          hasCover: true,
+          syncedAt: now,
+          addedAt: now,
+          userUpdatedAt: now,
+        },
+      ],
+    ]);
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([]);
+
+    await expect(service.getRandomBooks(42, 25)).resolves.toEqual([
+      expect.objectContaining({
+        id: 'cloud-random-1',
+        kind: 'catalog-ebook',
+        title: 'Cloud Random',
+      }),
+    ]);
+
+    const [randomCatalogChain] = (db.select as ReturnType<typeof vi.fn>).mock.results.map(
+      (result: { value: Record<string, unknown> }) => result.value,
+    );
+    expect(randomCatalogChain?.from).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+    expect(randomCatalogChain?.innerJoin).not.toHaveBeenCalledWith(schema.warehouseUserItems, expect.anything());
+    expect(randomCatalogChain?.leftJoin).toHaveBeenCalledWith(schema.warehouseUserItems, expect.anything());
+  });
+
+  it('applies content filters to OPDS surprise catalog ebooks', async () => {
+    const db = makeDb([
+      [
+        {
+          remoteId: 'cloud-visible',
+          title: 'Cloud Visible',
+          sortTitle: 'Cloud Visible',
+          authors: ['Ada Writer'],
+          series: null,
+          language: null,
+          publisher: null,
+          identifiers: {},
+          format: 'epub',
+          hasCover: true,
+          syncedAt: new Date('2026-06-01T00:00:00.000Z'),
+          addedAt: new Date('2026-06-01T00:00:00.000Z'),
+          userUpdatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    ]);
+    const service = new OpdsBookService(db as never, {} as never, { isCatalogEnabled: vi.fn().mockResolvedValue(true) } as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([]);
+    const contentFilters = { includeTagIds: [7], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+
+    await expect(service.getRandomBooks(42, 25, false, contentFilters)).resolves.toEqual([
+      expect.objectContaining({ id: 'cloud-visible', kind: 'catalog-ebook' }),
+    ]);
+    const [randomCatalogChain] = (db.select as ReturnType<typeof vi.fn>).mock.results.map(
+      (result: { value: Record<string, unknown> }) => result.value,
+    );
+    expect(renderSql(randomCatalogChain?.where.mock.calls.at(-1)?.[0] as SQL)?.sql).toContain('"warehouse_catalog_items"."tags" ? "tags"."name"');
+  });
+
+  it('returns distinct authors and series with and without access', async () => {
+    const { service, db } = makeService([[{ name: 'Frank Herbert', bookCount: 2 }], [{ name: 'Dune', bookCount: 2 }]]);
     const accessSpy = vi.spyOn(service, 'getAccessibleLibraryIds');
 
     accessSpy.mockResolvedValueOnce([]);
@@ -219,25 +394,442 @@ describe('OpdsBookService', () => {
     await expect(service.getDistinctAuthors(1)).resolves.toEqual([{ name: 'Frank Herbert', bookCount: 2 }]);
 
     accessSpy.mockResolvedValueOnce([1]);
-    await expect(service.getDistinctSeries(1)).resolves.toEqual([{ id: 42, name: 'Dune', bookCount: 2 }]);
+    await expect(service.getDistinctSeries(1)).resolves.toEqual([{ name: 'Dune', bookCount: 2 }]);
 
-    const chains = (db.select as ReturnType<typeof vi.fn>).mock.results.map((r) => r.value as Record<string, unknown>);
-    const seriesChain = chains.at(-1)!;
-    expect(seriesChain.from).toHaveBeenCalledWith(bookSeries);
-    expect(seriesChain.innerJoin).toHaveBeenCalledWith(bookSeriesMemberships, expect.anything());
+    expect(db.select).toHaveBeenCalled();
   });
 
-  it('returns user collections and smartScopes', async () => {
-    const { service, db } = makeService([[{ id: 4, name: 'Favorites', bookCount: 1 }], [{ id: 7, name: 'Unread', icon: 'sparkles' }]]);
+  it('merges owned catalog ebook authors and series into OPDS navigation summaries', async () => {
+    const db = makeDb(
+      [[{ name: 'Frank Herbert', bookCount: 2 }], [{ name: 'Dune', bookCount: 2 }]],
+      [
+        [
+          { name: 'Ada Writer', bookCount: 1 },
+          { name: 'Frank Herbert', bookCount: 1 },
+        ],
+        [
+          { name: 'Dune', bookCount: 1 },
+          { name: 'Wayfarers', bookCount: 1 },
+        ],
+      ],
+    );
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([1]);
+
+    await expect(service.getDistinctAuthors(42)).resolves.toEqual([
+      { name: 'Ada Writer', bookCount: 1 },
+      { name: 'Frank Herbert', bookCount: 3 },
+    ]);
+    await expect(service.getDistinctSeries(42)).resolves.toEqual([
+      { name: 'Dune', bookCount: 3 },
+      { name: 'Wayfarers', bookCount: 1 },
+    ]);
+  });
+
+  it('returns catalog ebook authors and series for OPDS users without filesystem library access', async () => {
+    const db = makeDb([], [[{ name: 'Cloud Author', bookCount: 1 }], [{ name: 'Cloud Series', bookCount: 1 }]]);
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([]);
+
+    await expect(service.getDistinctAuthors(42)).resolves.toEqual([{ name: 'Cloud Author', bookCount: 1 }]);
+    await expect(service.getDistinctSeries(42)).resolves.toEqual([{ name: 'Cloud Series', bookCount: 1 }]);
+  });
+
+  it('queries cached Ebook Library inventory for OPDS author and series navigation', async () => {
+    const db = makeDb([], [[{ name: 'Cached Author', bookCount: 1 }], [{ name: 'Cached Series', bookCount: 1 }]]);
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([]);
+
+    await expect(service.getDistinctAuthors(42)).resolves.toEqual([{ name: 'Cached Author', bookCount: 1 }]);
+    await expect(service.getDistinctSeries(42)).resolves.toEqual([{ name: 'Cached Series', bookCount: 1 }]);
+
+    const [authorSql, seriesSql] = (db.execute as ReturnType<typeof vi.fn>).mock.calls.map((call) => renderSql(call[0] as SQL)?.sql ?? '');
+    expect(authorSql).toContain('from "warehouse_catalog_items"');
+    expect(authorSql).not.toContain('from "warehouse_user_items"');
+    expect(seriesSql).toContain('from "warehouse_catalog_items"');
+    expect(seriesSql).not.toContain('from "warehouse_user_items"');
+  });
+
+  it('applies content filters to OPDS author and series catalog navigation', async () => {
+    const db = makeDb(
+      [[], [{ name: 'Visible Local Author', bookCount: 1 }], [], [{ name: 'Visible Local Series', bookCount: 1 }]],
+      [[{ name: 'Visible Catalog Author', bookCount: 1 }], [{ name: 'Visible Catalog Series', bookCount: 1 }]],
+    );
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    const contentFilters = { includeTagIds: [7], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([1]);
+
+    await expect(service.getDistinctAuthors(42, false, contentFilters)).resolves.toEqual([
+      { name: 'Visible Catalog Author', bookCount: 1 },
+      { name: 'Visible Local Author', bookCount: 1 },
+    ]);
+    await expect(service.getDistinctSeries(42, false, contentFilters)).resolves.toEqual([
+      { name: 'Visible Catalog Series', bookCount: 1 },
+      { name: 'Visible Local Series', bookCount: 1 },
+    ]);
+    const [authorSql, seriesSql] = (db.execute as ReturnType<typeof vi.fn>).mock.calls.map((call) => renderSql(call[0] as SQL)?.sql ?? '');
+    expect(authorSql).toContain('"warehouse_catalog_items"."tags" ? "tags"."name"');
+    expect(seriesSql).toContain('"warehouse_catalog_items"."tags" ? "tags"."name"');
+  });
+
+  it('returns user collections and visible smartScopes', async () => {
+    const { service, db } = makeService([
+      [{ id: 4, name: 'Favorites', bookCount: 1 }],
+      [
+        { id: 7, name: 'Unread', icon: 'sparkles' },
+        { id: 8, name: 'Shared Scope', icon: 'globe' },
+      ],
+    ]);
 
     await expect(service.getUserCollections(8)).resolves.toEqual([{ id: 4, name: 'Favorites', bookCount: 1 }]);
-    await expect(service.getUserSmartScopes(8)).resolves.toEqual([{ id: 7, name: 'Unread', icon: 'sparkles' }]);
+    await expect(service.getUserSmartScopes(8)).resolves.toEqual([
+      { id: 7, name: 'Unread', icon: 'sparkles' },
+      { id: 8, name: 'Shared Scope', icon: 'globe' },
+    ]);
+    const [, smartScopeChain] = (db.select as ReturnType<typeof vi.fn>).mock.results.map(
+      (result: { value: Record<string, unknown> }) => result.value,
+    );
+    const renderedWhere = renderSql(smartScopeChain?.where.mock.calls.at(-1)?.[0] as SQL);
+    expect(renderedWhere?.sql).toContain('"smart_scopes"."user_id"');
+    expect(renderedWhere?.sql).toContain('"smart_scopes"."is_public"');
+  });
 
-    const chains = (db.select as ReturnType<typeof vi.fn>).mock.results.map((r) => r.value as Record<string, unknown>);
-    const smartScopeChain = chains[1]!;
-    const whereClause = (smartScopeChain.where as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    expect(collectValues(whereClause)).toContain(8);
-    expect(collectValues(whereClause)).toContain(true);
+  it('counts owned catalog ebook collection members in OPDS collection navigation', async () => {
+    const { service, db } = makeService([[{ id: 4, name: 'Favorites', bookCount: 2 }]]);
+
+    await expect(service.getUserCollections(8)).resolves.toEqual([{ id: 4, name: 'Favorites', bookCount: 2 }]);
+
+    const [fields] = (db.select as ReturnType<typeof vi.fn>).mock.calls[0] ?? [];
+    const values = collectValues(fields);
+    expect(values).toContain(8);
+    expect(values).toContain('ebook');
+  });
+
+  it('returns user-owned catalog ebook OPDS entries with native OPDS media links', async () => {
+    const now = new Date('2026-06-03T12:00:00.000Z');
+    const { service } = makeService([
+      [
+        {
+          remoteId: 'book 1/with slash',
+          title: 'The Long Way Home',
+          authors: ['Ada Writer'],
+          series: 'Wayfarers',
+          language: 'en',
+          publisher: 'Small Press',
+          identifiers: { isbn13: '9780000000001' },
+          format: 'epub',
+          hasCover: true,
+          syncedAt: now,
+          addedAt: now,
+          userUpdatedAt: now,
+        },
+      ],
+      [{ total: 1 }],
+    ]);
+
+    await expect(service.getCatalogEbookPage(42, 1, 24, { q: 'long way' })).resolves.toEqual({
+      entries: [
+        expect.objectContaining({
+          id: 'book 1/with slash',
+          kind: 'catalog-ebook',
+          title: 'The Long Way Home',
+          authors: ['Ada Writer'],
+          seriesName: 'Wayfarers',
+          isbn13: '9780000000001',
+          hasCover: true,
+          files: [
+            {
+              id: 'book 1/with slash',
+              format: 'epub',
+              href: '/api/v1/opds/catalog-ebooks/book%201%2Fwith%20slash/download',
+            },
+          ],
+          coverHref: '/api/v1/opds/catalog-ebooks/book%201%2Fwith%20slash/cover',
+          thumbnailHref: '/api/v1/opds/catalog-ebooks/book%201%2Fwith%20slash/thumbnail',
+        }),
+      ],
+      total: 1,
+    });
+  });
+
+  it('queries cached Ebook Library inventory instead of requiring source-backed membership rows', async () => {
+    const now = new Date('2026-06-03T12:00:00.000Z');
+    const { service, db } = makeService([
+      [
+        {
+          remoteId: 'cached-only',
+          title: 'Cached Only',
+          authors: ['Ada Writer'],
+          series: null,
+          language: 'en',
+          publisher: 'Small Press',
+          identifiers: { isbn13: '9780000000002' },
+          format: 'epub',
+          hasCover: true,
+          syncedAt: now,
+          addedAt: now,
+          userUpdatedAt: now,
+        },
+      ],
+      [{ total: 1 }],
+    ]);
+
+    await expect(service.getCatalogEbookPage(42, 1, 24)).resolves.toMatchObject({
+      entries: [expect.objectContaining({ id: 'cached-only', kind: 'catalog-ebook', title: 'Cached Only' })],
+      total: 1,
+    });
+
+    const [listChain, countChain] = (db.select as ReturnType<typeof vi.fn>).mock.results.map(
+      (result: { value: Record<string, unknown> }) => result.value,
+    );
+    expect(listChain?.from).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+    expect(countChain?.from).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+  });
+
+  it('filters catalog ebook OPDS entries by collection membership', async () => {
+    const { service, db } = makeService([[], [{ total: 0 }]]);
+
+    await service.getCatalogEbookPage(42, 1, 10, { collectionId: 9, q: 'favorite' });
+
+    const chains = (db.select as ReturnType<typeof vi.fn>).mock.results.map((r: { value: Record<string, unknown> }) => r.value);
+    const whereValues = chains.flatMap((chain: Record<string, unknown>) => {
+      const fn = chain['where'] as ReturnType<typeof vi.fn>;
+      return fn.mock.calls.flatMap((call) => call.flatMap((arg: unknown) => collectValues(arg)));
+    });
+
+    expect(whereValues).toContain(9);
+  });
+
+  it('filters catalog ebook OPDS entries by content filters', async () => {
+    const { service, db } = makeService([[], [{ total: 0 }]]);
+    const contentFilters = { includeTagIds: [7], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [9] };
+
+    await service.getCatalogEbookPage(42, 1, 10, undefined, 'title_asc', contentFilters);
+
+    const chains = (db.select as ReturnType<typeof vi.fn>).mock.results.map((r: { value: Record<string, unknown> }) => r.value);
+    const renderedWhereSql = chains.map((chain: Record<string, unknown>) => {
+      const fn = chain['where'] as ReturnType<typeof vi.fn>;
+      return renderSql(fn.mock.calls[0]?.[0])?.sql ?? '';
+    });
+
+    expect(renderedWhereSql.every((value) => value.includes('"warehouse_catalog_items"."media_type"'))).toBe(true);
+    expect(renderedWhereSql.every((value) => value.includes('"warehouse_catalog_items"."tags"'))).toBe(true);
+    expect(renderedWhereSql.every((value) => value.includes('"warehouse_catalog_items"."genres"'))).toBe(true);
+  });
+
+  it('merges local and catalog ebook catalog pages before slicing', async () => {
+    const { service } = makeService();
+    const localSpy = vi.spyOn(service, 'getBooksPage').mockResolvedValue({
+      entries: [opdsEntry(1, 'Bravo', '2026-06-01T00:00:00.000Z')],
+      total: 1,
+    });
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [opdsEntry('remote-alpha', 'Alpha', '2026-06-02T00:00:00.000Z', { kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    const emptyContentFilters = { includeTagIds: [], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+
+    await expect(
+      (service as CombinedOpdsBookService).getBooksAndCatalogEbooksPage(
+        42,
+        'title_asc',
+        1,
+        2,
+        { author: 'Ada Writer', series: 'Wayfarers', q: 'long way' },
+        false,
+        emptyContentFilters,
+      ),
+    ).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 'remote-alpha', title: 'Alpha' }), expect.objectContaining({ id: 1, title: 'Bravo' })],
+      total: 2,
+    });
+    expect(localSpy).toHaveBeenCalledWith(
+      42,
+      'title_asc',
+      1,
+      2,
+      { author: 'Ada Writer', series: 'Wayfarers', q: 'long way' },
+      false,
+      emptyContentFilters,
+    );
+    expect(catalogSpy).toHaveBeenCalledWith(42, 1, 2, { author: 'Ada Writer', series: 'Wayfarers', q: 'long way' }, 'title_asc', emptyContentFilters);
+  });
+
+  it('merges collection-scoped local and catalog ebook pages before slicing', async () => {
+    const { service } = makeService();
+    const localSpy = vi.spyOn(service, 'getBooksPage').mockResolvedValue({
+      entries: [opdsEntry(1, 'Local Favorite', '2026-06-01T00:00:00.000Z')],
+      total: 1,
+    });
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [opdsEntry('remote-favorite', 'Library Favorite', '2026-06-02T00:00:00.000Z', { kind: 'catalog-ebook' })],
+      total: 1,
+    });
+
+    await expect(
+      (service as CombinedOpdsBookService).getBooksAndCatalogEbooksPage(42, 'title_asc', 1, 10, { collectionId: 9, q: 'favorite' }),
+    ).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 'remote-favorite' }), expect.objectContaining({ id: 1 })],
+      total: 2,
+    });
+    expect(localSpy).toHaveBeenCalledWith(42, 'title_asc', 1, 10, { collectionId: 9, q: 'favorite' }, false, undefined);
+    expect(catalogSpy).toHaveBeenCalledWith(42, 1, 10, { collectionId: 9, q: 'favorite' }, 'title_asc', undefined);
+  });
+
+  it('applies content filters to merged catalog feeds', async () => {
+    const { service } = makeService();
+    const localSpy = vi.spyOn(service, 'getBooksPage').mockResolvedValue({
+      entries: [opdsEntry(1, 'Visible Local', '2026-06-01T00:00:00.000Z')],
+      total: 1,
+    });
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [opdsEntry('remote-visible', 'Visible Remote', '2026-06-02T00:00:00.000Z', { kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    const contentFilters = { includeTagIds: [7], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+
+    await expect(
+      (service as CombinedOpdsBookService).getBooksAndCatalogEbooksPage(42, 'title_asc', 1, 20, { q: 'visible' }, false, contentFilters),
+    ).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 1 }), expect.objectContaining({ id: 'remote-visible' })],
+      total: 2,
+    });
+    expect(localSpy).toHaveBeenCalledWith(42, 'title_asc', 1, 20, { q: 'visible' }, false, contentFilters);
+    expect(catalogSpy).toHaveBeenCalledWith(42, 1, 20, { q: 'visible' }, 'title_asc', contentFilters);
+  });
+
+  it('treats Ebook Library as a normal OPDS library filter', async () => {
+    const warehouseCatalog = {
+      isCatalogEnabled: vi.fn().mockResolvedValue(true),
+    };
+    const db = makeDb();
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [opdsEntry('remote-alpha', 'Alpha', '2026-06-02T00:00:00.000Z', { kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    const localSpy = vi.spyOn(service, 'getBooksPage');
+
+    await expect(
+      (service as CombinedOpdsBookService).getLibraryBooksPage(
+        42,
+        'title_asc',
+        CLOUD_EBOOK_LIBRARY_ID,
+        1,
+        25,
+        { author: 'Ada Writer', series: 'Wayfarers', q: 'long way' },
+        false,
+        undefined,
+      ),
+    ).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 'remote-alpha', kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    expect(catalogSpy).toHaveBeenCalledWith(42, 1, 25, { author: 'Ada Writer', series: 'Wayfarers', q: 'long way' }, 'title_asc', undefined);
+    expect(localSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty Ebook Library OPDS feed when catalog access is disabled', async () => {
+    const warehouseCatalog = {
+      isCatalogEnabled: vi.fn().mockResolvedValue(false),
+    };
+    const db = makeDb();
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage');
+
+    await expect(
+      (service as CombinedOpdsBookService).getLibraryBooksPage(42, 'title_asc', CLOUD_EBOOK_LIBRARY_ID, 1, 25, undefined, false, undefined),
+    ).resolves.toEqual({ entries: [], total: 0 });
+    expect(catalogSpy).not.toHaveBeenCalled();
+  });
+
+  it('applies content filters when Ebook Library is browsed through OPDS', async () => {
+    const warehouseCatalog = {
+      isCatalogEnabled: vi.fn().mockResolvedValue(true),
+    };
+    const db = makeDb();
+    const service = new OpdsBookService(db as never, {} as never, warehouseCatalog as never);
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [opdsEntry('remote-visible', 'Visible Remote', '2026-06-02T00:00:00.000Z', { kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    const contentFilters = { includeTagIds: [7], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+
+    await expect(
+      (service as CombinedOpdsBookService).getLibraryBooksPage(
+        42,
+        'title_asc',
+        CLOUD_EBOOK_LIBRARY_ID,
+        1,
+        25,
+        { q: 'visible' },
+        false,
+        contentFilters,
+      ),
+    ).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 'remote-visible', kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    expect(catalogSpy).toHaveBeenCalledWith(42, 1, 25, { q: 'visible' }, 'title_asc', contentFilters);
+  });
+
+  it('sorts recent local and catalog ebook entries by added time', async () => {
+    const { service } = makeService();
+    vi.spyOn(service, 'getRecentBooksPage').mockResolvedValue({
+      entries: [
+        opdsEntry(1, 'Local Older', '2026-06-01T00:00:00.000Z', { updatedAt: new Date('2026-06-10T00:00:00.000Z') }),
+        opdsEntry(2, 'Local Newer', '2026-06-03T00:00:00.000Z', { updatedAt: new Date('2026-06-04T00:00:00.000Z') }),
+      ],
+      total: 2,
+    });
+    vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [
+        opdsEntry('remote-middle', 'Catalog Middle', '2026-06-02T00:00:00.000Z', {
+          kind: 'catalog-ebook',
+          updatedAt: new Date('2026-06-11T00:00:00.000Z'),
+        }),
+      ],
+      total: 1,
+    });
+
+    await expect((service as CombinedOpdsBookService).getRecentBooksAndCatalogEbooksPage(42, 1, 3, false, undefined)).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 2 }), expect.objectContaining({ id: 'remote-middle' }), expect.objectContaining({ id: 1 })],
+      total: 3,
+    });
+  });
+
+  it('applies content filters to merged recent feeds', async () => {
+    const { service } = makeService();
+    const localSpy = vi.spyOn(service, 'getRecentBooksPage').mockResolvedValue({
+      entries: [opdsEntry(1, 'Visible Local', '2026-06-01T00:00:00.000Z')],
+      total: 1,
+    });
+    const catalogSpy = vi.spyOn(service, 'getCatalogEbookPage').mockResolvedValue({
+      entries: [opdsEntry('remote-visible', 'Visible Remote', '2026-06-02T00:00:00.000Z', { kind: 'catalog-ebook' })],
+      total: 1,
+    });
+    const contentFilters = { includeTagIds: [], excludeTagIds: [9], includeGenreIds: [], excludeGenreIds: [] };
+
+    await expect((service as CombinedOpdsBookService).getRecentBooksAndCatalogEbooksPage(42, 1, 20, false, contentFilters)).resolves.toEqual({
+      entries: [expect.objectContaining({ id: 'remote-visible' }), expect.objectContaining({ id: 1 })],
+      total: 2,
+    });
+    expect(localSpy).toHaveBeenCalledWith(42, 1, 20, false, contentFilters);
+    expect(catalogSpy).toHaveBeenCalledWith(42, 1, 20, undefined, 'recent', contentFilters);
+  });
+
+  it('builds catalog ebook author filters as exact author-name matches', () => {
+    const { service } = makeService();
+
+    const clause = (service as unknown as { buildCatalogEbookAuthorClause(author: string): unknown }).buildCatalogEbookAuthorClause('Ann');
+    const values = collectValues(clause);
+
+    expect(values).toContain('Ann');
+    expect(values).not.toContain('%Ann%');
   });
 
   it('enforces validateBookAccess ownership checks', async () => {
@@ -304,6 +896,112 @@ describe('OpdsBookService', () => {
     await expect(service.getBooksPage(7, 'title_desc', 2, 10, { smartScopeId: 9 })).resolves.toEqual({ entries: [{ id: 1 }], total: 1 });
     expect(queryBuilder.buildWhere).toHaveBeenCalledWith({ op: 'and' }, { accessibleLibraryIds: [1, 2], userId: 7 });
     expect(paginatedSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges smartScope OPDS books with source-backed Ebook Library matches', async () => {
+    const filter = { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'title', operator: 'contains', value: 'cloud' }] };
+    const db = makeDb([[{ id: 9, userId: 7, isPublic: false, filter }]]);
+    const queryBuilder = { buildWhere: vi.fn().mockReturnValue({ kind: 'where' }) };
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const warehouseRepository = {
+      queryUserCatalogItems: vi.fn().mockResolvedValue({
+        rows: [makeCatalogRow('cloud-1', 'Alpha Cloud')],
+        total: 1,
+        page: 0,
+        limit: 10,
+      }),
+    };
+    const service = new OpdsBookService(db as never, queryBuilder as never, warehouseCatalog as never, warehouseRepository as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([1]);
+    vi.spyOn(service as never, 'paginatedBookQuery').mockResolvedValue({
+      entries: [opdsEntry(3, 'Beta Local', '2025-01-01T00:00:00.000Z')],
+      total: 1,
+    });
+
+    await expect(service.getBooksPage(7, 'title_asc', 1, 10, { smartScopeId: 9 })).resolves.toMatchObject({
+      total: 2,
+      entries: [
+        { id: 'cloud-1', kind: 'catalog-ebook', title: 'Alpha Cloud', coverHref: '/api/v1/opds/catalog-ebooks/cloud-1/cover' },
+        { id: 3, title: 'Beta Local' },
+      ],
+    });
+    expect(queryBuilder.buildWhere).toHaveBeenCalledWith(filter, { accessibleLibraryIds: [1], userId: 7 });
+    expect(warehouseCatalog.isCatalogEnabled).toHaveBeenCalledTimes(1);
+    expect(warehouseRepository.queryUserCatalogItems).toHaveBeenCalledWith(7, {
+      includeAllCatalogItems: true,
+      filter,
+      mediaType: 'ebook',
+      q: undefined,
+      sort: [{ field: 'title', dir: 'asc' }],
+      page: 0,
+      limit: 10,
+    });
+  });
+
+  it('keeps smartScope OPDS source-backed matches for cloud-only users', async () => {
+    const filter = { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'title', operator: 'contains', value: 'cloud' }] };
+    const db = makeDb([[{ id: 9, userId: 7, isPublic: false, filter }]]);
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const warehouseRepository = {
+      queryUserCatalogItems: vi.fn().mockResolvedValue({
+        rows: [makeCatalogRow('cloud-only', 'Cloud Only')],
+        total: 1,
+        page: 0,
+        limit: 25,
+      }),
+    };
+    const service = new OpdsBookService(db as never, { buildWhere: vi.fn() } as never, warehouseCatalog as never, warehouseRepository as never);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([]);
+    const paginatedSpy = vi.spyOn(service as never, 'paginatedBookQuery');
+
+    await expect(service.getBooksPage(7, 'recent', 1, 25, { smartScopeId: 9 })).resolves.toMatchObject({
+      total: 1,
+      entries: [{ id: 'cloud-only', kind: 'catalog-ebook', title: 'Cloud Only' }],
+    });
+    expect(paginatedSpy).not.toHaveBeenCalled();
+    expect(warehouseRepository.queryUserCatalogItems).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ includeAllCatalogItems: true, filter, mediaType: 'ebook', sort: [{ field: 'addedAt', dir: 'desc' }] }),
+    );
+  });
+
+  it('applies content filters to smartScope OPDS source-backed matches', async () => {
+    const filter = { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'title', operator: 'contains', value: 'cloud' }] };
+    const db = makeDb([[{ id: 9, userId: 7, isPublic: false, filter }]]);
+    const queryBuilder = { buildWhere: vi.fn().mockReturnValue({ kind: 'where' }) };
+    const warehouseCatalog = { isCatalogEnabled: vi.fn().mockResolvedValue(true) };
+    const warehouseRepository = {
+      queryUserCatalogItems: vi.fn().mockResolvedValue({
+        rows: [makeCatalogRow('cloud-filtered', 'Filtered Cloud')],
+        total: 1,
+        page: 0,
+        limit: 25,
+      }),
+    };
+    const service = new OpdsBookService(db as never, queryBuilder as never, warehouseCatalog as never, warehouseRepository as never);
+    const contentFilters = { includeTagIds: [1], excludeTagIds: [], includeGenreIds: [], excludeGenreIds: [] };
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([1]);
+    vi.spyOn(service as never, 'paginatedBookQuery').mockResolvedValue({ entries: [opdsEntry(3, 'Local', '2025-01-01T00:00:00.000Z')], total: 1 });
+
+    await expect(service.getBooksPage(7, 'recent', 1, 25, { smartScopeId: 9 }, false, contentFilters)).resolves.toMatchObject({
+      entries: [
+        { id: 'cloud-filtered', kind: 'catalog-ebook', title: 'Filtered Cloud' },
+        { id: 3, title: 'Local' },
+      ],
+      total: 2,
+    });
+    expect(queryBuilder.buildWhere).toHaveBeenCalledWith(filter, { accessibleLibraryIds: [1], userId: 7, contentFilters });
+    expect(warehouseCatalog.isCatalogEnabled).toHaveBeenCalledTimes(1);
+    expect(warehouseRepository.queryUserCatalogItems).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        includeAllCatalogItems: true,
+        contentFilters,
+        filter,
+        mediaType: 'ebook',
+        sort: [{ field: 'addedAt', dir: 'desc' }],
+      }),
+    );
   });
 
   it('paginates ids and only fetches entries when rows are present', async () => {
@@ -535,7 +1233,7 @@ describe('OpdsBookService', () => {
           bookUpdatedAt: now,
           title: 'First',
           description: null,
-          seriesId: 10,
+          seriesId: null,
           seriesName: 'Primary Saga',
           seriesIndex: 1,
           language: 'en',

@@ -1,0 +1,14 @@
+Feature: Native catalog ebook detail media actions
+Status: Complete
+Date: 2026-06-03
+
+Completed:
+- Added encoded client URL helpers for catalog ebook cover and download media routes.
+- Updated catalog item detail pages so ebooks use the native cover proxy and show a Download action.
+- Added component coverage that verifies ebook details render cover/download actions without audiobook playback or integration wording.
+
+Verification:
+- pnpm --filter client exec vitest run src/features/warehouse/views/__tests__/CatalogItemDetailView.spec.ts src/features/warehouse/composables/__tests__/useCatalogSourceEbooks.spec.ts
+
+Notes:
+- This only exposes already user-scoped server routes in the native detail UI; reader-opening support remains a separate feature.

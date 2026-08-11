@@ -3,7 +3,16 @@ import type { MockedFunction } from 'vitest';
 import { access, readdir, rm, stat, rename } from 'fs/promises';
 
 import type { RequestUser } from '../../common/types/request-user';
-import { AUDIO_BOOK_FILE_WRITE_FIELDS, MetadataProviderKey, Permission, type BookQuery, type MetadataFetchDiagnostics } from '@bookorbit/types';
+import {
+  AUDIO_BOOK_FILE_WRITE_FIELDS,
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
+  MetadataProviderKey,
+  Permission,
+  type BookQuery,
+  type MetadataFetchDiagnostics,
+} from '@bookorbit/types';
 import { extractEpubMetadata } from '../metadata/lib/epub';
 import { extractAudioMetadata } from '../metadata/extractors/audio.extractor';
 import { extractCbzMetadata, extractCbrMetadata, extractCb7Metadata } from '../metadata/lib/cbz-metadata';
@@ -149,7 +158,20 @@ function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
     findTemporalJumpBuckets: vi.fn(),
     findTemporalJumpBucketsCollapsed: vi.fn(),
     checkBookPassesContentFilters: vi.fn().mockResolvedValue(true),
+    searchAcrossLibraries: vi.fn().mockResolvedValue([]),
   };
+  const warehouseRepo = {
+    searchCatalogItems: vi.fn().mockResolvedValue([]),
+    searchUserCatalogItems: vi.fn().mockResolvedValue([]),
+  };
+  const warehouseCatalog = {
+    searchCatalogItems: vi.fn().mockResolvedValue([]),
+    queryLibraryItems: vi.fn().mockResolvedValue({ items: [], total: 0, page: 0, limit: 50 }),
+    queryLibraryBooks: vi.fn().mockResolvedValue({ items: [], total: 0, page: 0, limit: 50 }),
+    bulkSetReadStatusForQuery: vi.fn().mockResolvedValue({ updated: 0 }),
+    bulkSetRatingForQuery: vi.fn().mockResolvedValue({ updated: 0 }),
+  };
+  warehouseCatalog.queryLibraryBooks.mockImplementation((...args) => warehouseCatalog.queryLibraryItems(...args));
   const libraryService = {
     verifyUserAccess: vi.fn().mockResolvedValue(undefined),
     findAll: vi.fn().mockResolvedValue([]),
@@ -237,6 +259,7 @@ function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
   const userBookStatusService = {
     autoUpdate: vi.fn().mockResolvedValue(undefined),
     setManual: vi.fn().mockResolvedValue(undefined),
+    bulkSetManual: vi.fn().mockResolvedValue(undefined),
     updateManual: vi.fn().mockResolvedValue({
       status: 'unread',
       source: 'manual',
@@ -273,6 +296,8 @@ function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
     fileWriteService as never,
     fileRenameService as never,
     achievementEvents as never,
+    warehouseRepo as never,
+    warehouseCatalog as never,
   );
 
   return {
@@ -295,6 +320,8 @@ function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
     comicMetadataService,
     customMetadataService,
     bookMetadataLockService,
+    warehouseRepo,
+    warehouseCatalog,
   };
 }
 
@@ -668,6 +695,56 @@ describe('BookService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('builds metadata export preflight for source-backed library query selections', async () => {
+      const { service, libraryService, warehouseCatalog, bookRepo, queryBuilder } = makeService();
+      const user = makeUser({ id: 12 });
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID, name: 'Ebook Library' }]);
+      warehouseCatalog.queryLibraryItems.mockResolvedValue({ items: [], total: 37, page: 0, limit: 1 });
+
+      const preflight = await service.getMetadataExportPreflight(
+        {
+          query: { libraryId: CLOUD_EBOOK_LIBRARY_ID, q: 'dune', sort: [{ field: 'title', dir: 'asc' }] },
+          format: 'json',
+          viewType: 'library',
+        } as never,
+        user,
+      );
+
+      expect(preflight.rowCount).toBe(37);
+      expect(preflight.scope).toBe('all-matching');
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenCalledWith(user, 'ebook', {
+        filter: undefined,
+        q: 'dune',
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 0, size: 1 },
+      });
+      expect(queryBuilder.buildWhere).not.toHaveBeenCalled();
+      expect(bookRepo.countWhere).not.toHaveBeenCalled();
+    });
+
+    it('rejects metadata export preflight for inaccessible source-backed library query selections', async () => {
+      const { service, libraryService, warehouseCatalog, bookRepo, queryBuilder } = makeService();
+      const user = makeUser({ id: 12 });
+      libraryService.findAll.mockResolvedValue([{ id: 7, name: 'Allowed Library' }]);
+
+      await expect(
+        service.getMetadataExportPreflight(
+          {
+            query: { libraryId: CLOUD_EBOOK_LIBRARY_ID, q: 'dune' },
+            format: 'json',
+            viewType: 'library',
+          } as never,
+          user,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(warehouseCatalog.queryLibraryItems).not.toHaveBeenCalled();
+      expect(queryBuilder.buildWhere).not.toHaveBeenCalled();
+      expect(bookRepo.countWhere).not.toHaveBeenCalled();
+    });
+
     it('builds csv metadata export with context lines and stable machine keys', async () => {
       const { service, libraryService, queryBuilder, bookRepo } = makeService();
       const user = makeUser({ id: 7 });
@@ -701,6 +778,92 @@ describe('BookService', () => {
       expect(exported.content).toContain('isbn13,hardcoverId,hardcoverEditionId,genres');
       expect(exported.content).toContain('9780000000000,hardcover-book-slug,8941973');
       expect(exported.content).toContain('1,5,Main Library,present,Book 1');
+    });
+
+    it('builds json metadata export from source-backed library rows without local book queries', async () => {
+      const { service, libraryService, warehouseCatalog, bookRepo, queryBuilder } = makeService();
+      const user = makeUser({ id: 12 });
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_AUDIO_LIBRARY_ID, name: 'Audio Library' }]);
+      warehouseCatalog.queryLibraryItems
+        .mockResolvedValueOnce({
+          items: [],
+          total: 1,
+          page: 0,
+          limit: 1,
+        })
+        .mockResolvedValueOnce({
+          items: [
+            {
+              type: 'catalog-item',
+              mediaType: 'audiobook',
+              remoteId: 'audio-1',
+              title: 'Cloud Audio',
+              subtitle: 'Remote subtitle',
+              seriesName: 'Cloud Series',
+              seriesIndex: 2,
+              authors: ['Cloud Author'],
+              narrators: ['Cloud Narrator'],
+              libraryName: 'Audio Library',
+              formats: ['m4b'],
+              language: 'en',
+              publisher: 'Orbit',
+              publishedYear: 2025,
+              pageCount: 12,
+              fileSizeBytes: 123456,
+              metadataScore: 91,
+              rating: 4,
+              readingProgress: 55,
+              readStatus: 'reading',
+              lastReadAt: '2026-06-01T00:00:00.000Z',
+              finishedAt: null,
+              hasCover: true,
+              addedAt: '2026-05-01T00:00:00.000Z',
+              updatedAt: '2026-05-02T00:00:00.000Z',
+            },
+          ],
+          total: 1,
+          page: 0,
+          limit: 1,
+        });
+
+      const exported = await service.buildMetadataExport(
+        {
+          query: { libraryId: CLOUD_AUDIO_LIBRARY_ID, sort: [{ field: 'title', dir: 'asc' }] },
+          format: 'json',
+          viewType: 'library',
+          options: { columnsMode: 'visible', visibleColumns: ['title', 'authors', 'format', 'rating'], includePersonalData: true },
+        } as never,
+        user,
+      );
+
+      const parsed = JSON.parse(exported.content) as {
+        schemaVersion: number;
+        items: Array<Record<string, unknown>>;
+        meta: { rowCount: number; query: { libraryId: number } };
+      };
+      expect(parsed.schemaVersion).toBe(1);
+      expect(parsed.meta.rowCount).toBe(1);
+      expect(parsed.meta.query.libraryId).toBe(CLOUD_AUDIO_LIBRARY_ID);
+      expect(parsed.items[0]).toMatchObject({
+        bookId: 'audio-1',
+        libraryId: CLOUD_AUDIO_LIBRARY_ID,
+        libraryName: 'Audio Library',
+        title: 'Cloud Audio',
+        authors: ['Cloud Author'],
+        primaryFormat: 'm4b',
+        formats: ['m4b'],
+        rating: 4,
+      });
+      expect(parsed.items[0]).not.toHaveProperty('files');
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenCalledWith(
+        user,
+        'audiobook',
+        expect.objectContaining({ pagination: { page: 0, size: 1 } }),
+      );
+      expect(queryBuilder.buildWhere).not.toHaveBeenCalled();
+      expect(bookRepo.countWhere).not.toHaveBeenCalled();
+      expect(bookRepo.findLibraryIdsByBookIds).not.toHaveBeenCalled();
     });
 
     it('builds json metadata export with visible-column projection', async () => {
@@ -3028,6 +3191,531 @@ describe('BookService', () => {
       });
     });
 
+    it('globalQuery merges accessible source-backed library items without querying negative library ids as local books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, { title: 'Local Dune' });
+      const ebookItem = { type: 'catalog-item', mediaType: 'ebook', remoteId: 'ebook-1', title: 'Cloud Dune' };
+      const audioItem = { type: 'catalog-item', mediaType: 'audiobook', remoteId: 'audio-1', title: 'Cloud Dune Audio' };
+      const comicItem = { type: 'catalog-item', mediaType: 'comic', remoteId: 'comic-1', title: 'Cloud Dune Comic' };
+      libraryService.findAll.mockResolvedValue([
+        { id: 3 },
+        { id: CLOUD_EBOOK_LIBRARY_ID },
+        { id: CLOUD_AUDIO_LIBRARY_ID },
+        { id: CLOUD_COMIC_LIBRARY_ID },
+      ]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems
+        .mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 })
+        .mockResolvedValueOnce({ items: [audioItem], total: 1, page: 0, limit: 10 })
+        .mockResolvedValueOnce({ items: [comicItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'title', dir: 'asc' }],
+          pagination: { page: 0, size: 10 },
+          q: 'dune',
+        } as never),
+      ).resolves.toEqual({
+        // Searching ranks by how closely a title matches, so the two shortest titles that
+        // are essentially just the query come first. Ordering is incidental to this test,
+        // which is about which library ids get queried.
+        items: [ebookItem, localBook, audioItem, comicItem],
+        total: 4,
+        page: 0,
+        size: 10,
+      });
+
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(queryBuilder.buildWhere).toHaveBeenCalledWith(null, expect.objectContaining({ accessibleLibraryIds: [3] }));
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenNthCalledWith(1, user, 'ebook', expect.objectContaining({ q: 'dune' }));
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenNthCalledWith(2, user, 'audiobook', expect.objectContaining({ q: 'dune' }));
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenNthCalledWith(3, user, 'comic', expect.objectContaining({ q: 'dune' }));
+    });
+
+    it('globalQuery uses title sorting across local and source-backed items when no explicit sort is provided', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, { title: 'Zebra Local' });
+      const ebookItem = { type: 'catalog-item', mediaType: 'ebook', remoteId: 'ebook-1', title: 'Alpha Cloud' };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(service.globalQuery(user, { filter: null, sort: [], pagination: { page: 0, size: 10 } } as never)).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenCalledWith(
+        user,
+        'ebook',
+        expect.objectContaining({ sort: [{ field: 'title', dir: 'asc' }] }),
+      );
+    });
+
+    it('globalQuery sorts source-backed audiobook items by series index like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, { title: 'Local Book', seriesName: 'Saga', seriesIndex: 3 });
+      const audioBookOne = {
+        type: 'catalog-item',
+        mediaType: 'audiobook',
+        remoteId: 'audio-1',
+        title: 'Cloud Audio One',
+        seriesName: 'Saga',
+        seriesIndex: 1,
+      };
+      const audioBookTwo = {
+        type: 'catalog-item',
+        mediaType: 'audiobook',
+        remoteId: 'audio-2',
+        title: 'Cloud Audio Two',
+        seriesName: 'Saga',
+        seriesIndex: 2,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_AUDIO_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [audioBookTwo, audioBookOne], total: 2, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'seriesIndex', dir: 'asc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [audioBookOne, audioBookTwo, localBook],
+        total: 3,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by publisher like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, { title: 'Local Book', publisher: 'Zeta Press' });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        publisher: 'Alpha Press',
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'publisher', dir: 'asc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by rating like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, { title: 'Local Book', rating: 3 });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        rating: 5,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'rating', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by read progress like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, { title: 'Local Book', readingProgress: 30 });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        readingProgress: 80,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'readProgress', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by last read activity like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        readStatus: {
+          status: 'reading',
+          source: 'manual',
+          startedAt: null,
+          finishedAt: null,
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        lastReadAt: '2026-02-02T00:00:00.000Z',
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'lastReadAt', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by finished date like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        readStatus: {
+          status: 'read',
+          source: 'manual',
+          startedAt: null,
+          finishedAt: '2026-01-02T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        finishedAt: '2026-02-02T00:00:00.000Z',
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'finishedAt', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by read status like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        readStatus: {
+          status: 'read',
+          source: 'manual',
+          startedAt: null,
+          finishedAt: null,
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        readStatus: 'reading',
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'readStatus', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by published year like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        publishedYear: 1999,
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        publishedYear: 2024,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'publishedYear', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by page count like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        pageCount: 220,
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        pageCount: 640,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'pageCount', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by updated time like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        updatedAt: '2026-02-02T00:00:00.000Z',
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'updatedAt', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by file size like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        files: [
+          { id: 31, format: 'jpg', role: 'cover', sizeBytes: 9999 },
+          { id: 30, format: 'epub', role: 'primary', sizeBytes: 220 },
+        ],
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        fileSizeBytes: 640,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'fileSize', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery sorts source-backed library items by metadata score like filesystem books', async () => {
+      const { service, libraryService, queryBuilder, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const localBook = makeBookCard(3, {
+        title: 'Local Book',
+        metadataScore: 42,
+      });
+      const ebookItem = {
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: 'ebook-1',
+        title: 'Cloud Book',
+        metadataScore: 86,
+      };
+      libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+      queryBuilder.buildWhere.mockReturnValue('GLOBAL_WHERE' as never);
+      vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 });
+      warehouseCatalog.queryLibraryItems.mockResolvedValueOnce({ items: [ebookItem], total: 1, page: 0, limit: 10 });
+
+      await expect(
+        service.globalQuery(user, {
+          filter: null,
+          sort: [{ field: 'metadataScore', dir: 'desc' }],
+          pagination: { page: 0, size: 10 },
+        } as never),
+      ).resolves.toEqual({
+        items: [ebookItem, localBook],
+        total: 2,
+        page: 0,
+        size: 10,
+      });
+    });
+
+    it('globalQuery fetches source-backed windows in bounded chunks for pages beyond the first warehouse limit', async () => {
+      const { service, libraryService, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 7 });
+      const makeCatalogItem = (index: number) => ({
+        type: 'catalog-item',
+        mediaType: 'ebook',
+        remoteId: `ebook-${index}`,
+        title: `Book ${String(index).padStart(3, '0')}`,
+      });
+      libraryService.findAll.mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]);
+      warehouseCatalog.queryLibraryItems.mockImplementation((_user, _mediaType, query) => {
+        const start = query.pagination.page * query.pagination.size;
+        const end = Math.min(125, start + query.pagination.size);
+        return Promise.resolve({
+          items: Array.from({ length: Math.max(0, end - start) }, (_, offset) => makeCatalogItem(start + offset)),
+          total: 125,
+          page: query.pagination.page,
+          limit: query.pagination.size,
+        });
+      });
+
+      const result = await service.globalQuery(user, {
+        filter: null,
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 2, size: 50 },
+      } as never);
+
+      expect(result.items).toHaveLength(25);
+      expect(result.items[0]).toEqual(expect.objectContaining({ remoteId: 'ebook-100' }));
+      expect(result.total).toBe(125);
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenNthCalledWith(
+        1,
+        user,
+        'ebook',
+        expect.objectContaining({ pagination: { page: 0, size: 100 } }),
+      );
+      expect(warehouseCatalog.queryLibraryItems).toHaveBeenNthCalledWith(
+        2,
+        user,
+        'ebook',
+        expect.objectContaining({ pagination: { page: 1, size: 100 } }),
+      );
+    });
+
     it('delegates getProgress to repository', async () => {
       const { service, bookRepo } = makeService();
       const user = makeUser({ id: 77 });
@@ -4754,6 +5442,183 @@ describe('BookService', () => {
       const { service } = makeService();
 
       await expect(service.resolveSelectionToIds({}, makeUser())).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('bulkSetStatusForSelection', () => {
+    it('routes source-backed library query selections through warehouse user state', async () => {
+      const { service, libraryService, warehouseCatalog, bookRepo, userBookStatusService } = makeService();
+      const user = makeUser({ id: 42 });
+      const filter = { type: 'group', join: 'AND', rules: [] } as const;
+      libraryService.findAll.mockResolvedValue([{ id: 5 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+
+      await service.bulkSetStatusForSelection({ query: { libraryId: CLOUD_EBOOK_LIBRARY_ID, filter, q: 'dune' } }, 'read', user);
+
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(warehouseCatalog.bulkSetReadStatusForQuery).toHaveBeenCalledWith(
+        user,
+        'ebook',
+        { libraryId: CLOUD_EBOOK_LIBRARY_ID, filter, q: 'dune' },
+        'read',
+      );
+      expect(bookRepo.findIdsByWhere).not.toHaveBeenCalled();
+      expect(userBookStatusService.bulkSetManual).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bulkSetRatingForSelection', () => {
+    it('routes source-backed library query selections through warehouse user state', async () => {
+      const { service, libraryService, warehouseCatalog, bookRepo } = makeService();
+      const user = makeUser({ id: 42 });
+      const filter = { type: 'group', join: 'AND', rules: [] } as const;
+      libraryService.findAll.mockResolvedValue([{ id: 5 }, { id: CLOUD_AUDIO_LIBRARY_ID }]);
+
+      await service.bulkSetRatingForSelection({ query: { libraryId: CLOUD_AUDIO_LIBRARY_ID, filter, q: 'dune' } }, 4, user);
+
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(warehouseCatalog.bulkSetRatingForQuery).toHaveBeenCalledWith(
+        user,
+        'audiobook',
+        { libraryId: CLOUD_AUDIO_LIBRARY_ID, filter, q: 'dune' },
+        4,
+      );
+      expect(bookRepo.findIdsByWhere).not.toHaveBeenCalled();
+      expect(bookRepo.bulkSetRating).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('searchAcrossLibraries', () => {
+    it('returns local books and cached source-backed library items as typed global search results', async () => {
+      const { service, bookRepo, libraryService, warehouseRepo, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 42 });
+      libraryService.findAll.mockResolvedValue([
+        { id: 7 },
+        { id: CLOUD_EBOOK_LIBRARY_ID },
+        { id: CLOUD_AUDIO_LIBRARY_ID },
+        { id: CLOUD_COMIC_LIBRARY_ID },
+      ]);
+      bookRepo.searchAcrossLibraries.mockResolvedValue([
+        {
+          id: 10,
+          title: 'Dune Local',
+          seriesName: null,
+          authors: ['Frank Herbert'],
+          libraryId: 7,
+          libraryName: 'Main Library',
+          formats: ['epub'],
+        },
+      ]);
+      warehouseCatalog.searchCatalogItems.mockResolvedValue([
+        {
+          id: 20,
+          mediaType: 'audiobook',
+          remoteId: 'audio-1',
+          title: 'Dune Audio',
+          series: null,
+          authors: ['Frank Herbert'],
+          narrators: ['Simon Vance'],
+          format: 'm4b',
+          hasCover: true,
+        },
+        {
+          id: 21,
+          mediaType: 'ebook',
+          remoteId: 'ebook-1',
+          title: 'Dune Ebook',
+          series: null,
+          authors: ['Frank Herbert'],
+          narrators: [],
+          format: 'epub',
+          hasCover: true,
+        },
+        {
+          id: 22,
+          mediaType: 'comic',
+          remoteId: 'comic-1',
+          title: 'Dune Comic',
+          series: 'Dune: House Atreides',
+          authors: ['Frank Herbert'],
+          narrators: [],
+          format: 'cbz',
+          hasCover: true,
+        },
+      ]);
+
+      await expect(service.searchAcrossLibraries('dune', 10, user)).resolves.toEqual([
+        {
+          type: 'catalog-item',
+          mediaType: 'audiobook',
+          remoteId: 'audio-1',
+          title: 'Dune Audio',
+          seriesName: null,
+          authors: ['Frank Herbert'],
+          narrators: ['Simon Vance'],
+          libraryName: 'Audiobooks',
+          formats: ['m4b'],
+          hasCover: true,
+        },
+        {
+          type: 'catalog-item',
+          mediaType: 'comic',
+          remoteId: 'comic-1',
+          title: 'Dune Comic',
+          seriesName: 'Dune: House Atreides',
+          authors: ['Frank Herbert'],
+          narrators: [],
+          libraryName: 'Comics',
+          formats: ['cbz'],
+          hasCover: true,
+        },
+        {
+          type: 'catalog-item',
+          mediaType: 'ebook',
+          remoteId: 'ebook-1',
+          title: 'Dune Ebook',
+          seriesName: null,
+          authors: ['Frank Herbert'],
+          narrators: [],
+          libraryName: 'Books',
+          formats: ['epub'],
+          hasCover: true,
+        },
+        {
+          type: 'book',
+          id: 10,
+          title: 'Dune Local',
+          seriesName: null,
+          authors: ['Frank Herbert'],
+          libraryId: 7,
+          libraryName: 'Main Library',
+          formats: ['epub'],
+        },
+      ]);
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(bookRepo.searchAcrossLibraries).toHaveBeenCalledWith([7], 'dune', 10, EMPTY_CONTENT_FILTER_RULES);
+      expect(warehouseCatalog.searchCatalogItems).toHaveBeenCalledWith('dune', 10, EMPTY_CONTENT_FILTER_RULES, ['ebook', 'audiobook', 'comic']);
+      expect(warehouseRepo.searchUserCatalogItems).not.toHaveBeenCalled();
+      expect(warehouseRepo.searchCatalogItems).not.toHaveBeenCalled();
+    });
+
+    it('omits source-backed library results when source-backed libraries are disabled', async () => {
+      const { service, bookRepo, libraryService, warehouseRepo, warehouseCatalog } = makeService();
+      const user = makeUser({ id: 42 });
+      libraryService.findAll.mockResolvedValue([{ id: 7 }]);
+      bookRepo.searchAcrossLibraries.mockResolvedValue([]);
+
+      await expect(service.searchAcrossLibraries('dune', 10, user)).resolves.toEqual([]);
+      expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+      expect(bookRepo.searchAcrossLibraries).toHaveBeenCalledWith([7], 'dune', 10, EMPTY_CONTENT_FILTER_RULES);
+      expect(warehouseRepo.searchUserCatalogItems).not.toHaveBeenCalled();
+      expect(warehouseCatalog.searchCatalogItems).not.toHaveBeenCalled();
+    });
+
+    it('returns no global search results for blank queries', async () => {
+      const { service, bookRepo, libraryService, warehouseCatalog } = makeService();
+
+      await expect(service.searchAcrossLibraries('   ', 10, makeUser())).resolves.toEqual([]);
+      expect(libraryService.findAll).not.toHaveBeenCalled();
+      expect(bookRepo.searchAcrossLibraries).not.toHaveBeenCalled();
+      expect(warehouseCatalog.searchCatalogItems).not.toHaveBeenCalled();
     });
   });
 

@@ -29,6 +29,10 @@ function makeReply() {
 describe('KoboThumbnailService', () => {
   const bookAccessService = {
     assertBookAccessible: vi.fn(),
+    resolveCatalogEbookRemoteId: vi.fn(),
+  };
+  const warehouseCatalog = {
+    getEbookCover: vi.fn(),
   };
   const config = {
     get: vi.fn().mockReturnValue('/app-data'),
@@ -38,8 +42,9 @@ describe('KoboThumbnailService', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
-    service = new KoboThumbnailService(config as never, bookAccessService as never);
+    service = new KoboThumbnailService(config as never, bookAccessService as never, warehouseCatalog as never);
     bookAccessService.assertBookAccessible.mockResolvedValue(undefined);
+    bookAccessService.resolveCatalogEbookRemoteId.mockResolvedValue('remote/book-12');
   });
 
   it('returns 304 when thumbnail etag matches if-none-match', async () => {
@@ -107,5 +112,58 @@ describe('KoboThumbnailService', () => {
     readdirMock.mockResolvedValueOnce([]);
 
     await expect(service.serveCover(25, undefined, makeReply() as never)).rejects.toThrow(NotFoundException);
+  });
+
+  it('serves catalog ebook covers through user-scoped catalog media with safe image headers', async () => {
+    const reply = makeReply();
+    const body = Buffer.from('img');
+    warehouseCatalog.getEbookCover.mockResolvedValue({
+      body,
+      contentType: 'image/webp; private=https://example.invalid',
+      contentLength: body.length,
+      fileName: 'private.webp',
+      status: 200,
+      contentRange: null,
+      acceptRanges: null,
+    });
+
+    await service.serveCatalogThumbnail(7, 42, undefined, reply as never);
+
+    expect(warehouseCatalog.getEbookCover).toHaveBeenCalledWith({ id: 7 }, 'remote/book-12', 'thumbnail');
+    expect(reply.header).toHaveBeenCalledWith('Cache-Control', 'max-age=86400');
+    expect(reply.header).toHaveBeenCalledWith('ETag', '"catalog-3"');
+    expect(reply.header).toHaveBeenCalledWith('Content-Length', '3');
+    expect(reply.type).toHaveBeenCalledWith('image/webp');
+    expect(reply.send).toHaveBeenCalledWith(body);
+  });
+
+  it('returns 304 for matching catalog cover etags', async () => {
+    warehouseCatalog.getEbookCover.mockResolvedValue({
+      body: Buffer.from('img'),
+      contentType: 'image/jpeg',
+      contentLength: 3,
+      fileName: null,
+      status: 200,
+      contentRange: null,
+      acceptRanges: null,
+    });
+
+    await service.serveCatalogThumbnail(7, 42, '"catalog-3"', makeReply() as never);
+
+    expect(warehouseCatalog.getEbookCover).toHaveBeenCalledWith({ id: 7 }, 'remote/book-12', 'thumbnail');
+  });
+
+  it('rejects catalog cover responses that are not images', async () => {
+    warehouseCatalog.getEbookCover.mockResolvedValue({
+      body: Buffer.from('nope'),
+      contentType: 'text/html',
+      contentLength: 4,
+      fileName: null,
+      status: 200,
+      contentRange: null,
+      acceptRanges: null,
+    });
+
+    await expect(service.serveCatalogThumbnail(7, 42, undefined, makeReply() as never)).rejects.toThrow('Library media is temporarily unavailable.');
   });
 });

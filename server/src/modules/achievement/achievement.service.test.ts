@@ -604,7 +604,7 @@ describe('AchievementService', () => {
       await service.onModuleInit();
       const removeListenerSpy = vi.spyOn(events, 'removeListener');
       service.onModuleDestroy();
-      expect(removeListenerSpy).toHaveBeenCalledTimes(7);
+      expect(removeListenerSpy).toHaveBeenCalledTimes(8);
     });
   });
 });

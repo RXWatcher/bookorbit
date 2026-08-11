@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import type { BookCard } from '@bookorbit/types'
+import { CLOUD_AUDIO_LIBRARY_ID, type BookCard } from '@bookorbit/types'
 import { useBulkEditMetadata } from '../useBulkEditMetadata'
 import type { BulkEditFields } from '../useBulkEditMetadata'
 
@@ -24,7 +24,7 @@ vi.mock('vue-sonner', () => ({
 }))
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -53,8 +53,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     narrators: [],
     customMetadata: [],
     tags: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function makeBulkResult(overrides = {}) {
@@ -126,6 +127,19 @@ describe('useBulkEditMetadata', () => {
       expect(body.query).toEqual({ libraryId: 5, q: 'fantasy', sort: [{ field: 'title', dir: 'asc' }] })
       expect(body.fields).toEqual(fields)
       expect((body as Record<string, unknown>).bookIds).toBeUndefined()
+    })
+
+    it('serializes source-backed query selection library ids as friendly aliases', async () => {
+      const ids = ref(new Set<number>())
+      const query = ref({ libraryId: CLOUD_AUDIO_LIBRARY_ID, q: 'memoir', total: 12 })
+      const { submit } = useBulkEditMetadata(ids, undefined, query)
+      mocks.api.mockResolvedValue({ ok: true, json: async () => makeBulkResult() })
+
+      await submit({ publisher: { value: 'Penguin' } })
+
+      const [, init] = mocks.api.mock.calls[0] as [string, RequestInit]
+      const body = JSON.parse(init.body as string) as { query: Record<string, unknown> }
+      expect(body.query).toEqual({ libraryId: 'audiobooks', q: 'memoir' })
     })
   })
 

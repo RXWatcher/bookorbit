@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Mock } from 'vitest';
 
+import { CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 import { LibraryController } from './library.controller';
 
 describe('LibraryController', () => {
@@ -18,6 +19,9 @@ describe('LibraryController', () => {
     updateAccess: vi.fn(),
     revokeAccess: vi.fn(),
     writeMetadataToFiles: vi.fn(),
+    querySourceBackedCatalogItems: vi.fn(),
+    querySourceBackedLibraryBooks: vi.fn(),
+    querySourceBackedLibraryJumpBuckets: vi.fn(),
   };
 
   const bookService = { queryForLibrary: vi.fn(), queryJumpBucketsForLibrary: vi.fn() };
@@ -32,6 +36,75 @@ describe('LibraryController', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  it('passes the source-backed library opt-in flag to findAll', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+
+    void controller.findAll(user, 'true');
+
+    expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+  });
+
+  it('includes source-backed libraries by default for app-visible library lists', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+
+    void controller.findAll(user, undefined);
+
+    expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: true });
+  });
+
+  it('keeps findAll filesystem-only when source-backed libraries are explicitly disabled', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+
+    void controller.findAll(user, 'false');
+
+    expect(libraryService.findAll).toHaveBeenCalledWith(user, { includeSourceBacked: false });
+  });
+
+  it('queries source-backed catalog items through the library service', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as any;
+    const page = { items: [], total: 0, page: 0, limit: 50 };
+    libraryService.querySourceBackedCatalogItems.mockReturnValue(page);
+
+    expect(controller.queryCatalogItems(-1, query, user)).toBe(page);
+    expect(libraryService.querySourceBackedCatalogItems).toHaveBeenCalledWith(user, -1, query);
+  });
+
+  it('routes source-backed library book queries through the native source-backed library service', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as any;
+    const page = { items: [{ type: 'catalog-item', remoteId: 'ebook-1' }], total: 1, page: 0, size: 50 };
+    libraryService.querySourceBackedLibraryBooks.mockReturnValue(page);
+
+    expect(controller.queryBooks(CLOUD_EBOOK_LIBRARY_ID, query, user)).toBe(page);
+    expect(libraryService.querySourceBackedLibraryBooks).toHaveBeenCalledWith(user, CLOUD_EBOOK_LIBRARY_ID, query);
+    expect(libraryService.querySourceBackedCatalogItems).not.toHaveBeenCalled();
+    expect(bookService.queryForLibrary).not.toHaveBeenCalled();
+  });
+
+  it('routes source-backed library jump buckets through the native source-backed library service', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as any;
+    const buckets = { buckets: [{ key: 'A', label: 'A', index: 0 }], total: 42 };
+    libraryService.querySourceBackedLibraryJumpBuckets.mockReturnValue(buckets);
+
+    expect(controller.queryJumpBuckets(CLOUD_COMIC_LIBRARY_ID, query, user)).toBe(buckets);
+    expect(libraryService.querySourceBackedLibraryJumpBuckets).toHaveBeenCalledWith(user, CLOUD_COMIC_LIBRARY_ID, query);
+    expect(bookService.queryJumpBucketsForLibrary).not.toHaveBeenCalled();
+  });
+
+  it('keeps filesystem library book queries on the book service', () => {
+    const user = { id: 7, isSuperuser: false } as any;
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as any;
+    const page = { items: [{ id: 123 }], total: 1, page: 0, size: 50 };
+    bookService.queryForLibrary.mockReturnValue(page);
+
+    expect(controller.queryBooks(12, query, user)).toBe(page);
+    expect(bookService.queryForLibrary).toHaveBeenCalledWith(user, 12, query);
+    expect(libraryService.querySourceBackedLibraryBooks).not.toHaveBeenCalled();
+    expect(libraryService.querySourceBackedCatalogItems).not.toHaveBeenCalled();
   });
 
   it('writeMetadataToFiles blocks non-dry-run when file write is disabled', async () => {

@@ -58,15 +58,25 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+/** Returned in place of a stored api key. Never a real key, and ignored on write. */
+export const REDACTED_API_KEY = '__redacted__';
+
 function asString(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+/** A client that saves without touching the key sends the sentinel back, which must not
+ *  overwrite the stored value. An empty string still means clear. */
+function asApiKey(value: unknown, fallback: string): string {
+  if (value === REDACTED_API_KEY) return fallback;
+  return asString(value, fallback);
 }
 
 function mergeGoogleConfig(base: ProviderConfigurations['google'], value: unknown): ProviderConfigurations['google'] {
   const next = asObject(value);
   return {
     enabled: asBoolean(next.enabled, base.enabled),
-    apiKey: asString(next.apiKey, base.apiKey),
+    apiKey: asApiKey(next.apiKey, base.apiKey),
   };
 }
 
@@ -100,7 +110,7 @@ function mergeHardcoverConfig(base: ProviderConfigurations['hardcover'], value: 
   const next = asObject(value);
   return {
     enabled: asBoolean(next.enabled, base.enabled),
-    apiKey: asString(next.apiKey, base.apiKey),
+    apiKey: asApiKey(next.apiKey, base.apiKey),
   };
 }
 
@@ -116,7 +126,7 @@ function mergeComicVineConfig(base: ProviderConfigurations['comicvine'], value: 
   const next = asObject(value);
   return {
     enabled: asBoolean(next.enabled, base.enabled),
-    apiKey: asString(next.apiKey, base.apiKey),
+    apiKey: asApiKey(next.apiKey, base.apiKey),
   };
 }
 
@@ -360,6 +370,24 @@ export class ProviderConfigService {
     });
     if (!row) return defaults;
     return this.normalizeConfig(this.parsePersistedConfig(row.value, defaults, 'get', startedAt));
+  }
+
+  /**
+   * The same configuration with every stored api key replaced by a sentinel.
+   *
+   * This is what any endpoint must return. `getConfig` yields real keys because the metadata
+   * providers need them to call their upstreams, but returning them over HTTP exposed the
+   * Google Books key and the Hardcover token to anyone who could reach the settings endpoint.
+   */
+  async getRedactedConfig(): Promise<ProviderConfigurations> {
+    const config = await this.getConfig();
+
+    return {
+      ...config,
+      google: { ...config.google, apiKey: config.google.apiKey ? REDACTED_API_KEY : '' },
+      hardcover: { ...config.hardcover, apiKey: config.hardcover.apiKey ? REDACTED_API_KEY : '' },
+      comicvine: { ...config.comicvine, apiKey: config.comicvine.apiKey ? REDACTED_API_KEY : '' },
+    };
   }
 
   async updateConfig(patch: ProviderConfigPatch): Promise<ProviderConfigurations> {

@@ -1,0 +1,15 @@
+Feature: Native catalog audiobook playback progress
+Status: Complete
+Date: 2026-06-03
+
+Completed:
+- Added component coverage that pauses the native catalog audiobook player and verifies a catalog state save.
+- Updated catalog item detail playback so pause persists position seconds, progress percentage, and reading status through native user state.
+- Added a review regression so playback progress does not overwrite explicit user statuses like Read.
+- Kept progress persistence behind existing native catalog routes and avoided integration wording in regular user copy.
+
+Verification:
+- pnpm --filter client exec vitest run src/features/warehouse/views/__tests__/CatalogItemDetailView.spec.ts
+
+Notes:
+- Superseded 2026-06-04 by the native source-backed audiobook reader launch slice: playback now routes through AudiobookReaderView with catalog-backed stream, progress, bookmarks, sessions, status preservation, and stale-position clamping.

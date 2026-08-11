@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
+import { useAnnotationsHub } from '../useAnnotationsHub'
 
 const apiMock = vi.hoisted(() => vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>())
 
@@ -23,10 +25,6 @@ function paramsFromUrl(url: string): URLSearchParams {
 
 describe('useAnnotationsHub', () => {
   beforeEach(() => {
-    // Fake only the timer functions so the search-debounce setTimeout can never
-    // leak a real timer into a later test (which would call the mock mid-reset).
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-    vi.resetModules()
     apiMock.mockReset()
     // Safe default so any watcher-triggered reload resolves cleanly.
     apiMock.mockResolvedValue(makeResponse(emptyHub))
@@ -41,7 +39,6 @@ describe('useAnnotationsHub', () => {
 
   describe('query building', () => {
     it('builds the query with the date range as local-day-boundary ISO and the notes-only flag', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.dateFrom.value = '2026-01-10'
@@ -56,7 +53,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('omits the date range and notes-only params when they are unset', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const params = paramsFromUrl(hub.exportUrl('md'))
@@ -67,9 +63,9 @@ describe('useAnnotationsHub', () => {
     })
 
     it('includes the search, book, color, style and origin filters when set', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
       hub.search.value = '  needle  '
       hub.bookFilter.value = 5
       hub.colors.value = ['#FACC15', '#4ADE80']
@@ -85,7 +81,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('ignores an unparseable date value instead of sending an empty param', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.dateFrom.value = 'not-a-date'
@@ -97,7 +92,6 @@ describe('useAnnotationsHub', () => {
 
   describe('toggles', () => {
     it('toggleNotesOnly flips the flag and clearDates resets both dates', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       expect(hub.notesOnly.value).toBe(false)
@@ -112,7 +106,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('manages selection state', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
       hub.items.value = [{ id: 1 }, { id: 2 }, { id: 3 }] as never
 
@@ -132,7 +125,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('computes pagination ranges', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.total.value = 0
@@ -157,8 +149,6 @@ describe('useAnnotationsHub', () => {
         stats: { books: 1, withNotes: 1, originBreakdown: [{ origin: 'web', count: 1 }] },
       }
       apiMock.mockResolvedValueOnce(makeResponse(body))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       await hub.load()
@@ -172,8 +162,6 @@ describe('useAnnotationsHub', () => {
 
     it('load surfaces an error message when the request fails', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({}, { ok: false, status: 500 }))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       await hub.load()
@@ -183,8 +171,6 @@ describe('useAnnotationsHub', () => {
 
     it('searchBooks queries the books facet endpoint with the trimmed term', async () => {
       apiMock.mockResolvedValueOnce(makeResponse([{ bookId: 5, bookTitle: 'B', author: 'A', count: 3 }]))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const facets = await hub.searchBooks('  dune  ')
@@ -198,8 +184,6 @@ describe('useAnnotationsHub', () => {
 
     it('resolveSelectedBook fills the label for the selected book id', async () => {
       apiMock.mockResolvedValueOnce(makeResponse([{ bookId: 7, bookTitle: 'Dune', author: 'FH', count: 9 }]))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
       hub.hydrate({ bookFilter: 7 })
 
@@ -211,7 +195,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('resolveSelectedBook clears the label when no book is selected', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       await hub.resolveSelectedBook()
@@ -221,7 +204,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('bulk returns 0 and skips the request when nothing is selected', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       expect(await hub.bulk('trash')).toBe(0)
@@ -230,8 +212,6 @@ describe('useAnnotationsHub', () => {
 
     it('bulk posts the action and returns the affected count', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({ affected: 2 }))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
       hub.selectedIds.value = new Set([1, 2])
 
@@ -247,8 +227,6 @@ describe('useAnnotationsHub', () => {
 
     it('restore posts and resolves true on success', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({}))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const ok = await hub.restore(7)
@@ -259,8 +237,6 @@ describe('useAnnotationsHub', () => {
 
     it('purge deletes and resolves ok on success', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({}, { ok: true, status: 204 }))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const result = await hub.purge(7)
@@ -271,8 +247,6 @@ describe('useAnnotationsHub', () => {
 
     it('purge surfaces the conflict message on 409', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({ message: 'Still queued' }, { ok: false, status: 409 }))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const result = await hub.purge(7)
@@ -282,8 +256,6 @@ describe('useAnnotationsHub', () => {
 
     it('purge returns a generic failure on other errors', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({}, { ok: false, status: 500 }))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const result = await hub.purge(7)
@@ -294,8 +266,6 @@ describe('useAnnotationsHub', () => {
 
   describe('reactivity', () => {
     it('reloads on filter changes and resets the book filter when the tab changes', async () => {
-      const { nextTick } = await import('vue')
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.bookFilter.value = 5
@@ -312,7 +282,6 @@ describe('useAnnotationsHub', () => {
 
   describe('sort key', () => {
     it('maps the merged sort key to sortBy/sortDir and back', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       expect(hub.sortKey.value).toBe('newest')
@@ -333,7 +302,6 @@ describe('useAnnotationsHub', () => {
 
   describe('popover filters', () => {
     it('builds chips, counts them, and clears individually or all at once', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       expect(hub.popoverFilterCount.value).toBe(0)
@@ -361,7 +329,6 @@ describe('useAnnotationsHub', () => {
     })
 
     it('does not chip the book or notes-only filters', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.bookFilter.value = 5
@@ -374,8 +341,6 @@ describe('useAnnotationsHub', () => {
 
   describe('hydrate', () => {
     it('restores state and keeps the hydrated page despite the filter watcher', async () => {
-      const { nextTick } = await import('vue')
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.hydrate({ colors: ['#FACC15'], notesOnly: true, sortKey: 'oldest', page: 3 })
@@ -394,11 +359,9 @@ describe('useAnnotationsHub', () => {
 
   describe('search debounce', () => {
     it('defers the search-triggered reload until the debounce elapses', async () => {
-      vi.useFakeTimers()
       try {
-        const { nextTick } = await import('vue')
-        const { useAnnotationsHub } = await import('../useAnnotationsHub')
         const hub = useAnnotationsHub()
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
         apiMock.mockClear()
 
         hub.search.value = 'dune'
@@ -416,7 +379,6 @@ describe('useAnnotationsHub', () => {
 
   describe('filter reset', () => {
     it('hasActiveFilters reflects active filters and resetAllFilters clears them', async () => {
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       expect(hub.hasActiveFilters.value).toBe(false)
@@ -441,8 +403,6 @@ describe('useAnnotationsHub', () => {
   describe('updateAnnotation', () => {
     it('optimistically patches the item and PATCHes the book-scoped endpoint', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({}))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
       hub.items.value = [{ id: 1, bookId: 5, note: 'old', color: '#FACC15' }] as never
 
@@ -458,8 +418,6 @@ describe('useAnnotationsHub', () => {
 
     it('reverts the optimistic change when the request fails', async () => {
       apiMock.mockResolvedValueOnce(makeResponse({}, { ok: false, status: 500 }))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
       hub.items.value = [{ id: 1, bookId: 5, note: 'old' }] as never
 
@@ -472,8 +430,6 @@ describe('useAnnotationsHub', () => {
 
   describe('load sequencing', () => {
     it('reloads exactly once when a filter changes while on a later page', async () => {
-      const { nextTick } = await import('vue')
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       hub.page.value = 3
@@ -495,8 +451,6 @@ describe('useAnnotationsHub', () => {
       })
       const freshBody = { items: [{ id: 2 }], total: 2, page: 1, pageSize: 25, stats: emptyHub.stats }
       apiMock.mockReturnValueOnce(stalePending).mockResolvedValueOnce(makeResponse(freshBody))
-
-      const { useAnnotationsHub } = await import('../useAnnotationsHub')
       const hub = useAnnotationsHub()
 
       const stale = hub.load()

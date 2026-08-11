@@ -169,4 +169,33 @@ describe('useAnnotations', () => {
     expect(apiMock).toHaveBeenCalledWith('/api/v1/books/9/annotations/1', { method: 'DELETE' })
     expect(store.annotations.value.map((a) => a.id)).toEqual([2])
   })
+
+  it('loads, creates, updates, and removes annotations through a custom store', async () => {
+    const initial = [makeAnnotation(1)]
+    const created = makeAnnotation(2)
+    const createdCfi = created.cfi ?? 'epubcfi(/6/2)'
+    const createdColor = created.color ?? '#FACC15'
+    const updated = { ...created, note: 'Updated note' }
+    const customStore = {
+      load: vi.fn<() => Promise<Annotation[]>>().mockResolvedValue(initial),
+      create: vi.fn<() => Promise<Annotation>>().mockResolvedValue(created),
+      update: vi.fn<() => Promise<Annotation>>().mockResolvedValue(updated),
+      remove: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    }
+
+    const store = useAnnotations(customStore)
+
+    await store.load(0)
+    const result = await store.create(0, { cfi: createdCfi, text: created.text, color: createdColor, style: created.style })
+    await store.updateNote(0, created.id, 'Updated note')
+    await store.remove(0, initial[0]!.id)
+
+    expect(result).toEqual(created)
+    expect(customStore.load).toHaveBeenCalled()
+    expect(customStore.create).toHaveBeenCalledWith({ cfi: createdCfi, text: created.text, color: createdColor, style: created.style })
+    expect(customStore.update).toHaveBeenCalledWith(created.id, { note: 'Updated note' })
+    expect(customStore.remove).toHaveBeenCalledWith(initial[0]!.id)
+    expect(store.annotations.value).toEqual([updated])
+    expect(apiMock).not.toHaveBeenCalled()
+  })
 })

@@ -16,7 +16,12 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 
 COPY packages/ ./packages/
 COPY client/ ./client/
-RUN pnpm --filter client run build-only
+# `build`, not `build-only`: build-only is `vite build` alone, which does NOT
+# typecheck. That is how a Record<ScrollerType, ShelfNameKey> missing two
+# required keys reached production and rendered
+# "dashboard.settings.shelfNames.undefined" on the dashboard. `build` is
+# run-p type-check build-only, matching what the server stage already does.
+RUN pnpm --filter client run build
 
 # Stage 2: Build server + create deploy bundle
 FROM base AS server-builder
@@ -37,6 +42,7 @@ RUN pnpm --filter server run build
 RUN pnpm --config.allow-unused-patches=true --filter server deploy --prod --legacy /deploy
 RUN cp -r /app/server/dist /deploy/dist
 RUN mkdir -p /deploy/migrations && cp -r /app/server/src/db/migrations/. /deploy/migrations/
+RUN mkdir -p /deploy/warehouse-migrations && cp -r /app/server/src/db/warehouse-migrations/. /deploy/warehouse-migrations/
 
 # Stage 3: Runtime image
 FROM ${NODE_IMAGE} AS runtime
@@ -49,8 +55,7 @@ ENV KOREADER_PLUGIN_PATH=/app/koreader-plugin/bookorbit.koplugin
 
 COPY server/requirements/kobo-cloudscraper.txt /tmp/kobo-cloudscraper-requirements.txt
 
-RUN apk upgrade --no-cache && \
-    apk add --no-cache poppler-utils su-exec ffmpeg python3 py3-pip tini && \
+RUN apk add --no-cache poppler-utils su-exec ffmpeg python3 py3-pip tini && \
     python3 -m venv /opt/bookorbit-python && \
     /opt/bookorbit-python/bin/python -m pip install --no-cache-dir -r /tmp/kobo-cloudscraper-requirements.txt && \
     rm -f /tmp/kobo-cloudscraper-requirements.txt && \

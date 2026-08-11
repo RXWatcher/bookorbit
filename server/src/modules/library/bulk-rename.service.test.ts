@@ -465,9 +465,15 @@ describe('BulkRenameService', () => {
 
       expect(fileRenameService.performRename).toHaveBeenCalledTimes(1);
       expect(fileRenameService.performRename).toHaveBeenCalledWith(1, 42, false, true);
-      expect(events).toEqual([{ bookId: 1, status: 'success', reason: undefined }]);
-      expect(summary.processed).toBe(1);
+      expect(events).toEqual([
+        { bookId: 2, status: 'skipped', reason: 'path unchanged' },
+        { bookId: 3, status: 'skipped', reason: 'Multiple books would resolve to the same path' },
+        { bookId: 4, status: 'skipped', reason: 'Multiple books would resolve to the same path' },
+        { bookId: 1, status: 'success', reason: undefined },
+      ]);
+      expect(summary.processed).toBe(4);
       expect(summary.succeeded).toBe(1);
+      expect(summary.skipped).toBe(3);
     });
 
     it('suppresses per-book notifications during bulk rename', async () => {
@@ -495,7 +501,7 @@ describe('BulkRenameService', () => {
       });
 
       expect(fileRenameService.performRename).not.toHaveBeenCalled();
-      expect(summary).toMatchObject({ processed: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: false });
+      expect(summary).toMatchObject({ processed: 1, succeeded: 0, failed: 0, skipped: 1, cancelled: false });
       expect(notificationService.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'bulk_rename_completed' }));
     });
 

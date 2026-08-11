@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 
 import { StatisticsFilterQueryDto } from './statistics-filter-query.dto';
 
@@ -20,6 +21,14 @@ describe('StatisticsFilterQueryDto', () => {
 
     expect(errors).toHaveLength(0);
     expect(dto.libraryIds).toEqual([5, 8]);
+  });
+
+  it('coerces source-backed library aliases into virtual library ids', async () => {
+    const dto = plainToInstance(StatisticsFilterQueryDto, { libraryIds: ['ebooks', 'audiobooks', 'comics'] });
+    const errors = await validate(dto);
+
+    expect(errors).toHaveLength(0);
+    expect(dto.libraryIds).toEqual([CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID]);
   });
 
   it('keeps libraryIds undefined when omitted', async () => {

@@ -1,0 +1,21 @@
+Book Warehouse ABS-Style Audiobook Mapping Progress
+2026-06-03
+
+Completed:
+- Added read-only ABS-style compatibility mapping for current-user-owned cached catalog audiobooks.
+- Added opaque `boabs_` item IDs plus synthetic media, file, chapter, and progress IDs.
+- Added synthetic track filenames so cached upstream file names, paths, URLs, source IDs, and secrets are not reflected.
+- Added repository ownership lookup joining current user, media type, and local catalog item ID.
+- Added focused service, controller, and repository tests for access control, safe IDs, progress mapping, and leak prevention.
+
+Review checkpoints:
+- Spec/privacy review found upstream filename reflection risk; fixed with synthetic filenames and toxic-filename regression coverage.
+- Spec/privacy re-review approved.
+- Code-quality review approved.
+
+Verification:
+- pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.controller.test.ts src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse.repository.test.ts => 3 files / 84 tests passed.
+
+Notes:
+- The old warehouse-native compatibility route was removed; ABS item reads now belong under `audiobookshelf-compat`.
+- This is a compatibility mapping slice, not a full Audiobookshelf API surface or progress mutation endpoint.

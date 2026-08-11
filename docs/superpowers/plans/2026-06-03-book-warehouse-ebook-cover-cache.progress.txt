@@ -1,0 +1,22 @@
+Feature: Persistent catalog ebook cover cache
+Status: Complete
+Started: 2026-06-03
+Completed: 2026-06-03
+
+Ralph loop:
+- Baseline before edits: `pnpm run typecheck && pnpm run test` passed.
+- RED: Added service-level test proving cached ebook covers are returned only after current-user catalog state verification and without live client calls.
+- GREEN: Added `WarehouseCatalogCoverCacheService`, registered it in `WarehouseModule`, and wrapped `getEbookCover` with read-through/write-through cache behavior.
+- Hardening: Added filesystem cache tests for sanitized content types, no upstream filename replay, raster-only persistence, stream-backed production responses, source-key isolation, unknown stream sizes, checksum validation, and oversized-stream behavior.
+- Review checkpoint: Privacy review found active `image/*` payload risk; fixed by raster content-type allowlist.
+- Review checkpoint: Code review found mixed metadata/body race risk; fixed by sha256 metadata validation.
+- Review checkpoint: Re-review found Buffer-only writes and missing source identity; fixed stream materialization and credential-scoped cache keys.
+- Review checkpoint: Final stream review found lying content-length drain risk; fixed with safe empty response on over-limit materialization.
+- Focused verification: `pnpm --filter server exec vitest run src/modules/warehouse/warehouse-catalog.service.test.ts src/modules/warehouse/warehouse-catalog-cover-cache.service.test.ts` passed.
+- Type verification: `pnpm run typecheck` passed.
+
+Notes:
+- Cached files are stored under app data with hashed source, remote id, and requested size path segments.
+- Cache reads happen only after `ebookBinaryRequest` verifies settings, cached catalog item existence, and current-user `inLibrary` state.
+- Cache entries store only raster cover bytes plus sanitized content type, length, and sha256 metadata.
+- Live client requests never receive the internal cache source key.

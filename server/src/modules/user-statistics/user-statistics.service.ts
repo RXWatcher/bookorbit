@@ -1,7 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 
 import type {
   ChordDiagramData,
+  WarehouseMediaType,
   ReadingSessionSource,
   ReadingSessionSourceBucket,
   UserCompletionLatencyDistribution,
@@ -23,10 +24,13 @@ import type {
   UserSessionArchetypePoint,
   UserStatisticsSummary,
 } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 import { READING_SESSION_SOURCE_BUCKETS, emptySourceBucketRecord, toReadingSessionSourceBucket } from '@bookorbit/types';
 
 import type { RequestUser } from '../../common/types/request-user';
 import { StatsCache } from '../../common/cache/stats-cache';
+import { LibraryService } from '../library/library.service';
+import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service';
 import { resolveTimeZone } from '../../common/utils/timezone.utils';
 import type { UserDailyReadingQueryDto } from './dto/user-daily-reading-query.dto';
 import type { UserGoalTrajectoryQueryDto } from './dto/user-goal-trajectory-query.dto';
@@ -51,11 +55,21 @@ const SESSION_ARCHETYPES_DEFAULT_DAYS = 365;
 const USER_STATS_CACHE_TTL_MS = 300_000;
 const USER_STATS_CACHE_MAX_ENTRIES = 2_000;
 
+type UserStatisticsLibraryScope = {
+  localLibraryIds: number[] | undefined;
+  sourceBackedMediaTypes: WarehouseMediaType[];
+  hasExplicitLibraryFilter: boolean;
+};
+
 @Injectable()
 export class UserStatisticsService {
   private readonly cache = new StatsCache({ ttlMs: USER_STATS_CACHE_TTL_MS, maxEntries: USER_STATS_CACHE_MAX_ENTRIES });
 
-  constructor(private readonly repo: UserStatisticsRepository) {}
+  constructor(
+    private readonly repo: UserStatisticsRepository,
+    @Optional() private readonly libraryService?: LibraryService,
+    @Optional() private readonly warehouseCatalogService?: WarehouseCatalogService,
+  ) {}
 
   private startOfUtcDay(date: Date): Date {
     return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
@@ -116,6 +130,78 @@ export class UserStatisticsService {
     return Number(value.toFixed(4));
   }
 
+  private mergeDailyReadingStats(items: UserDailyReadingStat[]): UserDailyReadingStat[] {
+    const byDay = new Map<string, UserDailyReadingStat>();
+    for (const item of items) {
+      const existing = byDay.get(item.day);
+      byDay.set(item.day, {
+        day: item.day,
+        readingSeconds: (existing?.readingSeconds ?? 0) + item.readingSeconds,
+        progressDelta: (existing?.progressDelta ?? 0) + item.progressDelta,
+        eventsCount: (existing?.eventsCount ?? 0) + item.eventsCount,
+      });
+    }
+    return [...byDay.values()]
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .map((item) => ({ ...item, progressDelta: this.roundProgressDelta(item.progressDelta) }));
+  }
+
+  private mergeFavoriteReadingDays(items: UserFavoriteDayStat[]): UserFavoriteDayStat[] {
+    const byDay = new Map<number, UserFavoriteDayStat>();
+    for (const item of items) {
+      const existing = byDay.get(item.dayOfWeek);
+      byDay.set(item.dayOfWeek, {
+        dayOfWeek: item.dayOfWeek,
+        readingSeconds: (existing?.readingSeconds ?? 0) + item.readingSeconds,
+        eventsCount: (existing?.eventsCount ?? 0) + item.eventsCount,
+        byFormat: this.mergeNumberRecords(existing?.byFormat, item.byFormat),
+        bySource: this.mergeNumberRecords(existing?.bySource, item.bySource) as Record<ReadingSessionSourceBucket, number>,
+      });
+    }
+    return [...byDay.values()].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+  }
+
+  private mergeGenreReadingTime(items: UserGenreReadingTimeItem[]): UserGenreReadingTimeItem[] {
+    const byGenre = new Map<string, { readingSeconds: number; bySource: Record<ReadingSessionSourceBucket, number> }>();
+    for (const item of items) {
+      const existing = byGenre.get(item.genre);
+      byGenre.set(item.genre, {
+        readingSeconds: (existing?.readingSeconds ?? 0) + item.readingSeconds,
+        bySource: this.mergeNumberRecords(existing?.bySource, item.bySource) as Record<ReadingSessionSourceBucket, number>,
+      });
+    }
+    return [...byGenre.entries()]
+      .map(([genre, entry]) => ({ genre, readingSeconds: entry.readingSeconds, bySource: entry.bySource }))
+      .sort((a, b) => b.readingSeconds - a.readingSeconds)
+      .slice(0, 30);
+  }
+
+  private mergeNumberRecords(left: Record<string, number> | undefined, right: Record<string, number> | undefined): Record<string, number> {
+    const merged: Record<string, number> = { ...(left ?? {}) };
+    for (const [key, value] of Object.entries(right ?? {})) {
+      merged[key] = (merged[key] ?? 0) + value;
+    }
+    return merged;
+  }
+
+  private mergeChordData(left: ChordDiagramData, right: ChordDiagramData): ChordDiagramData {
+    const nodeNames = new Set([...left.nodes.map((node) => node.name), ...right.nodes.map((node) => node.name)]);
+    const links = new Map<string, { source: string; target: string; value: number }>();
+    for (const link of [...left.links, ...right.links]) {
+      const key = `${link.source}\u0000${link.target}`;
+      const existing = links.get(key);
+      links.set(key, {
+        source: link.source,
+        target: link.target,
+        value: (existing?.value ?? 0) + link.value,
+      });
+    }
+    return {
+      nodes: [...nodeNames].map((name) => ({ name })),
+      links: [...links.values()].sort((a, b) => b.value - a.value),
+    };
+  }
+
   private percentile(sorted: number[], p: number): number | null {
     if (sorted.length === 0) return null;
     if (sorted.length === 1) return Number(sorted[0].toFixed(1));
@@ -139,10 +225,25 @@ export class UserStatisticsService {
     return `${metric}|su=${user.isSuperuser ? 1 : 0}|${pieces.join('|')}`;
   }
 
+  private shouldLoadLocal(scope: UserStatisticsLibraryScope): boolean {
+    return (
+      scope.localLibraryIds === undefined ||
+      scope.localLibraryIds.length > 0 ||
+      (!scope.hasExplicitLibraryFilter && scope.sourceBackedMediaTypes.length === 0)
+    );
+  }
+
   async getSummary(user: RequestUser, query: UserStatisticsFilterQueryDto): Promise<UserStatisticsSummary> {
     const key = this.buildUserCacheKey('summary', user, { libraries: this.normalizeLibraryIds(query.libraryIds) });
     return this.cache.get(String(user.id), key, async () => {
-      const summary = await this.repo.getSummary(user.id, user.isSuperuser, query.libraryIds);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localSummary, sourceSummary] = await Promise.all([
+        this.shouldLoadLocal(scope) ? this.repo.getSummary(user.id, user.isSuperuser, scope.localLibraryIds) : this.emptySummary(),
+        scope.sourceBackedMediaTypes.length > 0 && this.warehouseCatalogService
+          ? this.warehouseCatalogService.getUserReadingSummary(user.id, user.contentFilters, scope.sourceBackedMediaTypes)
+          : this.emptySummary(),
+      ]);
+      const summary = this.mergeSummaries(localSummary, sourceSummary);
       return {
         ...summary,
         meanProgressPercent: Number(summary.meanProgressPercent.toFixed(2)),
@@ -154,11 +255,14 @@ export class UserStatisticsService {
     const days = query.days ?? 365;
     const key = this.buildUserCacheKey('daily-reading', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const items = await this.repo.getDailyReadingStats(user.id, user.isSuperuser, query.libraryIds, days);
-      return items.map((item) => ({
-        ...item,
-        progressDelta: this.roundProgressDelta(item.progressDelta),
-      }));
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localItems, sourceItems] = await Promise.all([
+        this.shouldLoadLocal(scope) ? this.repo.getDailyReadingStats(user.id, user.isSuperuser, scope.localLibraryIds, days) : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogDailyReadingStats(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      return this.mergeDailyReadingStats([...localItems, ...sourceItems]);
     });
   }
 
@@ -166,8 +270,17 @@ export class UserStatisticsService {
     const days = query.days ?? HEATMAP_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('reading-heatmap', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const items = await this.repo.getDailyReadingStats(user.id, user.isSuperuser, query.libraryIds, days);
-      const bySourceRows = await this.repo.getDailyReadingSecondsBySource(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localItems, sourceItems, bySourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope) ? this.repo.getDailyReadingStats(user.id, user.isSuperuser, scope.localLibraryIds, days) : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogDailyReadingStats(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+        this.shouldLoadLocal(scope)
+          ? this.repo.getDailyReadingSecondsBySource(user.id, user.isSuperuser, scope.localLibraryIds, days)
+          : Promise.resolve([]),
+      ]);
+      const items = this.mergeDailyReadingStats([...localItems, ...sourceItems]);
       const byDay = new Map(items.map((item) => [item.day, item]));
       const bySourceByDay = new Map<string, Record<ReadingSessionSourceBucket, number>>();
       for (const row of bySourceRows) {
@@ -221,7 +334,16 @@ export class UserStatisticsService {
     const timeZone = resolveTimeZone((user.settings as { timezone?: unknown } | undefined)?.timezone, 'UTC');
     const key = this.buildUserCacheKey('peak-hours', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days, timeZone });
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getPeakReadingHours(user.id, user.isSuperuser, query.libraryIds, days, timeZone);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getPeakReadingHours(user.id, user.isSuperuser, scope.localLibraryIds, days, timeZone)
+          : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogPeakReadingHours(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      const rows = [...localRows, ...sourceRows];
 
       const byHour = new Map<
         number,
@@ -256,12 +378,18 @@ export class UserStatisticsService {
     const days = query.days ?? BEHAVIOR_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('favorite-days', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getFavoriteReadingDays(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope) ? this.repo.getFavoriteReadingDays(user.id, user.isSuperuser, scope.localLibraryIds, days) : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogFavoriteReadingDays(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
       const byDay = new Map<
         number,
         { readingSeconds: number; eventsCount: number; byFormat: Record<string, number>; bySource: Record<ReadingSessionSourceBucket, number> }
       >();
-      for (const row of rows) {
+      for (const row of [...localRows, ...sourceRows]) {
         let entry = byDay.get(row.dayOfWeek);
         if (!entry) {
           entry = { readingSeconds: 0, eventsCount: 0, byFormat: {}, bySource: emptySourceBucketRecord() };
@@ -295,6 +423,9 @@ export class UserStatisticsService {
     startedAt: Date;
     endedAt: Date;
     durationSeconds: number;
+    itemSource?: 'local' | 'warehouse';
+    mediaType?: WarehouseMediaType;
+    remoteId?: string;
   }): UserReadingSessionTimelineItem {
     return {
       sessionId: row.sessionId,
@@ -305,6 +436,9 @@ export class UserStatisticsService {
       startedAt: row.startedAt.toISOString(),
       endedAt: row.endedAt.toISOString(),
       durationSeconds: row.durationSeconds,
+      source: row.itemSource,
+      mediaType: row.mediaType,
+      remoteId: row.remoteId,
     };
   }
 
@@ -326,14 +460,31 @@ export class UserStatisticsService {
     });
 
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getSessionTimelineItems(
-        user.id,
-        user.isSuperuser,
-        query.libraryIds,
-        weekStart,
-        weekEndExclusive,
-        SESSION_TIMELINE_MAX_SESSIONS,
-      );
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getSessionTimelineItems(
+              user.id,
+              user.isSuperuser,
+              scope.localLibraryIds,
+              weekStart,
+              weekEndExclusive,
+              SESSION_TIMELINE_MAX_SESSIONS,
+            )
+          : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogSessionTimelineItems(
+              user.id,
+              scope.sourceBackedMediaTypes,
+              weekStart,
+              weekEndExclusive,
+              SESSION_TIMELINE_MAX_SESSIONS,
+            )
+          : Promise.resolve([]),
+      ]);
+      const rows = [...localRows, ...sourceRows]
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+        .slice(0, SESSION_TIMELINE_MAX_SESSIONS);
       const weekEnd = new Date(weekStart);
       weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
 
@@ -362,7 +513,9 @@ export class UserStatisticsService {
       throw new BadRequestException('Session end time must be after start time');
     }
 
-    const existing = await this.repo.getSessionTimelineSessionById(user.id, user.isSuperuser, query.libraryIds, sessionId);
+    const localLibraryIds = await this.resolveLocalSessionLibraryIds(user, query.libraryIds);
+    const existing =
+      localLibraryIds === null ? null : await this.repo.getSessionTimelineSessionById(user.id, user.isSuperuser, localLibraryIds, sessionId);
     if (!existing) {
       throw new NotFoundException('Reading session not found');
     }
@@ -400,7 +553,10 @@ export class UserStatisticsService {
     const days = query.days ?? COMPLETION_TIMELINE_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('completion-timeline', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getCompletionTimeline(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const rows = await this.getMonthlyCompletionRows(user, scope, days, (localLibraryIds) =>
+        this.repo.getCompletionTimeline(user.id, user.isSuperuser, localLibraryIds, days),
+      );
       const byMonth = new Map(rows.map((row) => [`${row.year}-${row.month}`, row.count]));
       const start = this.startOfUtcMonth(this.sinceDateForDays(days));
       const end = this.startOfUtcMonth(new Date());
@@ -429,7 +585,10 @@ export class UserStatisticsService {
       goalBooks,
     });
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getMonthlyCompletions(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const rows = await this.getMonthlyCompletionRows(user, scope, days, (localLibraryIds) =>
+        this.repo.getMonthlyCompletions(user.id, user.isSuperuser, localLibraryIds, days),
+      );
       const byMonth = new Map(rows.map((row) => [`${row.year}-${row.month}`, row.count]));
       const start = this.startOfUtcMonth(this.sinceDateForDays(days));
       const end = this.startOfUtcMonth(new Date());
@@ -471,13 +630,14 @@ export class UserStatisticsService {
       const currentUntilExclusive = new Date(this.startOfUtcDay(new Date()));
       currentUntilExclusive.setUTCDate(currentUntilExclusive.getUTCDate() + 1);
 
-      const current = await this.repo.getProgressFunnelInRange(user.id, user.isSuperuser, query.libraryIds, currentSince, currentUntilExclusive);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const current = await this.getProgressFunnelInRange(user, scope, currentSince, currentUntilExclusive);
 
       let previous: UserProgressFunnel | null = null;
       if (comparePrevious) {
         const previousSince = new Date(currentSince);
         previousSince.setUTCDate(previousSince.getUTCDate() - days);
-        previous = await this.repo.getProgressFunnelInRange(user.id, user.isSuperuser, query.libraryIds, previousSince, currentSince);
+        previous = await this.getProgressFunnelInRange(user, scope, previousSince, currentSince);
       }
 
       return {
@@ -488,11 +648,141 @@ export class UserStatisticsService {
     });
   }
 
+  private async resolveLibraryScope(user: RequestUser, requestedLibraryIds?: number[]): Promise<UserStatisticsLibraryScope> {
+    const hasExplicitLibraryFilter = requestedLibraryIds !== undefined && requestedLibraryIds.length > 0;
+
+    if (!this.libraryService || !this.warehouseCatalogService) {
+      return {
+        localLibraryIds: requestedLibraryIds ?? undefined,
+        sourceBackedMediaTypes: [],
+        hasExplicitLibraryFilter,
+      };
+    }
+
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    const accessibleIds = new Set(libraries.map((library) => library.id));
+    const requestedIds = requestedLibraryIds && requestedLibraryIds.length > 0 ? requestedLibraryIds : [...accessibleIds];
+    const selectedIds = requestedIds.filter((id) => accessibleIds.has(id));
+
+    return {
+      localLibraryIds: selectedIds.filter((id) => id > 0),
+      sourceBackedMediaTypes: sourceBackedMediaTypesForLibraryIds(selectedIds),
+      hasExplicitLibraryFilter,
+    };
+  }
+
+  private emptySummary(): UserStatisticsSummary {
+    return {
+      trackedBooks: 0,
+      startedBooks: 0,
+      inProgressBooks: 0,
+      completedBooks: 0,
+      meanProgressPercent: 0,
+    };
+  }
+
+  private mergeSummaries(left: UserStatisticsSummary, right: UserStatisticsSummary): UserStatisticsSummary {
+    const trackedBooks = left.trackedBooks + right.trackedBooks;
+    const weightedProgress =
+      trackedBooks > 0 ? (left.meanProgressPercent * left.trackedBooks + right.meanProgressPercent * right.trackedBooks) / trackedBooks : 0;
+
+    return {
+      trackedBooks,
+      startedBooks: left.startedBooks + right.startedBooks,
+      inProgressBooks: left.inProgressBooks + right.inProgressBooks,
+      completedBooks: left.completedBooks + right.completedBooks,
+      meanProgressPercent: weightedProgress,
+    };
+  }
+
+  private emptyProgressFunnel(): UserProgressFunnel {
+    return {
+      started: 0,
+      reached25: 0,
+      reached50: 0,
+      reached75: 0,
+      completed: 0,
+    };
+  }
+
+  private mergeProgressFunnels(left: UserProgressFunnel, right: UserProgressFunnel): UserProgressFunnel {
+    return {
+      started: left.started + right.started,
+      reached25: left.reached25 + right.reached25,
+      reached50: left.reached50 + right.reached50,
+      reached75: left.reached75 + right.reached75,
+      completed: left.completed + right.completed,
+    };
+  }
+
+  private mergeMonthlyCompletions(left: UserCompletionTimelinePoint[], right: UserCompletionTimelinePoint[]): UserCompletionTimelinePoint[] {
+    const byMonth = new Map<string, UserCompletionTimelinePoint>();
+    for (const row of [...left, ...right]) {
+      const key = `${row.year}-${row.month}`;
+      const existing = byMonth.get(key);
+      byMonth.set(key, {
+        year: row.year,
+        month: row.month,
+        count: (existing?.count ?? 0) + row.count,
+      });
+    }
+    return [...byMonth.values()].sort((a, b) => a.year - b.year || a.month - b.month);
+  }
+
+  private async getMonthlyCompletionRows(
+    user: RequestUser,
+    scope: UserStatisticsLibraryScope,
+    days: number,
+    loadLocal: (localLibraryIds: number[] | undefined) => Promise<UserCompletionTimelinePoint[]>,
+  ): Promise<UserCompletionTimelinePoint[]> {
+    const [localRows, sourceRows] = await Promise.all([
+      this.shouldLoadLocal(scope) ? loadLocal(scope.localLibraryIds) : Promise.resolve([]),
+      scope.sourceBackedMediaTypes.length > 0 && this.warehouseCatalogService
+        ? this.warehouseCatalogService.getUserMonthlyCompletions(user.id, user.contentFilters, scope.sourceBackedMediaTypes, days)
+        : Promise.resolve([]),
+    ]);
+
+    return this.mergeMonthlyCompletions(localRows, sourceRows);
+  }
+
+  private async getProgressFunnelInRange(
+    user: RequestUser,
+    scope: UserStatisticsLibraryScope,
+    since: Date,
+    untilExclusive: Date,
+  ): Promise<UserProgressFunnel> {
+    const [localFunnel, sourceFunnel] = await Promise.all([
+      this.shouldLoadLocal(scope)
+        ? this.repo.getProgressFunnelInRange(user.id, user.isSuperuser, scope.localLibraryIds, since, untilExclusive)
+        : this.emptyProgressFunnel(),
+      scope.sourceBackedMediaTypes.length > 0 && this.warehouseCatalogService
+        ? this.warehouseCatalogService.getUserProgressFunnelInRange(user.id, user.contentFilters, scope.sourceBackedMediaTypes, since, untilExclusive)
+        : this.emptyProgressFunnel(),
+    ]);
+
+    return this.mergeProgressFunnels(localFunnel, sourceFunnel);
+  }
+
+  private async resolveLocalSessionLibraryIds(user: RequestUser, requestedLibraryIds?: number[]): Promise<number[] | undefined | null> {
+    const scope = await this.resolveLibraryScope(user, requestedLibraryIds);
+    if (scope.localLibraryIds === undefined) return undefined;
+    return scope.localLibraryIds.length > 0 ? scope.localLibraryIds : null;
+  }
+
   async getCompletionLatency(user: RequestUser, query: UserDailyReadingQueryDto): Promise<UserCompletionLatencyDistribution> {
     const days = query.days ?? COMPLETION_LATENCY_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('completion-latency', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const values = await this.repo.getCompletionLatencyDays(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localValues, sourceValues] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getCompletionLatencyDays(user.id, user.isSuperuser, scope.localLibraryIds, days)
+          : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0 && this.warehouseCatalogService
+          ? this.warehouseCatalogService.getUserCompletionLatencyDays(user.id, user.contentFilters, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      const values = [...localValues, ...sourceValues];
       const sorted = [...values].sort((a, b) => a - b);
 
       const buckets = [
@@ -527,7 +817,16 @@ export class UserStatisticsService {
     const days = query.days ?? READING_SURVIVAL_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('reading-survival', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const values = await this.repo.getReadingSurvivalMaxProgress(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localValues, sourceValues] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getReadingSurvivalMaxProgress(user.id, user.isSuperuser, scope.localLibraryIds, days)
+          : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0 && this.warehouseCatalogService
+          ? this.warehouseCatalogService.getUserReadingSurvivalMaxProgress(user.id, user.contentFilters, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      const values = [...localValues, ...sourceValues];
       const total = values.length;
       const thresholds = Array.from({ length: 21 }, (_, i) => i * 5);
       return thresholds.map((threshold) => {
@@ -545,7 +844,16 @@ export class UserStatisticsService {
     const days = query.days ?? COMPLETION_RACE_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('completion-race', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getCompletionRaceRawSessions(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getCompletionRaceRawSessions(user.id, user.isSuperuser, scope.localLibraryIds, days)
+          : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogCompletionRaceRawSessions(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      const rows = [...localRows, ...sourceRows];
       const byBook = new Map<number, { title: string; sessions: { startedAt: Date; endProgress: number }[] }>();
 
       for (const row of rows) {
@@ -576,16 +884,33 @@ export class UserStatisticsService {
   async getSessionArchetypes(user: RequestUser, query: UserDailyReadingQueryDto): Promise<UserSessionArchetypePoint[]> {
     const days = query.days ?? SESSION_ARCHETYPES_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('session-archetypes', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
-    return this.cache.get(String(user.id), key, () => this.repo.getSessionArchetypePoints(user.id, user.isSuperuser, query.libraryIds, days));
+    return this.cache.get(String(user.id), key, async () => {
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getSessionArchetypePoints(user.id, user.isSuperuser, scope.localLibraryIds, days)
+          : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogSessionArchetypePoints(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      return [...localRows, ...sourceRows];
+    });
   }
 
   async getGenreReadingTime(user: RequestUser, query: UserDailyReadingQueryDto): Promise<UserGenreReadingTimeItem[]> {
     const days = query.days ?? GENRE_READING_TIME_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('genre-reading-time', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
     return this.cache.get(String(user.id), key, async () => {
-      const rows = await this.repo.getGenreReadingTime(user.id, user.isSuperuser, query.libraryIds, days);
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope) ? this.repo.getGenreReadingTime(user.id, user.isSuperuser, scope.localLibraryIds, days) : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogGenreReadingTime(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
       const byGenre = new Map<string, { readingSeconds: number; bySource: Record<ReadingSessionSourceBucket, number> }>();
-      for (const row of rows) {
+      for (const row of [...localRows, ...sourceRows]) {
         let entry = byGenre.get(row.genre);
         if (!entry) {
           entry = { readingSeconds: 0, bySource: emptySourceBucketRecord() };
@@ -604,13 +929,33 @@ export class UserStatisticsService {
   async getReadingPace(user: RequestUser, query: UserDailyReadingQueryDto): Promise<UserReadingPacePoint[]> {
     const days = query.days ?? READING_PACE_DEFAULT_DAYS;
     const key = this.buildUserCacheKey('reading-pace', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
-    return this.cache.get(String(user.id), key, () => this.repo.getReadingPacePoints(user.id, user.isSuperuser, query.libraryIds, days));
+    return this.cache.get(String(user.id), key, async () => {
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localRows, sourceRows] = await Promise.all([
+        this.shouldLoadLocal(scope) ? this.repo.getReadingPacePoints(user.id, user.isSuperuser, scope.localLibraryIds, days) : Promise.resolve([]),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogReadingPacePoints(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve([]),
+      ]);
+      return [...localRows, ...sourceRows].slice(0, 2000);
+    });
   }
 
   async getAuthorGenreChord(user: RequestUser, query: UserDailyReadingQueryDto): Promise<ChordDiagramData> {
     const days = query.days ?? 1825;
     const key = this.buildUserCacheKey('author-genre-chord', user, { libraries: this.normalizeLibraryIds(query.libraryIds), days });
-    return this.cache.get(String(user.id), key, () => this.repo.getAuthorGenreChord(user.id, user.isSuperuser, query.libraryIds, days));
+    return this.cache.get(String(user.id), key, async () => {
+      const scope = await this.resolveLibraryScope(user, query.libraryIds);
+      const [localData, sourceData] = await Promise.all([
+        this.shouldLoadLocal(scope)
+          ? this.repo.getAuthorGenreChord(user.id, user.isSuperuser, scope.localLibraryIds, days)
+          : Promise.resolve({ nodes: [], links: [] } satisfies ChordDiagramData),
+        scope.sourceBackedMediaTypes.length > 0
+          ? this.repo.getCatalogAuthorGenreChord(user.id, scope.sourceBackedMediaTypes, days)
+          : Promise.resolve({ nodes: [], links: [] } satisfies ChordDiagramData),
+      ]);
+      return this.mergeChordData(localData, sourceData);
+    });
   }
 
   async recomputeRecentDailyStats(days = 2) {
@@ -618,4 +963,12 @@ export class UserStatisticsService {
     this.cache.clear();
     return result;
   }
+}
+
+function sourceBackedMediaTypesForLibraryIds(libraryIds: number[]): WarehouseMediaType[] {
+  const mediaTypes: WarehouseMediaType[] = [];
+  if (libraryIds.includes(CLOUD_EBOOK_LIBRARY_ID)) mediaTypes.push('ebook');
+  if (libraryIds.includes(CLOUD_AUDIO_LIBRARY_ID)) mediaTypes.push('audiobook');
+  if (libraryIds.includes(CLOUD_COMIC_LIBRARY_ID)) mediaTypes.push('comic');
+  return mediaTypes;
 }

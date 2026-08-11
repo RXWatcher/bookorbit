@@ -1,13 +1,13 @@
 import { computed, ref, type Ref } from 'vue'
 
-import type { BookCard } from '@bookorbit/types'
+import type { AuthorLibraryItem } from '@bookorbit/types'
 import { fetchAuthorBooks } from '../api/author'
 import type { AuthorBookSort, SortDirection } from '../types/author'
 
 const PAGE_SIZE = 50
 
 export function useAuthorBooks(authorId: Ref<number>) {
-  const items = ref<BookCard[]>([])
+  const items = ref<AuthorLibraryItem[]>([])
   const total = ref(0)
   const loading = ref(false)
   const error = ref<string | null>(null)

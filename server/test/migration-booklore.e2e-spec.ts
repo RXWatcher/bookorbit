@@ -101,7 +101,7 @@ describe('Migration Booklore API to DB (e2e)', { timeout: 240_000 }, () => {
     });
     expect(createdSource.statusCode).toBe(201);
     expect(createdSource.body.connectionConfig).toMatchObject({
-      host: '127.0.0.1',
+      host: ctx.mariadb.host,
       user: 'booklore',
       database: 'booklore',
       password: '********',
@@ -354,7 +354,7 @@ describe('Migration Booklore API to DB (e2e)', { timeout: 240_000 }, () => {
         source: expect.objectContaining({
           id: sourceId,
           connectionConfig: expect.objectContaining({
-            host: '127.0.0.1',
+            host: ctx.mariadb.host,
             user: 'booklore',
             password: '********',
           }),

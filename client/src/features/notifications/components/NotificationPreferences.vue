@@ -21,7 +21,7 @@ const { popupEnabled, setPopupEnabled, loadPrefs } = useWhatsNew()
 const saving = ref(false)
 
 onMounted(() => {
-  void loadPrefs()
+  void loadPrefs().catch(() => undefined)
 })
 
 async function handleWhatsNewToggle() {

@@ -1112,6 +1112,7 @@ async function seedStatefulData(db: ScannerE2EContext['db'], bookId: number, pri
   await db.insert(schema.readingSessions).values([
     {
       userId: userA,
+      bookId,
       bookFileId: primaryFileId,
       bookId,
       sessionId: `session-${suffix}-a`,
@@ -1123,6 +1124,7 @@ async function seedStatefulData(db: ScannerE2EContext['db'], bookId: number, pri
     },
     {
       userId: userB,
+      bookId,
       bookFileId: primaryFileId,
       bookId,
       sessionId: `session-${suffix}-b`,

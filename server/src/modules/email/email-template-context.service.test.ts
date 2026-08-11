@@ -59,6 +59,35 @@ describe('EmailTemplateContextService', () => {
     expect(context.coverUrl).toBe('http://localhost/api/v1/books/1/cover');
   });
 
+  it('should build context for a source-backed ebook', () => {
+    const context = service.buildForCatalogEbook(
+      {
+        id: 17,
+        remoteId: 'ebook 1/with slash',
+        title: 'Cloud Book',
+        subtitle: 'Skybound',
+        authors: ['Ada Author', 'Bea Writer'],
+        series: 'Cloud Series',
+        language: 'en',
+        publisher: 'Orbit Press',
+        identifiers: { isbn13: '9780000000001' },
+        format: 'epub',
+        hasCover: true,
+        syncedAt: '2026-06-01T12:00:00.000Z',
+        source: 'catalog-source',
+      },
+      { contentLength: 1024 * 1024, contentType: 'application/epub+zip' },
+      'Sender',
+    );
+
+    expect(context.title).toBe('Cloud Book');
+    expect(context.authors).toBe('Ada Author, Bea Writer');
+    expect(context.series).toBe('Cloud Series');
+    expect(context.fileSize).toBe('1.0 MB');
+    expect(context.isbn).toBe('9780000000001');
+    expect(context.coverUrl).toBe('http://localhost/api/v1/catalog/ebooks/ebook%201%2Fwith%20slash/cover/medium');
+  });
+
   it('should throw NotFoundException if book not found', async () => {
     repo.findBookById.mockResolvedValue(null);
     repo.findMetadataByBookId.mockResolvedValue(null);

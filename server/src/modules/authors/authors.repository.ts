@@ -115,6 +115,39 @@ export class AuthorsRepository {
     return { items, total: Number(total), page: params.page, size: params.size };
   }
 
+  async findSummaries(params: {
+    q?: string;
+    libraryIds: number[];
+    hasPhoto?: boolean;
+    contentFilters?: ContentFilterRules;
+  }): Promise<AuthorSummaryRow[]> {
+    if (params.libraryIds.length === 0) {
+      return [];
+    }
+
+    const where = this.buildAuthorWhere({
+      q: params.q,
+      libraryIds: params.libraryIds,
+      hasPhoto: params.hasPhoto,
+      contentFilters: params.contentFilters,
+    });
+
+    return this.db
+      .select({
+        id: authors.id,
+        name: authors.name,
+        sortName: authors.sortName,
+        description: authors.description,
+        bookCount: sql<number>`count(distinct ${books.id})::int`,
+        lastAddedAt: max(books.addedAt),
+      })
+      .from(authors)
+      .innerJoin(bookAuthors, eq(bookAuthors.authorId, authors.id))
+      .innerJoin(books, eq(books.id, bookAuthors.bookId))
+      .where(where)
+      .groupBy(authors.id, authors.name, authors.sortName, authors.description);
+  }
+
   async countAuthors(params: { libraryIds: number[]; contentFilters?: ContentFilterRules }): Promise<number> {
     if (params.libraryIds.length === 0) return 0;
 

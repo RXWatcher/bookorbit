@@ -1,0 +1,7 @@
+[2026-06-03 16:30] Feature: OPDS catalog ebook acquisition feed
+Status: Complete
+Notes: OPDS now has a native Catalog Ebooks acquisition feed backed by current-user-owned synced catalog ebooks, with OPDS-authenticated download/cover routes and remote-aware identifiers that keep integration details out of client XML.
+
+[2026-06-03 16:39] Review hardening
+Status: Complete
+Notes: The OPDS feed now respects the catalog enabled gate, and OPDS downloads use generic native filenames rather than reflecting proxied filenames.

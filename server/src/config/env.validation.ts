@@ -1,6 +1,7 @@
 import { parseIntoClientConfig } from 'pg-connection-string';
 import { z } from 'zod';
 
+const HEX_256_BIT_KEY = /^[a-fA-F0-9]{64}$/;
 const BOOLEAN_ENV_VALUES = ['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'];
 
 function isValidPostgresConnectionString(value: string): boolean {
@@ -59,6 +60,12 @@ const envSchema = z.object({
   APP_URL: z.string().url().default('http://localhost:5173'),
   TRUST_PROXY: z.string().optional(),
   EMAIL_ENCRYPTION_KEY: z.string().optional(),
+  WAREHOUSE_ENCRYPTION_KEY: z
+    .string()
+    .refine((val) => val.trim() === '' || HEX_256_BIT_KEY.test(val.trim()), {
+      message: 'WAREHOUSE_ENCRYPTION_KEY must be empty or a 64-character hex key',
+    })
+    .optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).optional(),
   OIDC_ALLOW_LOCAL_ISSUERS: booleanEnvFlag('OIDC_ALLOW_LOCAL_ISSUERS'),
   CSP_ALLOW_CLOUDFLARE_INSIGHTS: booleanEnvFlag('CSP_ALLOW_CLOUDFLARE_INSIGHTS'),

@@ -109,7 +109,15 @@ export function useFoliate(
     await customElements.whenDefined('foliate-view')
   }
 
-  async function open(bookId: number, fileId: number, format: string, cfi?: string | null, fallbackFraction?: number, options?: EpubOpenOptions) {
+  async function open(
+    bookId: number,
+    fileId: number,
+    format: string,
+    cfi?: string | null,
+    fallbackFraction?: number,
+    source?: { url: string; title: string },
+    options?: EpubOpenOptions,
+  ) {
     const el = container()
     if (!el) return
 
@@ -119,6 +127,7 @@ export function useFoliate(
 
     let loadTimeoutId: ReturnType<typeof setTimeout> | undefined
     let initialNavigationPending = true
+    let shouldRestoreByFraction = false
 
     try {
       await loadScript()
@@ -236,9 +245,14 @@ export function useFoliate(
         }
       }, 30_000)
 
-      let shouldRestoreByFraction = false
-
-      if (format === 'epub') {
+      if (source) {
+        if (format !== 'epub') throw new Error('This library item format is not supported in the reader yet.')
+        const res = await api(source.url)
+        if (!res.ok) throw new Error(`Failed to fetch book file: ${res.status}`)
+        const blob = await res.blob()
+        const file = new File([blob], `${source.title || 'catalog-book'}.epub`, { type: 'application/epub+zip' })
+        await view.open(file)
+      } else if (format === 'epub') {
         const infoRes = await api(`/api/v1/epub/${bookId}/info?fileId=${fileId}`)
         if (!infoRes.ok) throw new Error(`Failed to fetch EPUB info: ${infoRes.status}`)
         const bookInfo = await infoRes.json()
@@ -301,6 +315,10 @@ export function useFoliate(
       error.value = e instanceof Error ? e.message : 'Failed to open book'
       loading.value = false
     }
+  }
+
+  async function openFromUrl(url: string, format: string, title: string, cfi?: string | null, fallbackFraction?: number) {
+    await open(0, 0, format, cfi, fallbackFraction, { url, title })
   }
 
   function getViewEl() {
@@ -366,7 +384,8 @@ export function useFoliate(
     isFixedLayout,
     view: viewRef,
     open: (bookId: number, fileId: number, format: string, cfi?: string | null, fallbackFraction?: number, options?: EpubOpenOptions) =>
-      open(bookId, fileId, format, cfi, fallbackFraction, options),
+      open(bookId, fileId, format, cfi, fallbackFraction, undefined, options),
+    openFromUrl,
     prev: () => getViewEl()?.prev?.(),
     next: () => getViewEl()?.next?.(),
     goTo: (t: string | number) => getViewEl()?.goTo?.(t),

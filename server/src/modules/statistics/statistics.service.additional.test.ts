@@ -1,6 +1,6 @@
 import type { RequestUser } from '../../common/types/request-user';
 import { StatisticsService } from './statistics.service';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 
 function makeUser(isSuperuser = false): RequestUser {
   return {
@@ -40,13 +40,64 @@ function makeService() {
     libraryIntegrityGauge: vi.fn(),
     acquisitionLagScatter: vi.fn(),
     getSummary: vi.fn(),
+    getSummaryDimensionValues: vi.fn().mockResolvedValue({ authors: [], series: [], publishers: [], genres: [], languages: [] }),
     getGenreCooccurrence: vi.fn(),
     largestBooks: vi.fn(),
     topSeries: vi.fn(),
   };
+  const libraryService = {
+    findAll: vi.fn().mockResolvedValue([{ id: 1 }, { id: 3 }]),
+  };
+  const warehouseCatalogService = {
+    getUserCatalogStatisticsSummary: vi.fn().mockResolvedValue(makeSummary()),
+    getUserCatalogStatisticsDimensionValues: vi.fn().mockResolvedValue({
+      authors: [],
+      series: [],
+      publishers: [],
+      genres: [],
+      languages: [],
+    }),
+    topUserCatalogAuthors: vi.fn().mockResolvedValue([]),
+    topUserCatalogGenres: vi.fn().mockResolvedValue({ items: [], unknownCount: 0 }),
+    topUserCatalogSeries: vi.fn().mockResolvedValue([]),
+    metadataFreshnessGauge: vi.fn().mockResolvedValue({
+      totalBooks: 0,
+      neverFetchedCount: 0,
+      fresh30dCount: 0,
+      stale31To90dCount: 0,
+      stale91To180dCount: 0,
+      staleOver180dCount: 0,
+    }),
+    libraryIntegrityGauge: vi.fn().mockResolvedValue({
+      totalBooks: 0,
+      presentCount: 0,
+      primaryFileCount: 0,
+      metadataCount: 0,
+    }),
+    acquisitionLagScatter: vi.fn().mockResolvedValue({ items: [], unknownCount: 0 }),
+  };
+
   return {
     repo,
-    service: new StatisticsService(repo as never),
+    libraryService,
+    warehouseCatalogService,
+    service: new StatisticsService(repo as never, libraryService as never, warehouseCatalogService as never),
+  };
+}
+
+function makeSummary(overrides: Partial<Awaited<ReturnType<StatisticsService['getSummary']>>> = {}) {
+  return {
+    totalBooks: 0,
+    totalAuthors: 0,
+    totalSeries: 0,
+    totalPublishers: 0,
+    totalStorageBytes: 0,
+    totalGenres: 0,
+    totalLanguages: 0,
+    publicationYearMin: null,
+    publicationYearMax: null,
+    booksAddedThisYear: 0,
+    ...overrides,
   };
 }
 
@@ -119,6 +170,50 @@ describe('StatisticsService additional coverage', () => {
     });
   });
 
+  it('merges metadata freshness gauge counts from cached source-backed libraries', async () => {
+    const { service, repo, warehouseCatalogService, libraryService } = makeService();
+    libraryService.findAll.mockResolvedValue([{ id: 1 }, { id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    repo.metadataFreshnessGauge.mockResolvedValue({
+      totalBooks: 10,
+      neverFetchedCount: 1,
+      fresh30dCount: 4,
+      stale31To90dCount: 3,
+      stale91To180dCount: 2,
+      staleOver180dCount: 1,
+    });
+    warehouseCatalogService.metadataFreshnessGauge.mockResolvedValue({
+      totalBooks: 5,
+      neverFetchedCount: 0,
+      fresh30dCount: 2,
+      stale31To90dCount: 1,
+      stale91To180dCount: 1,
+      staleOver180dCount: 1,
+    });
+
+    await expect(service.getMetadataFreshnessGauge(makeUser(), { libraryIds: [1, CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual({
+      totalBooks: 15,
+      neverFetchedCount: 1,
+      fresh30dCount: 6,
+      stale31To90dCount: 4,
+      stale91To180dCount: 3,
+      staleOver180dCount: 2,
+      freshnessScore: 69,
+    });
+
+    await expect(service.getMetadataFreshnessGauge(makeUser(), { libraryIds: [CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual({
+      totalBooks: 5,
+      neverFetchedCount: 0,
+      fresh30dCount: 2,
+      stale31To90dCount: 1,
+      stale91To180dCount: 1,
+      staleOver180dCount: 1,
+      freshnessScore: 65,
+    });
+
+    expect(repo.metadataFreshnessGauge).toHaveBeenCalledWith(2, false, EMPTY_CONTENT_FILTER_RULES, [1]);
+    expect(warehouseCatalogService.metadataFreshnessGauge).toHaveBeenCalledWith(EMPTY_CONTENT_FILTER_RULES, ['ebook']);
+  });
+
   it('delegates scatter, decade, timeline, author, and genre endpoints', async () => {
     const { service, repo } = makeService();
     repo.publicationDecade.mockResolvedValue({ items: [{ decade: 2000, count: 2 }], unknownCount: 1 });
@@ -151,7 +246,7 @@ describe('StatisticsService additional coverage', () => {
 
   it('caches summary and genre-cooccurrence results for repeated identical requests', async () => {
     const { service, repo } = makeService();
-    repo.getSummary.mockResolvedValue({ totalBooks: 5 });
+    repo.getSummary.mockResolvedValue(makeSummary({ totalBooks: 5 }));
     repo.getGenreCooccurrence.mockResolvedValue({ nodes: [{ name: 'A' }], links: [] });
 
     await service.getSummary(makeUser(), { libraryIds: [3, 1, 3] });
@@ -165,7 +260,7 @@ describe('StatisticsService additional coverage', () => {
 
   it('caches results per user scope: two different users get independent cache entries', async () => {
     const { service, repo } = makeService();
-    repo.getSummary.mockResolvedValueOnce({ totalBooks: 10 }).mockResolvedValueOnce({ totalBooks: 20 });
+    repo.getSummary.mockResolvedValueOnce(makeSummary({ totalBooks: 10 })).mockResolvedValueOnce(makeSummary({ totalBooks: 20 }));
 
     const userA = makeUser();
     const userB = { ...makeUser(), id: 3 };

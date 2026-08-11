@@ -1,0 +1,1 @@
+[2026-06-05 06:09 EDT] Feature: source-backed series gap detection. Status: Complete. Notes: Series detail now merges source-backed item series indices into the native gap detector so warehouse-only and mixed series can surface missing volumes like filesystem libraries.

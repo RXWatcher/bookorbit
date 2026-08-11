@@ -1,3 +1,4 @@
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 import { UserStatisticsService } from './user-statistics.service';
 
 describe('UserStatisticsService', () => {
@@ -33,6 +34,83 @@ describe('UserStatisticsService', () => {
       completedBooks: 1,
       meanProgressPercent: 42.35,
     });
+  });
+
+  it('returns source-backed summary when only Ebook Library is selected', async () => {
+    const repo = {
+      getSummary: vi.fn(),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 1 }, { id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserReadingSummary: vi.fn().mockResolvedValue({
+        trackedBooks: 6,
+        startedBooks: 5,
+        inProgressBooks: 3,
+        completedBooks: 2,
+        meanProgressPercent: 61.234,
+      }),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+
+    await expect(
+      service.getSummary({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+        libraryIds: [CLOUD_EBOOK_LIBRARY_ID],
+      }),
+    ).resolves.toEqual({
+      trackedBooks: 6,
+      startedBooks: 5,
+      inProgressBooks: 3,
+      completedBooks: 2,
+      meanProgressPercent: 61.23,
+    });
+
+    expect(libraryService.findAll).toHaveBeenCalledWith(expect.any(Object), { includeSourceBacked: true });
+    expect(repo.getSummary).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.getUserReadingSummary).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['ebook']);
+  });
+
+  it('merges local and source-backed reading summaries', async () => {
+    const repo = {
+      getSummary: vi.fn().mockResolvedValue({
+        trackedBooks: 4,
+        startedBooks: 3,
+        inProgressBooks: 1,
+        completedBooks: 1,
+        meanProgressPercent: 25,
+      }),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 1 }, { id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserReadingSummary: vi.fn().mockResolvedValue({
+        trackedBooks: 6,
+        startedBooks: 5,
+        inProgressBooks: 2,
+        completedBooks: 3,
+        meanProgressPercent: 75,
+      }),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+
+    await expect(
+      service.getSummary({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+        libraryIds: [1, CLOUD_AUDIO_LIBRARY_ID],
+      }),
+    ).resolves.toEqual({
+      trackedBooks: 10,
+      startedBooks: 8,
+      inProgressBooks: 3,
+      completedBooks: 4,
+      meanProgressPercent: 55,
+    });
+
+    expect(repo.getSummary).toHaveBeenCalledWith(123, false, [1]);
+    expect(warehouseCatalogService.getUserReadingSummary).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['audiobook']);
   });
 
   it('returns a contiguous daily heatmap window with zero-filled days', async () => {
@@ -179,6 +257,37 @@ describe('UserStatisticsService', () => {
     ]);
   });
 
+  it('returns source-backed completion timeline when only Ebook Library is selected', async () => {
+    const repo = {
+      getCompletionTimeline: vi.fn(),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserMonthlyCompletions: vi.fn().mockResolvedValue([
+        { year: 2026, month: 2, count: 1 },
+        { year: 2026, month: 4, count: 2 },
+      ]),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const result = await service.getCompletionTimeline({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      days: 120,
+      libraryIds: [CLOUD_EBOOK_LIBRARY_ID],
+    });
+
+    expect(repo.getCompletionTimeline).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.getUserMonthlyCompletions).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['ebook'], 120);
+    expect(result).toEqual([
+      { year: 2025, month: 12, count: 0 },
+      { year: 2026, month: 1, count: 0 },
+      { year: 2026, month: 2, count: 1 },
+      { year: 2026, month: 3, count: 0 },
+      { year: 2026, month: 4, count: 2 },
+    ]);
+  });
+
   it('builds goal trajectory with cumulative actual and target lines', async () => {
     const repo = {
       getMonthlyCompletions: vi.fn().mockResolvedValue([
@@ -201,6 +310,41 @@ describe('UserStatisticsService', () => {
     ]);
   });
 
+  it('merges local and source-backed monthly completions in goal trajectory', async () => {
+    const repo = {
+      getMonthlyCompletions: vi.fn().mockResolvedValue([
+        { year: 2026, month: 1, count: 1 },
+        { year: 2026, month: 3, count: 2 },
+      ]),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 1 }, { id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserMonthlyCompletions: vi.fn().mockResolvedValue([
+        { year: 2026, month: 3, count: 1 },
+        { year: 2026, month: 4, count: 1 },
+      ]),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const result = await service.getGoalTrajectory({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      days: 120,
+      goalBooks: 12,
+      libraryIds: [1, CLOUD_AUDIO_LIBRARY_ID],
+    });
+
+    expect(repo.getMonthlyCompletions).toHaveBeenCalledWith(123, false, [1], 120);
+    expect(warehouseCatalogService.getUserMonthlyCompletions).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['audiobook'], 120);
+    expect(result.points).toEqual([
+      { year: 2025, month: 12, actualCumulative: 0, targetCumulative: 1 },
+      { year: 2026, month: 1, actualCumulative: 1, targetCumulative: 2 },
+      { year: 2026, month: 2, actualCumulative: 1, targetCumulative: 3 },
+      { year: 2026, month: 3, actualCumulative: 4, targetCumulative: 4 },
+      { year: 2026, month: 4, actualCumulative: 5, targetCumulative: 5 },
+    ]);
+  });
+
   it('passes progress funnel query to repository with defaults', async () => {
     const repo = {
       getProgressFunnelInRange: vi.fn().mockResolvedValue({
@@ -219,6 +363,44 @@ describe('UserStatisticsService', () => {
     expect(result.days).toBe(365);
     expect(result.current.completed).toBe(4);
     expect(result.previous).toBeNull();
+  });
+
+  it('returns source-backed progress funnel when only Audio Library is selected', async () => {
+    const repo = {
+      getProgressFunnelInRange: vi.fn(),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserProgressFunnelInRange: vi.fn().mockResolvedValue({
+        started: 7,
+        reached25: 6,
+        reached50: 4,
+        reached75: 3,
+        completed: 2,
+      }),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const result = await service.getProgressFunnel({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      libraryIds: [CLOUD_AUDIO_LIBRARY_ID],
+      days: 30,
+    });
+
+    expect(result).toEqual({
+      days: 30,
+      current: { started: 7, reached25: 6, reached50: 4, reached75: 3, completed: 2 },
+      previous: null,
+    });
+    expect(repo.getProgressFunnelInRange).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.getUserProgressFunnelInRange).toHaveBeenCalledWith(
+      123,
+      EMPTY_CONTENT_FILTER_RULES,
+      ['audiobook'],
+      new Date('2026-03-10T00:00:00.000Z'),
+      new Date('2026-04-09T00:00:00.000Z'),
+    );
   });
 
   it('caches repeated progress funnel queries for the same key', async () => {
@@ -265,6 +447,73 @@ describe('UserStatisticsService', () => {
       { label: '366-730d', minDays: 366, maxDays: 730, count: 1 },
       { label: '731d+', minDays: 731, maxDays: null, count: 0 },
     ]);
+  });
+
+  it('returns source-backed completion latency when only Ebook Library is selected', async () => {
+    const repo = {
+      getCompletionLatencyDays: vi.fn(),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserCompletionLatencyDays: vi.fn().mockResolvedValue([5, 40]),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const result = await service.getCompletionLatency({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      days: 365,
+      libraryIds: [CLOUD_EBOOK_LIBRARY_ID],
+    });
+
+    expect(repo.getCompletionLatencyDays).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.getUserCompletionLatencyDays).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['ebook'], 365);
+    expect(result).toEqual(
+      expect.objectContaining({
+        totalCompletions: 2,
+        medianDays: 22.5,
+        percentile75Days: 31.3,
+        percentile90Days: 36.5,
+      }),
+    );
+    expect(result.buckets).toEqual([
+      { label: '0-7d', minDays: 0, maxDays: 7, count: 1 },
+      { label: '8-30d', minDays: 8, maxDays: 30, count: 0 },
+      { label: '31-90d', minDays: 31, maxDays: 90, count: 1 },
+      { label: '91-180d', minDays: 91, maxDays: 180, count: 0 },
+      { label: '181-365d', minDays: 181, maxDays: 365, count: 0 },
+      { label: '366-730d', minDays: 366, maxDays: 730, count: 0 },
+      { label: '731d+', minDays: 731, maxDays: null, count: 0 },
+    ]);
+  });
+
+  it('merges local and source-backed completion latency values', async () => {
+    const repo = {
+      getCompletionLatencyDays: vi.fn().mockResolvedValue([2, 10]),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 1 }, { id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserCompletionLatencyDays: vi.fn().mockResolvedValue([40]),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const result = await service.getCompletionLatency({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      days: 365,
+      libraryIds: [1, CLOUD_AUDIO_LIBRARY_ID],
+    });
+
+    expect(repo.getCompletionLatencyDays).toHaveBeenCalledWith(123, false, [1], 365);
+    expect(warehouseCatalogService.getUserCompletionLatencyDays).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['audiobook'], 365);
+    expect(result).toEqual(
+      expect.objectContaining({
+        totalCompletions: 3,
+        medianDays: 10,
+        percentile75Days: 25,
+        percentile90Days: 34,
+      }),
+    );
   });
 
   it('clears cached query results after recomputeRecentDailyStats', async () => {
@@ -350,6 +599,84 @@ describe('UserStatisticsService', () => {
     expect(limit).toBe(3000);
   });
 
+  it('strips source-backed library ids before loading the local reading session timeline', async () => {
+    const repo = {
+      getSessionTimelineItems: vi.fn().mockResolvedValue([]),
+      getCatalogSessionTimelineItems: vi.fn().mockResolvedValue([]),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 4 }, { id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const service = new UserStatisticsService(repo as any, libraryService as any, {} as any);
+
+    await expect(
+      service.getSessionTimeline({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+        libraryIds: [4, CLOUD_EBOOK_LIBRARY_ID],
+      }),
+    ).resolves.toMatchObject({
+      year: 2026,
+      week: 15,
+      items: [],
+    });
+
+    expect(repo.getSessionTimelineItems).toHaveBeenCalledTimes(1);
+    expect(repo.getSessionTimelineItems.mock.calls[0]?.[2]).toEqual([4]);
+    expect(repo.getCatalogSessionTimelineItems).toHaveBeenCalledWith(123, ['ebook'], expect.any(Date), expect.any(Date), 3000);
+  });
+
+  it('returns source-backed reading session timeline data for source-backed-only scopes', async () => {
+    const repo = {
+      getSessionTimelineItems: vi.fn(),
+      getCatalogSessionTimelineItems: vi.fn().mockResolvedValue([
+        {
+          sessionId: 200,
+          bookId: -9,
+          bookTitle: 'Warehouse Audio',
+          bookFormat: 'M4B',
+          startedAt: new Date('2026-04-07T04:00:00.000Z'),
+          endedAt: new Date('2026-04-07T04:20:00.000Z'),
+          durationSeconds: 1200,
+          source: null,
+          itemSource: 'warehouse',
+          mediaType: 'audiobook',
+          remoteId: 'audio-1',
+        },
+      ]),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const service = new UserStatisticsService(repo as any, libraryService as any, {} as any);
+
+    await expect(
+      service.getSessionTimeline({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+        libraryIds: [CLOUD_AUDIO_LIBRARY_ID],
+      }),
+    ).resolves.toMatchObject({
+      year: 2026,
+      week: 15,
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+      items: [
+        {
+          sessionId: 200,
+          bookId: -9,
+          bookTitle: 'Warehouse Audio',
+          bookFormat: 'M4B',
+          startedAt: '2026-04-07T04:00:00.000Z',
+          endedAt: '2026-04-07T04:20:00.000Z',
+          durationSeconds: 1200,
+          source: 'warehouse',
+          mediaType: 'audiobook',
+          remoteId: 'audio-1',
+        },
+      ],
+    });
+
+    expect(repo.getSessionTimelineItems).not.toHaveBeenCalled();
+    expect(repo.getCatalogSessionTimelineItems).toHaveBeenCalledWith(123, ['audiobook'], expect.any(Date), expect.any(Date), 3000);
+  });
+
   it('updates a timeline session atomically', async () => {
     const existing = {
       sessionId: 101,
@@ -399,6 +726,67 @@ describe('UserStatisticsService', () => {
     );
     expect(result.startedAt).toBe('2026-04-08T09:00:00.000Z');
     expect(result.endedAt).toBe('2026-04-08T09:30:00.000Z');
+  });
+
+  it('strips source-backed library ids before looking up a timeline session edit', async () => {
+    const existing = {
+      sessionId: 101,
+      libraryId: 4,
+      bookId: 44,
+      bookTitle: 'Atomic Habits',
+      bookFormat: 'EPUB',
+      startedAt: new Date('2026-04-07T08:00:00.000Z'),
+      endedAt: new Date('2026-04-07T08:30:00.000Z'),
+      durationSeconds: 1800,
+    };
+    const repo = {
+      getSessionTimelineSessionById: vi.fn().mockResolvedValue(existing),
+      moveSessionTimelineSessionAtomic: vi.fn().mockResolvedValue({ updated: existing, conflict: null }),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 4 }, { id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const service = new UserStatisticsService(repo as any, libraryService as any, {} as any);
+
+    await expect(
+      service.updateSessionTimelineSession(
+        { id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any,
+        101,
+        {
+          startedAt: '2026-04-07T08:00:00.000Z',
+          endedAt: '2026-04-07T08:30:00.000Z',
+        },
+        { libraryIds: [4, CLOUD_AUDIO_LIBRARY_ID] },
+      ),
+    ).resolves.toMatchObject({ sessionId: 101 });
+
+    expect(repo.getSessionTimelineSessionById).toHaveBeenCalledWith(123, false, [4], 101);
+  });
+
+  it('does not query local session edits for source-backed-only scopes', async () => {
+    const repo = {
+      getSessionTimelineSessionById: vi.fn(),
+      moveSessionTimelineSessionAtomic: vi.fn(),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const service = new UserStatisticsService(repo as any, libraryService as any, {} as any);
+
+    await expect(
+      service.updateSessionTimelineSession(
+        { id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any,
+        101,
+        {
+          startedAt: '2026-04-07T08:00:00.000Z',
+          endedAt: '2026-04-07T08:30:00.000Z',
+        },
+        { libraryIds: [CLOUD_EBOOK_LIBRARY_ID] },
+      ),
+    ).rejects.toThrow('Reading session not found');
+
+    expect(repo.getSessionTimelineSessionById).not.toHaveBeenCalled();
+    expect(repo.moveSessionTimelineSessionAtomic).not.toHaveBeenCalled();
   });
 
   it('rejects session moves that overlap another session', async () => {
@@ -641,6 +1029,155 @@ describe('UserStatisticsService', () => {
     expect(repo.getGenreReadingTime).toHaveBeenCalledTimes(1);
     expect(repo.getReadingPacePoints).toHaveBeenCalledTimes(1);
     expect(repo.getAuthorGenreChord).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges source-backed reading survival progress with local session survival', async () => {
+    const repo = {
+      getReadingSurvivalMaxProgress: vi.fn().mockResolvedValue([15, 65]),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 1 }, { id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserReadingSurvivalMaxProgress: vi.fn().mockResolvedValue([50, 100]),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+
+    const result = await service.getReadingSurvival({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      days: 365,
+      libraryIds: [1, CLOUD_EBOOK_LIBRARY_ID],
+    });
+
+    expect(repo.getReadingSurvivalMaxProgress).toHaveBeenCalledWith(123, false, [1], 365);
+    expect(warehouseCatalogService.getUserReadingSurvivalMaxProgress).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['ebook'], 365);
+    expect(result.find((point) => point.threshold === 50)).toEqual({
+      threshold: 50,
+      survivedCount: 3,
+      survivedPct: 75,
+    });
+    expect(result.find((point) => point.threshold === 100)).toEqual({
+      threshold: 100,
+      survivedCount: 1,
+      survivedPct: 25,
+    });
+  });
+
+  it('returns source-backed reading survival when only Audio Library is selected', async () => {
+    const repo = {
+      getReadingSurvivalMaxProgress: vi.fn(),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {
+      getUserReadingSurvivalMaxProgress: vi.fn().mockResolvedValue([30, 80]),
+    };
+
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+
+    const result = await service.getReadingSurvival({ id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any, {
+      days: 90,
+      libraryIds: [CLOUD_AUDIO_LIBRARY_ID],
+    });
+
+    expect(repo.getReadingSurvivalMaxProgress).not.toHaveBeenCalled();
+    expect(warehouseCatalogService.getUserReadingSurvivalMaxProgress).toHaveBeenCalledWith(123, EMPTY_CONTENT_FILTER_RULES, ['audiobook'], 90);
+    expect(result.find((point) => point.threshold === 75)).toEqual({
+      threshold: 75,
+      survivedCount: 1,
+      survivedPct: 50,
+    });
+  });
+
+  it('merges source-backed reading session chart data with local chart data', async () => {
+    const repo = {
+      getCompletionRaceRawSessions: vi.fn().mockResolvedValue([]),
+      getSessionArchetypePoints: vi.fn().mockResolvedValue([]),
+      getGenreReadingTime: vi.fn().mockResolvedValue([]),
+      getReadingPacePoints: vi.fn().mockResolvedValue([]),
+      getAuthorGenreChord: vi.fn().mockResolvedValue({ nodes: [], links: [] }),
+      getCatalogCompletionRaceRawSessions: vi.fn().mockResolvedValue([]),
+      getCatalogSessionArchetypePoints: vi.fn().mockResolvedValue([]),
+      getCatalogGenreReadingTime: vi.fn().mockResolvedValue([]),
+      getCatalogReadingPacePoints: vi.fn().mockResolvedValue([]),
+      getCatalogAuthorGenreChord: vi.fn().mockResolvedValue({ nodes: [], links: [] }),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: 7 }, { id: CLOUD_EBOOK_LIBRARY_ID }, { id: CLOUD_AUDIO_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {};
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const user = { id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any;
+
+    await expect(service.getCompletionRace(user, { days: 365, libraryIds: [7, CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual([]);
+    await expect(service.getSessionArchetypes(user, { days: 365, libraryIds: [7, CLOUD_AUDIO_LIBRARY_ID] })).resolves.toEqual([]);
+    await expect(service.getGenreReadingTime(user, { days: 365, libraryIds: [7, CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual([]);
+    await expect(service.getReadingPace(user, { days: 365, libraryIds: [7, CLOUD_AUDIO_LIBRARY_ID] })).resolves.toEqual([]);
+    await expect(service.getAuthorGenreChord(user, { days: 365, libraryIds: [7, CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual({
+      nodes: [],
+      links: [],
+    });
+
+    expect(repo.getCompletionRaceRawSessions).toHaveBeenCalledWith(123, false, [7], 365);
+    expect(repo.getSessionArchetypePoints).toHaveBeenCalledWith(123, false, [7], 365);
+    expect(repo.getGenreReadingTime).toHaveBeenCalledWith(123, false, [7], 365);
+    expect(repo.getReadingPacePoints).toHaveBeenCalledWith(123, false, [7], 365);
+    expect(repo.getAuthorGenreChord).toHaveBeenCalledWith(123, false, [7], 365);
+    expect(repo.getCatalogCompletionRaceRawSessions).toHaveBeenCalledWith(123, ['ebook'], 365);
+    expect(repo.getCatalogSessionArchetypePoints).toHaveBeenCalledWith(123, ['audiobook'], 365);
+    expect(repo.getCatalogGenreReadingTime).toHaveBeenCalledWith(123, ['ebook'], 365);
+    expect(repo.getCatalogReadingPacePoints).toHaveBeenCalledWith(123, ['audiobook'], 365);
+    expect(repo.getCatalogAuthorGenreChord).toHaveBeenCalledWith(123, ['ebook'], 365);
+  });
+
+  it('returns source-backed reading session chart data when only source-backed libraries are selected', async () => {
+    const repo = {
+      getCompletionRaceRawSessions: vi.fn(),
+      getSessionArchetypePoints: vi.fn(),
+      getGenreReadingTime: vi.fn(),
+      getReadingPacePoints: vi.fn(),
+      getAuthorGenreChord: vi.fn(),
+      getCatalogCompletionRaceRawSessions: vi.fn().mockResolvedValue([]),
+      getCatalogSessionArchetypePoints: vi.fn().mockResolvedValue([{ hour: 9, durationMinutes: 15, dayOfWeek: 2 }]),
+      getCatalogGenreReadingTime: vi.fn().mockResolvedValue([{ genre: 'Sci-Fi', readingSeconds: 120 }]),
+      getCatalogReadingPacePoints: vi.fn().mockResolvedValue([{ durationSeconds: 900, progressDelta: 2.5 }]),
+      getCatalogAuthorGenreChord: vi
+        .fn()
+        .mockResolvedValue({ nodes: [{ name: 'A' }, { name: 'G' }], links: [{ source: 'A', target: 'G', value: 120 }] }),
+    };
+    const libraryService = {
+      findAll: vi.fn().mockResolvedValue([{ id: CLOUD_EBOOK_LIBRARY_ID }]),
+    };
+    const warehouseCatalogService = {};
+    const service = new UserStatisticsService(repo as any, libraryService as any, warehouseCatalogService as any);
+    const user = { id: 123, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any;
+
+    await expect(service.getCompletionRace(user, { days: 365, libraryIds: [CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual([]);
+    await expect(service.getSessionArchetypes(user, { days: 365, libraryIds: [CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual([
+      { hour: 9, durationMinutes: 15, dayOfWeek: 2 },
+    ]);
+    await expect(service.getGenreReadingTime(user, { days: 365, libraryIds: [CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual([
+      { genre: 'Sci-Fi', readingSeconds: 120, bySource: { bookorbit: 120, koreader: 0, kobo: 0 } },
+    ]);
+    await expect(service.getReadingPace(user, { days: 365, libraryIds: [CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual([
+      { durationSeconds: 900, progressDelta: 2.5 },
+    ]);
+    await expect(service.getAuthorGenreChord(user, { days: 365, libraryIds: [CLOUD_EBOOK_LIBRARY_ID] })).resolves.toEqual({
+      nodes: [{ name: 'A' }, { name: 'G' }],
+      links: [{ source: 'A', target: 'G', value: 120 }],
+    });
+
+    expect(repo.getCompletionRaceRawSessions).not.toHaveBeenCalled();
+    expect(repo.getSessionArchetypePoints).not.toHaveBeenCalled();
+    expect(repo.getGenreReadingTime).not.toHaveBeenCalled();
+    expect(repo.getReadingPacePoints).not.toHaveBeenCalled();
+    expect(repo.getAuthorGenreChord).not.toHaveBeenCalled();
+    expect(repo.getCatalogCompletionRaceRawSessions).toHaveBeenCalledWith(123, ['ebook'], 365);
+    expect(repo.getCatalogSessionArchetypePoints).toHaveBeenCalledWith(123, ['ebook'], 365);
+    expect(repo.getCatalogGenreReadingTime).toHaveBeenCalledWith(123, ['ebook'], 365);
+    expect(repo.getCatalogReadingPacePoints).toHaveBeenCalledWith(123, ['ebook'], 365);
+    expect(repo.getCatalogAuthorGenreChord).toHaveBeenCalledWith(123, ['ebook'], 365);
   });
 
   it('updateSessionTimelineSession clears only the requesting user cache, not other users', async () => {

@@ -1,0 +1,10 @@
+Feature: Kobo catalog ebook compatibility
+Status: Complete
+Completed: 2026-06-03 17:31
+
+Summary:
+Kobo sync now includes current-user-owned synced catalog ebooks through opaque BookOrbit catalog IDs, user-scoped media routes, and catalog-backed reading state. Catalog ebook metadata, thumbnails, downloads, deletes, and progress updates avoid exposing upstream source identifiers while preserving Kobo paging behavior.
+
+Verification:
+- pnpm --filter server exec vitest run src/modules/kobo
+- pnpm run lint:check && pnpm run typecheck

@@ -1,12 +1,14 @@
-import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsInt, IsObject, IsOptional, IsString, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ArrayNotEmpty, IsArray, IsInt, IsObject, IsOptional, IsString, Min, NotEquals, ValidateIf, ValidateNested } from 'class-validator';
 
 import type { GroupRule, SortSpec } from '@bookorbit/types';
+import { transformLibraryIdQueryValue } from '../utils/library-query-id-transform';
 
 export class BulkQuerySelectionDto {
   @IsOptional()
+  @Transform(({ value }) => transformLibraryIdQueryValue(value))
   @IsInt()
-  @Min(1)
+  @NotEquals(0)
   libraryId?: number;
 
   @IsOptional()

@@ -25,6 +25,7 @@ function resetEnv(): void {
   delete process.env.FILE_WRITE_MAX_CONCURRENT_WRITES;
   delete process.env.EMAIL_ENCRYPTION_KEY;
   delete process.env.MIGRATION_ENCRYPTION_KEY;
+  delete process.env.WAREHOUSE_ENCRYPTION_KEY;
   delete process.env.OIDC_STATE_TTL_SECS;
   delete process.env.OIDC_DISCOVERY_CACHE_TTL_SECS;
   delete process.env.OIDC_JWKS_CACHE_TTL_SECS;
@@ -50,6 +51,9 @@ describe('config', () => {
       githubReleasesToken: undefined,
       oidcAllowLocalIssuers: false,
       swaggerEnabled: false,
+      warehouse: {
+        encryptionKey: '',
+      },
       koboCloudscraperPython: undefined,
       koreaderPluginSourcePath: undefined,
     });
@@ -74,9 +78,18 @@ describe('config', () => {
       githubReleasesToken: 'ghp_example',
       oidcAllowLocalIssuers: true,
       swaggerEnabled: true,
+      warehouse: {
+        encryptionKey: '',
+      },
       koboCloudscraperPython: '/opt/bookorbit-python/bin/python',
       koreaderPluginSourcePath: '/opt/koreader/bookorbit.koplugin',
     });
+  });
+
+  it('reads warehouse encryption key', () => {
+    process.env.WAREHOUSE_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    expect(appConfig().warehouse.encryptionKey).toBe('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
   });
 
   it('falls back to false when OIDC_ALLOW_LOCAL_ISSUERS is invalid', () => {

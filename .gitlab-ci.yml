@@ -1,0 +1,341 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH"
+    - if: "$CI_COMMIT_TAG"
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+stages:
+  - conventions
+  - quality
+  - test
+  - e2e
+  - image
+  - release
+  - maintenance
+
+variables:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10"
+  PNPM_HOME: "$CI_PROJECT_DIR/.pnpm"
+  PNPM_STORE_DIR: "$CI_PROJECT_DIR/.pnpm-store"
+  NODE_ENV: "test"
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_BUILDKIT: "1"
+  IMAGE_NAME: "$CI_REGISTRY_IMAGE"
+  APP_VERSION: "1.10.0"
+  E2E_DATABASE_URL: "postgres://bookorbit:bookorbit@postgres:5432/bookorbit_e2e"
+  DATABASE_URL: "postgres://bookorbit:bookorbit@postgres:5432/bookorbit_e2e"
+  JWT_SECRET: "scanner-e2e-secret-1234"
+  JWT_EXPIRES_IN: "15m"
+  JWT_REFRESH_EXPIRES_IN: "7d"
+  BOOKS_PATH: "../local/data"
+  APP_URL: "http://localhost:5173"
+
+.node-job:
+  image: "node:24-bookworm"
+  interruptible: true
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store/
+      - .pnpm/
+  before_script:
+    - corepack enable
+    - corepack prepare "pnpm@${PNPM_VERSION}" --activate
+    - pnpm config set store-dir "${PNPM_STORE_DIR}"
+    - pnpm install --frozen-lockfile
+
+.docker-job:
+  image: docker:28
+  interruptible: true
+  services:
+    - name: docker:28-dind
+      alias: docker
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+  before_script:
+    - docker version
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+
+.kaniko-job:
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
+  interruptible: true
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}\n' "$CI_REGISTRY" "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" > /kaniko/.docker/config.json
+
+commitlint:
+  extends: .node-job
+  stage: conventions
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH"
+  script:
+    - |
+      if [ -n "${CI_MERGE_REQUEST_TITLE:-}" ]; then
+        printf '%s\n' "$CI_MERGE_REQUEST_TITLE" | pnpm exec commitlint --config commitlint.config.cjs
+      fi
+    - |
+      pnpm exec commitlint --config commitlint.config.cjs --from "HEAD~1" --to "HEAD" --verbose
+
+branch-conventions:
+  image: alpine:3.22
+  stage: conventions
+  interruptible: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH"
+  script:
+    - |
+      branch="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-$CI_COMMIT_BRANCH}"
+      pattern='^BO-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$|^agent/.+'
+      if ! echo "$branch" | grep -Eq "$pattern"; then
+        echo "Branch name '$branch' is invalid."
+        echo "Use BO-<issue-number>-<short-description>, or agent/<description> for agent branches."
+        exit 1
+      fi
+
+lint-server:
+  extends: .node-job
+  stage: quality
+  variables:
+    NODE_OPTIONS: "--max-old-space-size=4096"
+  script:
+    - pnpm --filter server lint:check
+
+lint-client:
+  extends: .node-job
+  stage: quality
+  script:
+    - pnpm --filter client lint:check
+
+format-server:
+  extends: .node-job
+  stage: quality
+  script:
+    - pnpm --filter server format:check
+
+format-client:
+  extends: .node-job
+  stage: quality
+  script:
+    - pnpm --filter client format:check
+
+typecheck-server:
+  extends: .node-job
+  stage: quality
+  script:
+    - pnpm --filter server type-check
+
+typecheck-client:
+  extends: .node-job
+  stage: quality
+  script:
+    - pnpm --filter @bookorbit/types build
+    - pnpm --filter client type-check
+
+test-server:
+  extends: .node-job
+  stage: test
+  needs: []
+  script:
+    - mkdir -p test-results/server
+    - pnpm --filter server exec vitest --run --reporter=default --reporter=junit --outputFile.junit="$CI_PROJECT_DIR/test-results/server/junit.xml"
+  artifacts:
+    when: always
+    reports:
+      junit: test-results/server/junit.xml
+    paths:
+      - test-results/server/
+    expire_in: 14 days
+
+test-client:
+  extends: .node-job
+  stage: test
+  needs: []
+  script:
+    - mkdir -p test-results/client
+    - pnpm --filter client exec vitest --run --reporter=default --reporter=junit --outputFile="$CI_PROJECT_DIR/test-results/client/junit.xml"
+  artifacts:
+    when: always
+    reports:
+      junit: test-results/client/junit.xml
+    paths:
+      - test-results/client/
+    expire_in: 14 days
+
+e2e-matrix:
+  extends: .node-job
+  stage: e2e
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+      allow_failure: true
+  script:
+    - node scripts/e2e/list-matrix.mjs > e2e-matrix.json
+    - cat e2e-matrix.json
+  artifacts:
+    paths:
+      - e2e-matrix.json
+    expire_in: 14 days
+
+e2e-all:
+  extends: .node-job
+  stage: e2e
+  services:
+    - name: postgres:17
+      alias: postgres
+  variables:
+    POSTGRES_DB: "bookorbit_e2e"
+    POSTGRES_USER: "bookorbit"
+    POSTGRES_PASSWORD: "bookorbit"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+      allow_failure: true
+  script:
+    - mkdir -p test-results/e2e
+    - pnpm run e2e:all
+  artifacts:
+    when: always
+    paths:
+      - test-results/e2e/
+      - e2e-artifacts/
+    expire_in: 14 days
+
+image-scan:
+  extends: .docker-job
+  stage: image
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+    - if: "$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH"
+      when: manual
+      allow_failure: true
+  script:
+    - docker build --pull -t "${IMAGE_NAME}:scan-${CI_COMMIT_SHORT_SHA}" .
+    - docker save "${IMAGE_NAME}:scan-${CI_COMMIT_SHORT_SHA}" -o image.tar
+    - docker run --rm -v "$PWD:/work" aquasec/trivy:0.67.2 image --input /work/image.tar --exit-code 1 --severity HIGH,CRITICAL
+
+image-publish-amd64:
+  extends: .kaniko-job
+  stage: image
+  needs:
+    - lint-server
+    - lint-client
+    - format-server
+    - format-client
+    - typecheck-server
+    - typecheck-client
+    - test-server
+    - test-client
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH"
+    - if: "$CI_COMMIT_TAG"
+  script:
+    - |
+      destinations="--destination ${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}-amd64 --destination ${IMAGE_NAME}:${APP_VERSION}-amd64"
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        destinations="$destinations --destination ${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA} --destination ${IMAGE_NAME}:${APP_VERSION} --destination ${IMAGE_NAME}:main --destination ${IMAGE_NAME}:latest"
+      fi
+
+      /kaniko/executor \
+        --context "$CI_PROJECT_DIR" \
+        --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+        --build-arg "APP_VERSION=${APP_VERSION}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.version=${APP_VERSION}" \
+        $destinations
+
+image-publish-arm64:
+  extends: .kaniko-job
+  stage: image
+  tags:
+    - saas-linux-medium-arm64
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $ENABLE_ARM64_IMAGE == "true"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $ENABLE_ARM64_IMAGE == "true"'
+      when: manual
+  script:
+    - |
+      /kaniko/executor \
+        --context "$CI_PROJECT_DIR" \
+        --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+        --build-arg "APP_VERSION=${APP_VERSION}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.version=${APP_VERSION}" \
+        --destination "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}-arm64" \
+        --destination "${IMAGE_NAME}:${APP_VERSION}-arm64"
+
+release-dry-run:
+  extends: .node-job
+  stage: release
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH"
+      when: manual
+      allow_failure: true
+  script:
+    - pnpm exec semantic-release --dry-run --no-ci
+
+release:
+  extends: .node-job
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "web"'
+      when: manual
+  script:
+    - pnpm exec semantic-release
+
+docker-promote-release:
+  extends: .docker-job
+  stage: release
+  rules:
+    - if: "$CI_COMMIT_TAG"
+  script:
+    - docker build --pull --build-arg "APP_VERSION=${CI_COMMIT_TAG}" -t "${IMAGE_NAME}:${CI_COMMIT_TAG}" -t "${IMAGE_NAME}:latest" .
+    - docker push "${IMAGE_NAME}:${CI_COMMIT_TAG}"
+    - docker push "${IMAGE_NAME}:latest"
+
+dependency-review:
+  image: alpine:3.22
+  stage: maintenance
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+  script:
+    - echo "GitHub dependency-review-action has no direct GitLab CI equivalent in this repo."
+    - echo "Enable GitLab Dependency Scanning/SBOM features for equivalent coverage."
+
+stale-issues-and-merge-requests:
+  image: alpine:3.22
+  stage: maintenance
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RUN_STALE_MAINTENANCE == "true"'
+  script:
+    - echo "GitHub stale action mapped to a scheduled GitLab maintenance placeholder."
+    - echo "Add a GitLab API token and policy script here if stale issue/MR automation is desired."
+
+label-merge-request:
+  image: alpine:3.22
+  stage: maintenance
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $RUN_MR_LABELER == "true"'
+  script:
+    - echo "GitHub PR labeler mapped to a GitLab MR labeling placeholder."
+    - echo "Add a GitLab API token and label policy script here if automatic MR labels are desired."

@@ -17,7 +17,7 @@ import { useTableCellHelpers } from '../useTableCellHelpers'
 import type { useTableLocks } from '../useTableLocks'
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -46,8 +46,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     narrators: [],
     customMetadata: [],
     tags: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 function makeMockLocks(overrides: Partial<ReturnType<typeof useTableLocks>> = {}): ReturnType<typeof useTableLocks> {

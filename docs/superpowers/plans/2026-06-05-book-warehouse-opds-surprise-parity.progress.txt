@@ -1,0 +1,1 @@
+2026-06-05 08:16:20 EDT - Feature: OPDS source-backed surprise parity. Status: Complete. Notes: OPDS Surprise now samples current-user-owned Ebook Library entries alongside filesystem random books, including cloud-only users, while preserving the non-empty content-filter guard and avoiding new migrations.

@@ -2,10 +2,10 @@ import { onMounted, ref } from 'vue'
 
 import {
   DASHBOARD_SCROLLER_BATCH_MAX,
-  type BookCard,
   type DashboardScrollerBatchRequest,
   type DashboardScrollerBatchResponse,
   type DashboardScrollerBatchResult,
+  type DashboardScrollerItem,
   type ScrollerType,
 } from '@bookorbit/types'
 import { api } from '@/lib/api'
@@ -71,8 +71,23 @@ function requestScroller(type: ScrollerType, limit: number, smartScopeId?: numbe
   })
 }
 
+/** Scroller types the server serves from a dedicated route rather than from
+ *  the batch endpoint, which rejects them by design. */
+const DEDICATED_SCROLLER_ROUTES: Partial<Record<ScrollerType, string>> = {
+  'catalog-additions': '/api/v1/dashboard/catalog-additions',
+  'catalog-discovery': '/api/v1/dashboard/catalog-discovery',
+}
+
+async function loadDedicated(url: string, type: ScrollerType, limit: number, smartScopeId?: number): Promise<DashboardScrollerItem[]> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (type === 'smart-scope' && smartScopeId) params.set('smartScopeId', String(smartScopeId))
+  const res = await api(`${url}?${params}`)
+  if (!res.ok) throw new Error('Dashboard scroller request failed')
+  return res.json()
+}
+
 export function useDashboardScroller(type: ScrollerType, limit = 20, smartScopeId?: number) {
-  const books = ref<BookCard[]>([])
+  const books = ref<DashboardScrollerItem[]>([])
   const loading = ref(true)
   const error = ref(false)
 
@@ -80,6 +95,18 @@ export function useDashboardScroller(type: ScrollerType, limit = 20, smartScopeI
     loading.value = true
     error.value = false
     try {
+      // The two catalog shelves have their OWN endpoints and are deliberately
+      // refused by the generic scroller path — the server's own test asserts
+      // it: "Library discovery is loaded through the library discovery
+      // endpoint". Routing them through the shared path made every dashboard
+      // load fail twice and left the page rendering its "your library is
+      // empty" state while the warehouse held hundreds of thousands of items.
+      const dedicated = DEDICATED_SCROLLER_ROUTES[type]
+      if (dedicated) {
+        books.value = await loadDedicated(dedicated, type, limit, smartScopeId)
+        return
+      }
+
       const result = await requestScroller(type, limit, smartScopeId)
       books.value = result.books
       error.value = result.failed

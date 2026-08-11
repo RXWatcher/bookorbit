@@ -21,6 +21,16 @@ function makeSelectChain(resolvedValue: unknown) {
   return chain;
 }
 
+function makeSelectMock(...resolvedValues: unknown[]) {
+  const chains = resolvedValues.map(makeSelectChain);
+  const select = vi.fn();
+  for (const chain of chains) {
+    select.mockReturnValueOnce(chain);
+  }
+  select.mockReturnValue(makeSelectChain([]));
+  return { select, chains };
+}
+
 function makeInsertChain(resolvedValue: unknown) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   const methods = ['values', 'onConflictDoUpdate', 'onConflictDoNothing', 'returning'];
@@ -389,49 +399,49 @@ describe('AchievementRepository', () => {
 
   describe('countAccessibleBooks', () => {
     it('counts all present books for superuser without join', async () => {
-      const chain = makeSelectChain([{ value: 100 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select, chains } = makeSelectMock([{ value: 100 }], [{ value: 0 }]);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.countAccessibleBooks(1, true);
 
       expect(result).toBe(100);
-      expect(chain.innerJoin).not.toHaveBeenCalled();
+      expect(chains[0]!.innerJoin).not.toHaveBeenCalled();
     });
 
     it('counts books via library access join for regular user', async () => {
-      const chain = makeSelectChain([{ value: 25 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select, chains } = makeSelectMock([{ value: 25 }], []);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.countAccessibleBooks(1, false);
 
       expect(result).toBe(25);
-      expect(chain.innerJoin).toHaveBeenCalledOnce();
+      expect(chains[0]!.innerJoin).toHaveBeenCalledOnce();
     });
   });
 
   describe('countDistinctFormats', () => {
     it('counts formats without join for superuser', async () => {
-      const chain = makeSelectChain([{ value: 3 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select, chains } = makeSelectMock([{ format: 'epub' }, { format: 'pdf' }, { format: 'mobi' }], []);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.countDistinctFormats(1, true);
 
       expect(result).toBe(3);
-      expect(chain.innerJoin).not.toHaveBeenCalled();
+      expect(chains[0]!.innerJoin).not.toHaveBeenCalled();
     });
 
     it('counts formats via library join for regular user', async () => {
-      const chain = makeSelectChain([{ value: 2 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select, chains } = makeSelectMock([{ format: 'epub' }, { format: 'pdf' }], []);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.countDistinctFormats(1, false);
 
       expect(result).toBe(2);
-      expect(chain.innerJoin).toHaveBeenCalled();
+      expect(chains[0]!.innerJoin).toHaveBeenCalled();
     });
   });
 
@@ -449,8 +459,19 @@ describe('AchievementRepository', () => {
 
   describe('countDistinctGenresRead', () => {
     it('returns distinct genre count', async () => {
-      const chain = makeSelectChain([{ value: 7 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select } = makeSelectMock(
+        [
+          { genre: 'Fantasy' },
+          { genre: 'Mystery' },
+          { genre: 'Science Fiction' },
+          { genre: 'History' },
+          { genre: 'Essay' },
+          { genre: 'Horror' },
+          { genre: 'Poetry' },
+        ],
+        [],
+      );
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.countDistinctGenresRead(1);
@@ -461,8 +482,8 @@ describe('AchievementRepository', () => {
 
   describe('countDistinctLanguagesRead', () => {
     it('returns distinct language count', async () => {
-      const chain = makeSelectChain([{ value: 3 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select } = makeSelectMock([{ language: 'en' }, { language: 'fr' }, { language: 'es' }], []);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.countDistinctLanguagesRead(1);
@@ -517,8 +538,11 @@ describe('AchievementRepository', () => {
 
   describe('maxBooksPerAuthor', () => {
     it('returns the highest count for a single author', async () => {
-      const chain = makeSelectChain([{ cnt: 8 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select } = makeSelectMock(
+        Array.from({ length: 8 }, () => ({ authorName: 'Octavia Butler' })),
+        [],
+      );
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.maxBooksPerAuthor(1);
@@ -527,8 +551,8 @@ describe('AchievementRepository', () => {
     });
 
     it('returns 0 when user has not finished any books', async () => {
-      const chain = makeSelectChain([]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select } = makeSelectMock([], []);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.maxBooksPerAuthor(1);
@@ -1200,7 +1224,7 @@ describe('AchievementRepository', () => {
     });
 
     it('returns false when no such series', async () => {
-      const db = { execute: vi.fn().mockResolvedValue({ rows: [] }) };
+      const db = { execute: vi.fn().mockResolvedValue({ rows: [] }), select: vi.fn().mockReturnValue(makeSelectChain([])) };
       const repo = makeRepo(db);
 
       const result = await repo.hasCompletedSeriesOfSize(7, 3);
@@ -1289,8 +1313,11 @@ describe('AchievementRepository', () => {
 
   describe('maxBooksPerGenre', () => {
     it('returns the highest count for a single genre', async () => {
-      const chain = makeSelectChain([{ cnt: 15 }]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select } = makeSelectMock(
+        Array.from({ length: 15 }, () => ({ genre: 'Fantasy' })),
+        [],
+      );
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.maxBooksPerGenre(1);
@@ -1299,8 +1326,8 @@ describe('AchievementRepository', () => {
     });
 
     it('returns 0 when no books have been read', async () => {
-      const chain = makeSelectChain([]);
-      const db = { select: vi.fn().mockReturnValue(chain) };
+      const { select } = makeSelectMock([], []);
+      const db = { select };
       const repo = makeRepo(db);
 
       const result = await repo.maxBooksPerGenre(1);

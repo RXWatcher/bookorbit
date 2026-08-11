@@ -14,6 +14,16 @@ export class DashboardController {
     private readonly widgetService: DashboardWidgetService,
   ) {}
 
+  @Get('catalog-additions')
+  getCatalogAdditions(@Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number, @CurrentUser() user: RequestUser) {
+    return this.dashboardService.getCatalogAdditions(user, limit);
+  }
+
+  @Get('catalog-discovery')
+  getCatalogDiscovery(@Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number, @CurrentUser() user: RequestUser) {
+    return this.dashboardService.getCatalogDiscovery(user, limit);
+  }
+
   @Get('scrollers/:type')
   getScroller(
     @Param('type', new ParseEnumPipe(ScrollerType)) type: ScrollerType,

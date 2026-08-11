@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { CLOUD_COMIC_LIBRARY_ID } from '@bookorbit/types';
 
 import { SORT_DIRECTIONS, type SortDirection } from './list-authors.dto';
 
@@ -31,6 +32,6 @@ export class ListAuthorBooksDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(1)
+  @Min(CLOUD_COMIC_LIBRARY_ID)
   libraryId?: number;
 }

@@ -3,7 +3,7 @@ import type { BookCard } from '@bookorbit/types'
 import { buildLockStateBookUpdate, mergeBookPatchWithLatest, sameLockFields } from './table-row-state-sync'
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'ok',
     coverAspectRatio: '2/3',
@@ -32,8 +32,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     isbn13: null,
     narrators: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 describe('table-row-state-sync', () => {

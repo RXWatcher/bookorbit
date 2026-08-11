@@ -1,10 +1,26 @@
-import { FileCog, FolderSync, HardDriveDownload, Mail, RefreshCw, ScanLine, Smartphone, Tags, Trophy, Users, type LucideIcon } from '@lucide/vue'
+import {
+  BookPlus,
+  FileCog,
+  FolderSync,
+  HardDriveDownload,
+  Mail,
+  RefreshCw,
+  ScanLine,
+  Smartphone,
+  Tags,
+  Trophy,
+  Users,
+  type LucideIcon,
+} from '@lucide/vue'
 import type { NotificationCategory } from '@bookorbit/types'
 
 export const NOTIFICATION_CATEGORY_GROUPS = [
   { id: 'library', categories: ['scanning', 'metadata', 'authorEnrichment'] },
   { id: 'files', categories: ['fileWriteBack', 'fileRename', 'bulkRename', 'migration'] },
   { id: 'integrations', categories: ['bookDock', 'koboSync', 'email'] },
+  // catalogRequests is a NotificationCategory but belonged to no group and had
+  // no icon, so request notifications had nowhere to render.
+  { id: 'requests', categories: ['catalogRequests'] },
   { id: 'personal', categories: ['achievements'] },
 ] as const satisfies ReadonlyArray<{ id: string; categories: readonly NotificationCategory[] }>
 
@@ -18,6 +34,7 @@ export const NOTIFICATION_CATEGORY_ICONS: Record<NotificationCategory, LucideIco
   migration: RefreshCw,
   bookDock: FolderSync,
   koboSync: Smartphone,
+  catalogRequests: BookPlus,
   email: Mail,
   achievements: Trophy,
 }

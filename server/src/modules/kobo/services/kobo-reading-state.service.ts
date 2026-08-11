@@ -259,6 +259,76 @@ export class KoboReadingStateService {
     };
   }
 
+  async upsertCatalogState(
+    userId: number,
+    catalogItemId: number,
+    payload: Record<string, unknown>,
+    readingThreshold: number,
+    finishedThreshold: number,
+    entitlementId: string,
+  ) {
+    const item = await this.resolveCatalogEbook(catalogItemId);
+    if (!item) return this.ignoredCatalogStateResult(entitlementId);
+
+    const bookmark = (payload.CurrentBookmark as JsonObj | undefined) ?? null;
+    const percent = this.extractPercent(bookmark) ?? 0;
+    const readStatus = percent >= finishedThreshold ? 'read' : percent >= readingThreshold ? 'reading' : 'unread';
+    const finishedAt = readStatus === 'read' ? new Date() : null;
+
+    await this.db
+      .insert(schema.warehouseUserState)
+      .values({
+        userId,
+        mediaType: 'ebook',
+        remoteId: item.remoteId,
+        readStatus,
+        progressPercent: percent,
+        positionSeconds: null,
+        finishedAt,
+      })
+      .onConflictDoUpdate({
+        target: [schema.warehouseUserState.userId, schema.warehouseUserState.mediaType, schema.warehouseUserState.remoteId],
+        set: {
+          readStatus,
+          progressPercent: percent,
+          positionSeconds: null,
+          finishedAt,
+          updatedAt: new Date(),
+        },
+      });
+
+    return this.getCatalogRawState(userId, catalogItemId, entitlementId);
+  }
+
+  async getCatalogRawState(userId: number, catalogItemId: number, entitlementId: string): Promise<unknown> {
+    const item = await this.resolveCatalogEbook(catalogItemId);
+    if (!item) return null;
+
+    const state = await this.db.query.warehouseUserState.findFirst({
+      where: and(
+        eq(schema.warehouseUserState.userId, userId),
+        eq(schema.warehouseUserState.mediaType, 'ebook'),
+        eq(schema.warehouseUserState.remoteId, item.remoteId),
+      ),
+    });
+    if (!state) return null;
+
+    const lastModified = state.updatedAt?.toISOString?.() ?? new Date().toISOString();
+    return {
+      EntitlementId: entitlementId,
+      Created: lastModified,
+      LastModified: lastModified,
+      PriorityTimestamp: lastModified,
+      CurrentBookmark: {
+        ProgressPercent: state.progressPercent ?? 0,
+      },
+      Statistics: null,
+      StatusInfo: {
+        Status: state.readStatus ?? 'unread',
+      },
+    };
+  }
+
   /**
    * Computes a precise KoboSpan Location for the bookmark when the hub position moved
    * since the device last reported. readingProgress.koboLocationValue is set only by
@@ -350,6 +420,28 @@ export class KoboReadingStateService {
     const pct = bookmark.ProgressPercent;
     if (typeof pct === 'number') return Math.max(0, Math.min(100, pct));
     return null;
+  }
+
+  private async resolveCatalogEbook(catalogItemId: number): Promise<{ remoteId: string } | null> {
+    const item = await this.db.query.warehouseCatalogItems.findFirst({
+      where: and(eq(schema.warehouseCatalogItems.id, catalogItemId), eq(schema.warehouseCatalogItems.mediaType, 'ebook')),
+      columns: { remoteId: true },
+    });
+    return item ?? null;
+  }
+
+  private ignoredCatalogStateResult(entitlementId: string) {
+    return {
+      RequestResult: 'Success',
+      UpdateResults: [
+        {
+          EntitlementId: entitlementId,
+          CurrentBookmarkResult: { Result: 'Ignored' },
+          StatisticsResult: { Result: 'Ignored' },
+          StatusInfoResult: { Result: 'Ignored' },
+        },
+      ],
+    };
   }
 
   private extractContentSourceProgressPercent(bookmark: JsonObj | null): number | null {

@@ -1,0 +1,1 @@
+2026-06-05 05:51:41 EDT - Feature: source-backed audiobook cover geometry in mixed library surfaces. Status: Complete. Notes: Collection, Smart Scope, and Series mixed local/source-backed layouts now keep audiobook covers square in grid/list views while preserving portrait framing for ebooks and local books in those mixed surfaces.

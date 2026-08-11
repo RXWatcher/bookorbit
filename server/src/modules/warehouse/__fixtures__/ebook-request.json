@@ -1,0 +1,8 @@
+{
+  "id": "book-request-1",
+  "title": "Missing Book",
+  "author": "Ada Writer",
+  "isbn": "9780000000001",
+  "preferred_format": "epub",
+  "status": "pending"
+}

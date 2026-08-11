@@ -401,12 +401,22 @@ export async function createReadingSession(
   ctx: AuthorizationMatrixE2EContext,
   input: CreateReadingSessionInput,
 ): Promise<typeof schema.readingSessions.$inferSelect> {
+  const [bookFile] = await ctx.db
+    .select({ bookId: schema.bookFiles.bookId })
+    .from(schema.bookFiles)
+    .where(eq(schema.bookFiles.id, input.bookFileId))
+    .limit(1);
+
+  if (!bookFile) {
+    throw new Error(`Book file ${input.bookFileId} not found`);
+  }
+
   const durationSeconds = Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 1000);
   const [row] = await ctx.db
     .insert(schema.readingSessions)
     .values({
       userId: input.userId,
-      bookId: input.bookId,
+      bookId: bookFile.bookId,
       bookFileId: input.bookFileId,
       sessionId: input.sessionId ?? `session-${randomUUID()}`,
       startedAt: input.startedAt,

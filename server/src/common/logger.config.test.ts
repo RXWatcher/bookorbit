@@ -95,6 +95,9 @@ describe('loggerConfig', () => {
     expect(redact?.paths).toContain('req.body.token');
     expect(redact?.paths).toContain('req.body.clientSecret');
     expect(redact?.paths).toContain('req.body.codeVerifier');
+    expect(redact?.paths).toContain('req.body.apiKey');
+    expect(redact?.paths).toContain('req.body.warehouseApiKey');
+    expect(redact?.paths).toContain('req.headers.x-api-key');
     expect(redact?.censor).toBe('[REDACTED]');
   });
 });

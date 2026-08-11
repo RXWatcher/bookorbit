@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import { useRecommendations } from '@/features/book/composables/useRecommendations'
 import BookCarousel from '@/features/book/components/detail/BookCarousel.vue'
+import CatalogRecommendationsRow from '@/features/book/components/detail/CatalogRecommendationsRow.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -39,4 +40,5 @@ const filteredRecommendations = computed(() => {
       </template>
     </BookCarousel>
   </div>
+  <CatalogRecommendationsRow :book-id="bookId" />
 </template>

@@ -6,13 +6,22 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readdir, rm, stat } from 'fs/promises';
 import { join } from 'path';
 
-import { DEFAULT_FORMAT_PRIORITY } from '@bookorbit/types';
-import type { AccessLevel, LibraryFileSyncProgressEvent, OrganizationMode, WriteResult } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, DEFAULT_FORMAT_PRIORITY } from '@bookorbit/types';
+import type {
+  AccessLevel,
+  BookQuery,
+  JumpBucketsResponse,
+  LibraryBooksPage,
+  LibraryFileSyncProgressEvent,
+  OrganizationMode,
+  WriteResult,
+} from '@bookorbit/types';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { normalizeIconValue } from '../../common/utils/icon-value.utils';
 import type { RequestUser } from '../../common/types/request-user';
@@ -22,6 +31,8 @@ import { PathPolicyService } from '../path/path-policy.service';
 import { isPrimaryFormat } from '../scanner/lib/classify';
 import { FileWatcherService } from '../scanner/file-watcher.service';
 import { ScannerService } from '../scanner/scanner.service';
+import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service';
+import { WarehouseSettingsService } from '../warehouse/warehouse-settings.service';
 import { CreateLibraryDto } from './dto/create-library.dto';
 import { GrantLibraryAccessDto } from './dto/grant-library-access.dto';
 import { PrescanLibraryDto } from './dto/prescan-library.dto';
@@ -34,6 +45,12 @@ interface LibraryMetadataWriteStreamOptions {
   onProgress?: (event: LibraryFileSyncProgressEvent) => void;
   isCancelled?: () => boolean;
 }
+
+const DEFAULT_SOURCE_BACKED_LIBRARY_ICONS = {
+  ebook: 'BookOpen',
+  audiobook: 'Headphones',
+  comic: 'PanelsTopLeft',
+};
 
 interface LibraryMetadataWriteSummary {
   processed: number;
@@ -56,17 +73,27 @@ export class LibraryService {
     private readonly fileWriteService: FileWriteService,
     private readonly achievementEvents: AchievementEventsService,
     private readonly pathPolicy: PathPolicyService,
+    @Optional()
+    private readonly warehouseCatalog?: WarehouseCatalogService,
+    @Optional()
+    private readonly warehouseSettings?: WarehouseSettingsService,
   ) {
     this.appDataPath = this.config.get<string>('storage.appDataPath')!;
   }
 
   async verifyUserAccess(userId: number, libraryId: number, isSuperuser: boolean): Promise<void> {
     if (isSuperuser) return;
+    if (this.isSourceBackedLibraryId(libraryId)) {
+      const library = await this.findSourceBackedLibrary(libraryId);
+      if (!library) throw new ForbiddenException('No access to this library');
+      return;
+    }
+
     const hasAccess = await this.libraryRepo.hasUserAccess(userId, libraryId);
     if (!hasAccess) throw new ForbiddenException('No access to this library');
   }
 
-  async findAll(user: RequestUser) {
+  async findAll(user: RequestUser, options: { includeSourceBacked?: boolean } = {}) {
     const librariesForUser = user.isSuperuser
       ? await this.libraryRepo.findAll()
       : await this.libraryRepo.findAllForUser(user.id, user.contentFilters);
@@ -84,10 +111,21 @@ export class LibraryService {
       }
     }
 
-    return librariesForUser.map((library) => ({
+    const filesystemLibraries = librariesForUser.map((library) => ({
       ...normalizeLibraryOrganizationMode(library),
+      sourceKind: 'filesystem' as const,
       folders: (foldersByLibraryId.get(library.id) ?? []).map(({ id, path, createdAt }) => ({ id, path, createdAt })),
     }));
+
+    if (!options.includeSourceBacked || !this.warehouseCatalog) {
+      return filesystemLibraries;
+    }
+
+    if (!(await this.warehouseCatalog.isCatalogEnabled())) {
+      return filesystemLibraries;
+    }
+
+    return [...(await this.getSourceBackedLibraries()), ...filesystemLibraries];
   }
 
   async findAccessibleLibraryIds(user: RequestUser): Promise<number[]> {
@@ -95,11 +133,189 @@ export class LibraryService {
     return ids.map(({ id }) => id);
   }
 
+  private async getSourceBackedLibraries() {
+    const [ebooks, audiobooks, comics] = await Promise.all([
+      this.warehouseCatalog!.listEbooks({ page: 1, limit: 1, sort: 'title', order: 'asc' }),
+      this.warehouseCatalog!.listAudiobooks({ page: 1, limit: 1, sort: 'title', order: 'asc' }),
+      this.warehouseCatalog!.listComics({ page: 1, limit: 1, sort: 'title', order: 'asc' }),
+    ]);
+    const icons = this.warehouseSettings ? await this.warehouseSettings.getSourceBackedLibraryIcons() : DEFAULT_SOURCE_BACKED_LIBRARY_ICONS;
+    const now = new Date(0).toISOString();
+
+    return [
+      {
+        id: CLOUD_EBOOK_LIBRARY_ID,
+        name: 'Books',
+        sourceKind: 'source_backed' as const,
+        icon: icons.ebook,
+        displayOrder: -20,
+        coverAspectRatio: '2/3' as const,
+        watch: false,
+        autoScanCronExpression: null,
+        metadataPrecedence: [...LIBRARY_METADATA_PRECEDENCE_DEFAULT],
+        formatPriority: [...DEFAULT_FORMAT_PRIORITY],
+        allowedFormats: [],
+        organizationMode: DEFAULT_LIBRARY_ORGANIZATION_MODE,
+        excludePatterns: [],
+        readingThreshold: 0.25,
+        markAsFinishedPercentComplete: 98,
+        fileNamingPattern: null,
+        fileWriteEnabled: false,
+        fileWriteWriteCover: false,
+        fileWriteEpubEnabled: false,
+        fileWriteEpubMaxFileSizeMb: 100,
+        fileWritePdfEnabled: false,
+        fileWritePdfMaxFileSizeMb: 100,
+        fileWriteCbxEnabled: false,
+        fileWriteCbxMaxFileSizeMb: 500,
+        fileWriteAudioEnabled: false,
+        fileWriteAudioMaxFileSizeMb: 500,
+        fileRenameEnabled: false,
+        folders: [],
+        bookCount: ebooks.total,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: CLOUD_AUDIO_LIBRARY_ID,
+        name: 'Audiobooks',
+        sourceKind: 'source_backed' as const,
+        icon: icons.audiobook,
+        displayOrder: -10,
+        coverAspectRatio: '1/1' as const,
+        watch: false,
+        autoScanCronExpression: null,
+        metadataPrecedence: [...LIBRARY_METADATA_PRECEDENCE_DEFAULT],
+        formatPriority: [...DEFAULT_FORMAT_PRIORITY],
+        allowedFormats: [],
+        organizationMode: DEFAULT_LIBRARY_ORGANIZATION_MODE,
+        excludePatterns: [],
+        readingThreshold: 0.25,
+        markAsFinishedPercentComplete: 98,
+        fileNamingPattern: null,
+        fileWriteEnabled: false,
+        fileWriteWriteCover: false,
+        fileWriteEpubEnabled: false,
+        fileWriteEpubMaxFileSizeMb: 100,
+        fileWritePdfEnabled: false,
+        fileWritePdfMaxFileSizeMb: 100,
+        fileWriteCbxEnabled: false,
+        fileWriteCbxMaxFileSizeMb: 500,
+        fileWriteAudioEnabled: false,
+        fileWriteAudioMaxFileSizeMb: 500,
+        fileRenameEnabled: false,
+        folders: [],
+        bookCount: audiobooks.total,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: CLOUD_COMIC_LIBRARY_ID,
+        name: 'Comics',
+        sourceKind: 'source_backed' as const,
+        icon: icons.comic,
+        displayOrder: -5,
+        coverAspectRatio: '2/3' as const,
+        watch: false,
+        autoScanCronExpression: null,
+        metadataPrecedence: [...LIBRARY_METADATA_PRECEDENCE_DEFAULT],
+        formatPriority: [...DEFAULT_FORMAT_PRIORITY],
+        allowedFormats: [],
+        organizationMode: DEFAULT_LIBRARY_ORGANIZATION_MODE,
+        excludePatterns: [],
+        readingThreshold: 0.25,
+        markAsFinishedPercentComplete: 98,
+        fileNamingPattern: null,
+        fileWriteEnabled: false,
+        fileWriteWriteCover: false,
+        fileWriteEpubEnabled: false,
+        fileWriteEpubMaxFileSizeMb: 100,
+        fileWritePdfEnabled: false,
+        fileWritePdfMaxFileSizeMb: 100,
+        fileWriteCbxEnabled: false,
+        fileWriteCbxMaxFileSizeMb: 500,
+        fileWriteAudioEnabled: false,
+        fileWriteAudioMaxFileSizeMb: 500,
+        fileRenameEnabled: false,
+        folders: [],
+        bookCount: comics.total,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+  }
+
   async findOne(id: number) {
+    if (this.isSourceBackedLibraryId(id)) {
+      const library = await this.findSourceBackedLibrary(id);
+      if (!library) throw new NotFoundException('Library not found');
+      return library;
+    }
+
     const [library] = await this.libraryRepo.findById(id);
     if (!library) throw new NotFoundException('Library not found');
     const folders = await this.libraryRepo.findFoldersByLibrary(id);
     return { ...normalizeLibraryOrganizationMode(library), folders };
+  }
+
+  private isSourceBackedLibraryId(id: number): boolean {
+    return id === CLOUD_EBOOK_LIBRARY_ID || id === CLOUD_AUDIO_LIBRARY_ID || id === CLOUD_COMIC_LIBRARY_ID;
+  }
+
+  private async findSourceBackedLibrary(id: number) {
+    if (!this.warehouseCatalog || !(await this.warehouseCatalog.isCatalogEnabled())) {
+      return null;
+    }
+
+    return (await this.getSourceBackedLibraries()).find((library) => library.id === id) ?? null;
+  }
+
+  async querySourceBackedCatalogItems(user: RequestUser, libraryId: number, query: BookQuery) {
+    if (!this.warehouseCatalog) {
+      throw new NotFoundException('Library not found');
+    }
+
+    if (libraryId === CLOUD_EBOOK_LIBRARY_ID) {
+      return this.warehouseCatalog.queryLibraryItems(user, 'ebook', query);
+    }
+
+    if (libraryId === CLOUD_AUDIO_LIBRARY_ID) {
+      return this.warehouseCatalog.queryLibraryItems(user, 'audiobook', query);
+    }
+
+    if (libraryId === CLOUD_COMIC_LIBRARY_ID) {
+      return this.warehouseCatalog.queryLibraryItems(user, 'comic', query);
+    }
+
+    throw new NotFoundException('Library not found');
+  }
+
+  async querySourceBackedLibraryBooks(user: RequestUser, libraryId: number, query: BookQuery): Promise<LibraryBooksPage> {
+    if (!this.warehouseCatalog) {
+      throw new NotFoundException('Library not found');
+    }
+
+    const mediaType = sourceBackedMediaTypeForLibraryId(libraryId);
+    if (!mediaType) throw new NotFoundException('Library not found');
+
+    const page = await this.warehouseCatalog.queryLibraryBooks(user, mediaType, query);
+    return {
+      items: page.items,
+      total: page.total,
+      page: page.page,
+      size: page.limit,
+    };
+  }
+
+  async querySourceBackedLibraryJumpBuckets(user: RequestUser, libraryId: number, query: BookQuery): Promise<JumpBucketsResponse> {
+    if (!this.warehouseCatalog) {
+      throw new NotFoundException('Library not found');
+    }
+
+    const mediaType = sourceBackedMediaTypeForLibraryId(libraryId);
+    if (!mediaType) throw new NotFoundException('Library not found');
+
+    return this.warehouseCatalog.queryLibraryJumpBuckets(user, mediaType, query);
   }
 
   async create(dto: CreateLibraryDto) {
@@ -291,6 +507,12 @@ export class LibraryService {
   }
 
   async getStats(libraryId: number) {
+    if (this.isSourceBackedLibraryId(libraryId)) {
+      const library = await this.findSourceBackedLibrary(libraryId);
+      if (!library) throw new NotFoundException('Library not found');
+      return { totalBooks: library.bookCount ?? 0, totalSizeBytes: 0, formatCounts: {} };
+    }
+
     const [existing] = await this.libraryRepo.findById(libraryId);
     if (!existing) throw new NotFoundException('Library not found');
     try {
@@ -416,6 +638,13 @@ export class LibraryService {
       `[${event}] [end] bookCount=${bookIds.length} durationMs=${Date.now() - startedAt} deletedCount=${deletedCount} failedCount=${failedCount} - cover directory cleanup completed`,
     );
   }
+}
+
+function sourceBackedMediaTypeForLibraryId(libraryId: number) {
+  if (libraryId === CLOUD_EBOOK_LIBRARY_ID) return 'ebook';
+  if (libraryId === CLOUD_AUDIO_LIBRARY_ID) return 'audiobook';
+  if (libraryId === CLOUD_COMIC_LIBRARY_ID) return 'comic';
+  return null;
 }
 
 async function countPrimaryFiles(dir: string): Promise<number> {

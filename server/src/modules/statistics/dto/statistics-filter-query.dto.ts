@@ -1,10 +1,10 @@
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { IsArray, IsInt, IsOptional } from 'class-validator';
+import { transformLibraryIdsQueryValue } from '../../../common/utils/library-query-id-transform';
 
 export class StatisticsFilterQueryDto {
   @IsOptional()
-  @Transform(({ value }) => (Array.isArray(value) ? value : value != null ? [value] : []))
-  @Type(() => Number)
+  @Transform(({ value }) => transformLibraryIdsQueryValue(value))
   @IsArray()
   @IsInt({ each: true })
   libraryIds?: number[];

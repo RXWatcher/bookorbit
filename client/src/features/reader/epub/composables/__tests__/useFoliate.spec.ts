@@ -268,6 +268,28 @@ describe('useFoliate.open', () => {
     expect(mockGoToFraction).not.toHaveBeenCalled()
   })
 
+  it('opens an EPUB from an authenticated catalog download URL as a file', async () => {
+    const foliate = useFoliate(() => container)
+    const blob = new Blob(['epub'], { type: 'application/epub+zip' })
+    vi.mocked(api).mockResolvedValueOnce({ ok: true, blob: vi.fn<() => Promise<Blob>>().mockResolvedValue(blob) } as unknown as Response)
+
+    await foliate.openFromUrl('/api/v1/catalog/ebooks/remote-7/download', 'epub', 'Remote Book', null, 0.25)
+
+    const view = container.querySelector('div') as unknown as HTMLElement & { open: ReturnType<typeof vi.fn> }
+    expect(vi.mocked(api)).toHaveBeenCalledWith('/api/v1/catalog/ebooks/remote-7/download')
+    expect(view.open).toHaveBeenCalledWith(expect.any(File))
+    expect(mockGoToFraction).toHaveBeenCalledWith(0.25)
+  })
+
+  it('uses native library item copy when a source-backed ebook format cannot open in Foliate', async () => {
+    const foliate = useFoliate(() => container)
+
+    await foliate.openFromUrl('/api/v1/catalog/ebooks/remote-7/download', 'pdf', 'Remote Book', null, 0.25)
+
+    expect(foliate.error.value).toBe('This library item format is not supported in the reader yet.')
+    expect(foliate.error.value?.toLowerCase()).not.toContain('catalog')
+  })
+
   it('suppresses tap navigation when an annotation is shown', async () => {
     const foliate = useFoliate(() => container)
     const onAnnotationClick = vi.fn<(cfi: string, popupPosition: { x: number; y: number; showBelow: boolean }) => void>()

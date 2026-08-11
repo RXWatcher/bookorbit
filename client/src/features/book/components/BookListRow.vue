@@ -35,6 +35,8 @@ import { usePermissions } from '@/features/auth/composables/usePermissions'
 import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import { RATING_STARS, getRatingStarClass } from '@/features/book/lib/rating-stars'
 import { useDisplaySettings } from '@/composables/useDisplaySettings'
+import { bookCoverUrl, bookDetailRoute, bookReaderRoute, getBookCatalogSource, isSourceBackedBook } from '@/features/book/lib/source-backed-book'
+import { patchCatalogSourceUserState } from '@/features/warehouse/api/catalog-source.api'
 import { displayPublishedDate } from '../lib/published-date'
 
 const COLLAPSED_SERIES_COVER_LIMIT = 3
@@ -60,6 +62,9 @@ const emit = defineEmits<{
 const { hasPermission } = usePermissions()
 const { thumbnailClickAction } = useDisplaySettings()
 const showSendDialog = ref(false)
+const catalogSource = computed(() => getBookCatalogSource(props.book))
+const isSourceBacked = computed(() => isSourceBackedBook(props.book))
+const canUseLocalBookActions = computed(() => !isSourceBacked.value)
 
 const collapsedSeries = computed(() => props.book.collapsedSeries ?? null)
 const isCollapsedSeries = computed(() => collapsedSeries.value !== null)
@@ -136,6 +141,11 @@ async function setRating(star: number) {
   const newRating = localRating.value === star ? null : star
   localRating.value = newRating
   emit('rating-change', newRating)
+  if (catalogSource.value) {
+    await patchCatalogSourceUserState(catalogSource.value.mediaType, catalogSource.value.remoteId, { rating: newRating })
+    return
+  }
+
   await api(`/api/v1/books/${props.book.id}/metadata`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -144,18 +154,14 @@ async function setRating(star: number) {
 }
 
 const { coverUrl } = useCoverVersions()
-const coverSrc = computed(() => coverUrl(props.book.id, 'thumbnail', props.book.updatedAt ?? props.book.addedAt))
+const coverSrc = computed(() => bookCoverUrl(props.book, coverUrl, 'thumbnail'))
 
 const { refreshing, refreshWithFeedback } = useRefreshMetadata()
 const injectedCoverAspectRatio = inject(COVER_ASPECT_RATIO_KEY, ref(DEFAULT_COVER_ASPECT_RATIO))
 const coverAspectRatio = computed(() => props.book.coverAspectRatio ?? injectedCoverAspectRatio.value)
 
 function openFile(file: BookFileRef, mode?: 'peek') {
-  router.push({
-    name: 'reader',
-    params: { bookId: props.book.id, fileId: file.id },
-    query: mode === 'peek' ? { format: file.format ?? 'epub', mode } : { format: file.format ?? 'epub' },
-  })
+  router.push(bookReaderRoute(props.book, file, mode))
 }
 
 function peekPrimaryFile() {
@@ -169,7 +175,7 @@ function openAuthorBrowse() {
 }
 
 function openBookDetails() {
-  void router.push({ name: 'book-detail', params: { bookId: props.book.id } })
+  void router.push(bookDetailRoute(props.book))
 }
 
 function openSeriesDetails() {
@@ -198,6 +204,11 @@ function handleRowClick(event: MouseEvent) {
   }
 
   if (thumbnailClickAction.value === 'details') {
+    openBookDetails()
+    return
+  }
+
+  if (isSourceBacked.value) {
     openBookDetails()
     return
   }
@@ -426,34 +437,38 @@ function handleRowClick(event: MouseEvent) {
             <ExternalLink class="size-4 mr-2" />
             {{ t('book.actions.bookDetails') }}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          <DropdownMenuSeparator v-if="canUseLocalBookActions" />
           <DropdownMenuItem
-            v-if="hasPermission('library_edit_metadata')"
+            v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
             @click="router.push({ name: 'book-detail', params: { bookId: book.id }, query: { tab: 'edit' } })"
           >
             <Pencil class="size-4 mr-2" />
             {{ t('book.actions.editMetadata') }}
           </DropdownMenuItem>
-          <DropdownMenuItem v-if="hasPermission('library_edit_metadata')" :disabled="refreshing" @click="refreshWithFeedback(book.id)">
+          <DropdownMenuItem
+            v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
+            :disabled="refreshing"
+            @click="refreshWithFeedback(book.id)"
+          >
             <Loader2 v-if="refreshing" class="size-4 mr-2 animate-spin" />
             <RefreshCw v-else class="size-4 mr-2" />
             {{ t('book.actions.refreshMetadata') }}
           </DropdownMenuItem>
-          <DropdownMenuItem v-if="allowMoveToLibrary && hasPermission('library_edit_metadata')" @click="emit('action', 'move-to-library')">
+          <DropdownMenuItem v-if="canUseLocalBookActions && allowMoveToLibrary && hasPermission('library_edit_metadata')" @click="emit('action', 'move-to-library')">
             <FolderInput class="size-4 mr-2" />
             {{ t('book.move.action') }}
           </DropdownMenuItem>
-          <DropdownMenuItem @click="emit('action', 'add-to-collection')">
+          <DropdownMenuItem v-if="canUseLocalBookActions" @click="emit('action', 'add-to-collection')">
             <FolderPlus class="size-4 mr-2" />
             {{ t('book.actions.addToCollection') }}
           </DropdownMenuItem>
-          <DropdownMenuItem v-if="hasPermission('email_send')" @click="showSendDialog = true">
+          <DropdownMenuItem v-if="canUseLocalBookActions && hasPermission('email_send')" @click="showSendDialog = true">
             <Send class="size-4 mr-2" />
             {{ t('book.actions.sendViaEmail') }}
           </DropdownMenuItem>
-          <DropdownMenuSeparator v-if="hasPermission('library_delete_books')" />
+          <DropdownMenuSeparator v-if="canUseLocalBookActions && hasPermission('library_delete_books')" />
           <DropdownMenuItem
-            v-if="hasPermission('library_delete_books')"
+            v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
             class="text-destructive focus:text-destructive"
             @click="emit('action', 'delete')"
           >
@@ -466,7 +481,7 @@ function handleRowClick(event: MouseEvent) {
   </div>
 
   <SendBookDialog
-    v-if="showSendDialog"
+    v-if="showSendDialog && canUseLocalBookActions"
     :open="showSendDialog"
     :selection-payload="{ bookIds: [book.id] }"
     :selected-count="1"

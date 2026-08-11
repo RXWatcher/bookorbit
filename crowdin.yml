@@ -23,7 +23,6 @@ commit_message: |-
 
   Keep translated catalogs synchronized with reviewed Crowdin content.
 append_commit_message: false
-
 files:
   - source: /client/src/locales/en.json
     translation: /client/src/locales/%two_letters_code%.json

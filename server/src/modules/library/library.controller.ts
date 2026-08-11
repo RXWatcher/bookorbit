@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
-import { Permission, AuditAction, AuditResource } from '@bookorbit/types';
+import { Permission, AuditAction, AuditResource, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 import type { BookQuery, BulkRenameProgressEvent, JumpBucketsQuery, LibraryFileSyncProgressEvent } from '@bookorbit/types';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireLibraryAccess } from '../../common/decorators/require-library-access.decorator';
@@ -29,8 +29,8 @@ export class LibraryController {
   ) {}
 
   @Get()
-  findAll(@CurrentUser() user: RequestUser) {
-    return this.libraryService.findAll(user);
+  findAll(@CurrentUser() user: RequestUser, @Query('includeSourceBacked') includeSourceBacked?: string) {
+    return this.libraryService.findAll(user, { includeSourceBacked: includeSourceBacked !== 'false' });
   }
 
   @Get(':id')
@@ -42,7 +42,16 @@ export class LibraryController {
   @Post(':id/books')
   @RequireLibraryAccess('viewer')
   queryBooks(@Param('id', ParseIntPipe) libraryId: number, @Body(BookQueryPipe) query: BookQuery, @CurrentUser() user: RequestUser) {
+    if (libraryId === CLOUD_EBOOK_LIBRARY_ID || libraryId === CLOUD_AUDIO_LIBRARY_ID || libraryId === CLOUD_COMIC_LIBRARY_ID) {
+      return this.libraryService.querySourceBackedLibraryBooks(user, libraryId, query);
+    }
+
     return this.bookService.queryForLibrary(user, libraryId, query);
+  }
+
+  @Post(':id/catalog-items/query')
+  queryCatalogItems(@Param('id', ParseIntPipe) libraryId: number, @Body(BookQueryPipe) query: BookQuery, @CurrentUser() user: RequestUser) {
+    return this.libraryService.querySourceBackedCatalogItems(user, libraryId, query);
   }
 
   @Post(':id/books/jump-buckets')
@@ -52,6 +61,10 @@ export class LibraryController {
     @Body(JumpBucketsQueryPipe) query: JumpBucketsQuery,
     @CurrentUser() user: RequestUser,
   ) {
+    if (libraryId === CLOUD_EBOOK_LIBRARY_ID || libraryId === CLOUD_AUDIO_LIBRARY_ID || libraryId === CLOUD_COMIC_LIBRARY_ID) {
+      return this.libraryService.querySourceBackedLibraryJumpBuckets(user, libraryId, query);
+    }
+
     return this.bookService.queryJumpBucketsForLibrary(user, libraryId, query);
   }
 

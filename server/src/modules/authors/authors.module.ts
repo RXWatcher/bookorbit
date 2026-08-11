@@ -10,6 +10,7 @@ import { LibraryModule } from '../library/library.module';
 import { MetadataModule } from '../metadata/metadata.module';
 import { MetadataScoreModule } from '../metadata-score/metadata-score.module';
 import { NotificationModule } from '../notification/notification.module';
+import { WarehouseModule } from '../warehouse/warehouse.module';
 import { AuthorImageStorageService } from './author-image-storage.service';
 import { AuthorEnrichmentConfigService } from './author-enrichment-config.service';
 import { AuthorEnrichmentExecutorService } from './author-enrichment-executor.service';
@@ -34,6 +35,7 @@ const AUTHOR_PROVIDER_CLASSES = [AudnexusAuthorMetadataProvider];
     LibraryModule,
     AppSettingsModule,
     MetadataModule,
+    WarehouseModule,
     MetadataScoreModule,
     forwardRef(() => NotificationModule),
     AuthModule,

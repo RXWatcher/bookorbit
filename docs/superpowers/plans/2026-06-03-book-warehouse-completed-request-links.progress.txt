@@ -1,0 +1,11 @@
+[2026-06-03 16:16 EDT] Feature: Completed request catalog links
+Status: Complete
+Notes: Request DTOs now include a nullable sanitized completed catalog item route id, and completed ebook/audiobook request rows render a native Open item link only when that id is safe and present.
+
+[2026-06-03 16:16 EDT] Verification
+Status: Complete
+Notes: Focused mapper/request-view tests passed, `pnpm run verify` passed, and `pnpm run build:client` passed with existing Vite crypto externalization and chunk-size warnings.
+
+[2026-06-03 16:16 EDT] Review
+Status: Complete
+Notes: Review found unsafe completed route-id wording and modified-click interception; route IDs now reuse forbidden public wording checks and modified clicks preserve native link behavior.

@@ -1,0 +1,13 @@
+2026-06-05 09:26 EDT - Feature: source-backed ebook email send parity. Status: Complete. Notes: Ebook Library item details can now open the normal email dialog with catalog ebook refs; the server streams the source-backed ebook through the existing user-scoped download path and logs null local book/file ids to avoid remote-id confusion.
+
+Verification:
+- pnpm --filter server exec vitest run src/modules/email/email-template-context.service.test.ts src/modules/email/email-send-orchestrator.service.test.ts src/modules/email/email.module.test.ts
+- pnpm --filter client exec vitest run src/features/warehouse/views/__tests__/CatalogItemDetailView.spec.ts src/features/email/components/__tests__/SendBookDialog.spec.ts
+- pnpm run typecheck
+- pnpm --filter server lint:check
+- pnpm --filter client lint:check
+- pnpm run test
+- git diff --check
+
+Review checkpoint:
+- Fixed the retry blocker by loading source-backed email attachments per dispatch attempt, so one-shot streams are not reused after a failed SMTP send.

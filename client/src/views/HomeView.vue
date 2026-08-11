@@ -68,15 +68,16 @@ import { useSavedViews, type SavedView } from '@/features/book/composables/useSa
 import type { GroupRule, Rule, SortSpec } from '@bookorbit/types'
 import EntityNotFound from '@/components/EntityNotFound.vue'
 import { type QuerySelectionState } from '@/features/book/composables/useBookBulkActions'
+import { parseLibraryRouteId } from '@/features/library/lib/library-route'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { viewMode, effectiveViewMode } = useEffectiveViewMode()
-const { libraries, loaded: librariesLoaded } = useLibraries()
+const { libraries, loaded: librariesLoaded } = useLibraries({ includeSourceBacked: true })
 const { hasPermission, isDemoRestrictedAccount } = usePermissions()
 
-const libraryId = shallowRef<number | null>(route.params.id ? Number(route.params.id) : null)
+const libraryId = shallowRef<number | null>(parseLibraryRouteId(route.params.id))
 const currentLibrary = computed(() => libraries.value.find((l) => l.id === libraryId.value))
 const currentCoverAspectRatio = computed(() => currentLibrary.value?.coverAspectRatio ?? DEFAULT_COVER_ASPECT_RATIO)
 const { coverSize, gridGap } = useViewDisplaySettings('library', libraryId, currentCoverAspectRatio)
@@ -99,6 +100,13 @@ const collapseEnabledRef = ref(libraryId.value !== null ? getEffectivePreference
 watch(libraryId, (id) => {
   collapseEnabledRef.value = id !== null ? getEffectivePreference({ libraryId: id }) : false
 })
+
+watch(
+  () => route.params.id,
+  (id) => {
+    libraryId.value = parseLibraryRouteId(id)
+  },
+)
 
 watch(prefs, () => {
   collapseEnabledRef.value = libraryId.value !== null ? getEffectivePreference({ libraryId: libraryId.value }) : false

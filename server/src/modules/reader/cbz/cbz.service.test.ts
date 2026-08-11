@@ -132,12 +132,13 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
 describe('CbzService', () => {
   const user = { id: 9, isSuperuser: false, permissions: [] } as any;
   const bookService = { verifyFileAccess: vi.fn() };
+  const warehouseCatalogService = { downloadEbook: vi.fn() };
 
   let service: CbzService;
 
   beforeEach(() => {
     vi.resetAllMocks();
-    service = new CbzService(bookService as any);
+    service = new CbzService(bookService as any, warehouseCatalogService as any);
     mockDetectComicContainerFormat.mockImplementation((_path, fmt) => Promise.resolve(fmt));
   });
 
@@ -333,7 +334,7 @@ describe('CbzService', () => {
     const result = await service.streamPage(8, 0, user);
     await expect(readStream(result.stream)).resolves.toEqual(Buffer.from([1, 2, 3]));
     expect(result.mimeType).toBe('image/png');
-    expect(fsApi.readFile).toHaveBeenCalledWith('/p8/2.png');
+    expect(fsApi.readFile).toHaveBeenCalledWith('/pOA/2.png');
     expect(sevenZip.callMain).toHaveBeenCalledTimes(1);
   });
 
@@ -399,5 +400,137 @@ describe('CbzService', () => {
     await service.getPageCount(12, user);
 
     expect(mockDetectComicContainerFormat).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts source-backed CBZ pages from the current user catalog download', async () => {
+    warehouseCatalogService.downloadEbook.mockResolvedValue({
+      status: 200,
+      contentType: 'application/x-cbz',
+      contentLength: null,
+      body: buildCbzBuffer([
+        { name: '02.png', data: Buffer.from([2]) },
+        { name: '01.jpg', data: Buffer.from([1]) },
+        { name: 'notes.txt', data: Buffer.from('skip') },
+      ]),
+      fileName: 'comic.cbz',
+    });
+
+    await expect(service.getCatalogPageCount('remote-archive', 'cbz', user)).resolves.toBe(2);
+
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledWith(user, 'remote-archive');
+    expect(bookService.verifyFileAccess).not.toHaveBeenCalled();
+  });
+
+  it('streams source-backed CBZ pages in natural order from cached catalog bytes', async () => {
+    warehouseCatalogService.downloadEbook.mockResolvedValue({
+      status: 200,
+      contentType: 'application/x-cbz',
+      contentLength: null,
+      body: buildCbzBuffer([
+        { name: '10.jpg', data: Buffer.from([10]) },
+        { name: '2.jpg', data: Buffer.from([2]) },
+      ]),
+      fileName: 'comic.cbz',
+    });
+
+    await expect(service.getCatalogPageCount('remote-archive', 'cbz', user)).resolves.toBe(2);
+    const result = await service.streamCatalogPage('remote-archive', 'cbz', 0, user);
+
+    await expect(readStream(result.stream)).resolves.toEqual(Buffer.from([2]));
+    expect(result.mimeType).toBe('image/jpeg');
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledTimes(1);
+    expect(mockCreateReadStream).not.toHaveBeenCalled();
+  });
+
+  it('counts and streams source-backed CBR pages from cached catalog bytes', async () => {
+    const rarBytes = Buffer.from('source-rar');
+    warehouseCatalogService.downloadEbook.mockResolvedValue({
+      status: 200,
+      contentType: 'application/x-cbr',
+      contentLength: null,
+      body: rarBytes,
+      fileName: 'comic.cbr',
+    });
+    mockCreateExtractorFromData
+      .mockResolvedValueOnce({
+        getFileList: () => ({
+          fileHeaders: [
+            { name: '10.jpg', flags: { directory: false } },
+            { name: '2.png', flags: { directory: false } },
+            { name: 'notes.txt', flags: { directory: false } },
+          ],
+        }),
+      } as any)
+      .mockResolvedValueOnce({
+        extract: () => ({
+          files: [{ fileHeader: { flags: { directory: false } }, extraction: Uint8Array.from([4, 5, 6]) }],
+        }),
+      } as any);
+
+    await expect(service.getCatalogPageCount('remote-rar', 'cbr', user)).resolves.toBe(2);
+    const result = await service.streamCatalogPage('remote-rar', 'cbr', 0, user);
+
+    await expect(readStream(result.stream)).resolves.toEqual(Buffer.from([4, 5, 6]));
+    expect(result.mimeType).toBe('image/png');
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledTimes(1);
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledWith(user, 'remote-rar');
+    expect(bookService.verifyFileAccess).not.toHaveBeenCalled();
+    expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it('counts and streams source-backed CB7 pages from cached catalog bytes', async () => {
+    const fsApi = {
+      open: vi.fn().mockReturnValue(5),
+      write: vi.fn(),
+      close: vi.fn(),
+      mkdir: vi.fn(),
+      readdir: vi.fn().mockReturnValue(['.', '..', '10.jpg', '2.png', 'notes.txt']),
+      readFile: vi.fn().mockReturnValue(Uint8Array.from([7, 8, 9])),
+    };
+    const sevenZip = { FS: fsApi, callMain: vi.fn() };
+    warehouseCatalogService.downloadEbook.mockResolvedValue({
+      status: 200,
+      contentType: 'application/x-cb7',
+      contentLength: null,
+      body: Buffer.from('source-7z'),
+      fileName: 'comic.cb7',
+    });
+    mockGetSevenZip.mockResolvedValue(sevenZip as any);
+
+    await expect(service.getCatalogPageCount('remote-7z', 'cb7', user)).resolves.toBe(2);
+    const result = await service.streamCatalogPage('remote-7z', 'cb7', 0, user);
+
+    await expect(readStream(result.stream)).resolves.toEqual(Buffer.from([7, 8, 9]));
+    expect(result.mimeType).toBe('image/png');
+    expect(fsApi.readFile).toHaveBeenCalledWith(`/p${Buffer.from('catalog:9:remote-7z').toString('base64url')}/2.png`);
+    expect(sevenZip.callMain).toHaveBeenCalledTimes(1);
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledTimes(1);
+    expect(bookService.verifyFileAccess).not.toHaveBeenCalled();
+    expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it('keeps source-backed archive caches scoped by user', async () => {
+    warehouseCatalogService.downloadEbook
+      .mockResolvedValueOnce({
+        status: 200,
+        contentType: 'application/x-cbz',
+        contentLength: null,
+        body: buildCbzBuffer([{ name: '1.jpg', data: Buffer.from([1]) }]),
+        fileName: 'one.cbz',
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        contentType: 'application/x-cbz',
+        contentLength: null,
+        body: buildCbzBuffer([{ name: '1.jpg', data: Buffer.from([2]) }]),
+        fileName: 'two.cbz',
+      });
+
+    await expect(service.getCatalogPageCount('shared-remote', 'cbz', { ...user, id: 1 })).resolves.toBe(1);
+    await expect(service.getCatalogPageCount('shared-remote', 'cbz', { ...user, id: 2 })).resolves.toBe(1);
+
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenCalledTimes(2);
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 1 }), 'shared-remote');
+    expect(warehouseCatalogService.downloadEbook).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 2 }), 'shared-remote');
   });
 });

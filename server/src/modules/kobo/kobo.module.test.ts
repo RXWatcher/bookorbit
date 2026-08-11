@@ -31,6 +31,7 @@ import { AnnotationModule } from '../annotation/annotation.module';
 import { BookModule } from '../book/book.module';
 import { PositionConverterModule } from '../position-converter/position-converter.module';
 import { ReadingSessionModule } from '../reading-session/reading-session.module';
+import { WarehouseModule } from '../warehouse/warehouse.module';
 
 describe('KoboModule', () => {
   it('registers expected controllers and providers', () => {
@@ -40,6 +41,7 @@ describe('KoboModule', () => {
 
     expect(imports).toContain(BookModule);
     expect(imports).toContain(ReadingSessionModule);
+    expect(imports).toContain(WarehouseModule);
     expect(imports).toContain(AnnotationModule);
     expect(imports).toContain(PositionConverterModule);
     expect(controllers).toEqual([KoboUserController, KoboAuthController, KoboSyncController, KoboDeviceController, KoboReadingServicesController]);

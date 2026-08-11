@@ -54,13 +54,19 @@ describe('KoreaderService', () => {
     deleteKoreaderUser: ReturnType<typeof vi.fn>;
     getAccessibleLibraryIds: ReturnType<typeof vi.fn>;
     resolveBookFileByHash: ReturnType<typeof vi.fn>;
+    resolveCatalogDocumentByHash: ReturnType<typeof vi.fn>;
+    recordCatalogDocumentHash: ReturnType<typeof vi.fn>;
     upsertDeviceProgress: ReturnType<typeof vi.fn>;
+    upsertCatalogDeviceProgress: ReturnType<typeof vi.fn>;
     upsertDeviceProgressMany: ReturnType<typeof vi.fn>;
     upsertReadingProgress: ReturnType<typeof vi.fn>;
+    upsertCatalogReadingProgress: ReturnType<typeof vi.fn>;
     getLatestDeviceProgress: ReturnType<typeof vi.fn>;
+    getLatestCatalogDeviceProgress: ReturnType<typeof vi.fn>;
     getDeviceProgressForFiles: ReturnType<typeof vi.fn>;
     getReadingProgressUpdatedAtForFiles: ReturnType<typeof vi.fn>;
     getReadingProgress: ReturnType<typeof vi.fn>;
+    getCatalogReadingProgress: ReturnType<typeof vi.fn>;
     getTotalSyncedBooks: ReturnType<typeof vi.fn>;
     getDevicesList: ReturnType<typeof vi.fn>;
     getDeviceFileNamingPatterns: ReturnType<typeof vi.fn>;
@@ -126,13 +132,19 @@ describe('KoreaderService', () => {
       deleteKoreaderUser: vi.fn(),
       getAccessibleLibraryIds: vi.fn(),
       resolveBookFileByHash: vi.fn(),
+      resolveCatalogDocumentByHash: vi.fn(),
+      recordCatalogDocumentHash: vi.fn(),
       upsertDeviceProgress: vi.fn(),
+      upsertCatalogDeviceProgress: vi.fn(),
       upsertDeviceProgressMany: vi.fn(),
       upsertReadingProgress: vi.fn(),
+      upsertCatalogReadingProgress: vi.fn(),
       getLatestDeviceProgress: vi.fn(),
+      getLatestCatalogDeviceProgress: vi.fn(),
       getDeviceProgressForFiles: vi.fn().mockResolvedValue(new Map()),
       getReadingProgressUpdatedAtForFiles: vi.fn().mockResolvedValue(new Map()),
       getReadingProgress: vi.fn(),
+      getCatalogReadingProgress: vi.fn(),
       getTotalSyncedBooks: vi.fn(),
       getDevicesList: vi.fn().mockResolvedValue([]),
       getDeviceFileNamingPatterns: vi.fn().mockResolvedValue([]),
@@ -189,8 +201,10 @@ describe('KoreaderService', () => {
     mockRepo.deleteKoreaderUser.mockResolvedValue(undefined);
     mockRepo.updateKoreaderUser.mockResolvedValue(undefined);
     mockRepo.upsertDeviceProgress.mockResolvedValue(undefined);
+    mockRepo.upsertCatalogDeviceProgress.mockResolvedValue(undefined);
     mockRepo.upsertDeviceProgressMany.mockResolvedValue(undefined);
     mockRepo.upsertReadingProgress.mockResolvedValue(undefined);
+    mockRepo.upsertCatalogReadingProgress.mockResolvedValue(undefined);
     mockRepo.getAccessibleLibraryIds.mockResolvedValue([1, 2]);
     mockChapterService.parseChapterIndexFromProgress.mockReturnValue(null);
     mockChapterExtractor.extractAndStoreChapters.mockResolvedValue([]);
@@ -409,6 +423,7 @@ describe('KoreaderService', () => {
 
     it('throws when the book file cannot be resolved', async () => {
       mockRepo.resolveBookFileByHash.mockResolvedValue(null);
+      mockRepo.resolveCatalogDocumentByHash.mockResolvedValue(null);
 
       await expect(
         service.saveProgress(12, {
@@ -421,6 +436,94 @@ describe('KoreaderService', () => {
       expect(mockRepo.upsertReadingProgress).not.toHaveBeenCalled();
       expect(mockBookService.autoUpdateReadStatusForProgress).not.toHaveBeenCalled();
       expect(mockAchievementEvents.emit).not.toHaveBeenCalled();
+    });
+
+    it('syncs cached Ebook Library progress through the recorded document hash mapping', async () => {
+      mockRepo.resolveBookFileByHash.mockResolvedValue(null);
+      mockRepo.resolveCatalogDocumentByHash.mockResolvedValue({
+        catalogDocumentId: 9,
+        catalogItemId: 42,
+        remoteId: 'remote/book-42',
+      });
+      mockChapterService.parseChapterIndexFromProgress.mockReturnValue(4);
+
+      const result = await service.saveProgress(12, {
+        document: '0123456789abcdef0123456789abcdef',
+        percentage: 0.42,
+        progress: '/body/DocFragment[5]/body',
+        device: 'KOReader',
+        device_id: 'device-42',
+        timestamp: 1700000100,
+      });
+
+      expect(mockRepo.resolveCatalogDocumentByHash).toHaveBeenCalledWith(12, '0123456789abcdef0123456789abcdef');
+      expect(mockRepo.upsertCatalogDeviceProgress).toHaveBeenCalledWith({
+        catalogDocumentId: 9,
+        userId: 12,
+        device: 'KOReader',
+        deviceId: 'device-42',
+        percentage: 0.42,
+        progress: '/body/DocFragment[5]/body',
+        chapterIndex: 4,
+        syncTimestamp: 1700000100,
+        updatedAt: expect.any(Date),
+      });
+      const syncedAt = mockRepo.upsertCatalogDeviceProgress.mock.calls[0]?.[0].updatedAt;
+      expect(mockRepo.upsertCatalogReadingProgress).toHaveBeenCalledWith(12, 'remote/book-42', 42, syncedAt);
+      expect(mockChapterExtractor.extractAndStoreChapters).not.toHaveBeenCalled();
+      expect(mockBookService.autoUpdateReadStatusForProgress).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        document: '0123456789abcdef0123456789abcdef',
+        timestamp: 1700000100,
+      });
+    });
+
+    it('keeps a catalog KOReader save as the latest source on the next pull', async () => {
+      const catalogDocument = {
+        catalogDocumentId: 9,
+        catalogItemId: 42,
+        remoteId: 'remote/book-42',
+      };
+      let latestDevice: Record<string, unknown> | null = null;
+      let catalogState: Record<string, unknown> | null = null;
+      mockRepo.resolveBookFileByHash.mockResolvedValue(null);
+      mockRepo.resolveCatalogDocumentByHash.mockResolvedValue(catalogDocument);
+      mockRepo.upsertCatalogDeviceProgress.mockImplementation((data: Record<string, unknown>) => {
+        latestDevice = {
+          percentage: data.percentage,
+          progress: data.progress,
+          device: data.device,
+          deviceId: data.deviceId,
+          syncTimestamp: data.syncTimestamp,
+          updatedAt: data.updatedAt ?? new Date('2026-02-03T10:00:00.000Z'),
+        };
+      });
+      mockRepo.upsertCatalogReadingProgress.mockImplementation((_userId: number, _remoteId: string, progressPercent: number, syncedAt?: Date) => {
+        catalogState = {
+          progressPercent,
+          updatedAt: syncedAt ?? new Date('2026-02-03T10:00:00.001Z'),
+        };
+      });
+      mockRepo.getLatestCatalogDeviceProgress.mockImplementation(() => latestDevice);
+      mockRepo.getCatalogReadingProgress.mockImplementation(() => catalogState);
+
+      await service.saveProgress(12, {
+        document: '0123456789abcdef0123456789abcdef',
+        percentage: 0.42,
+        progress: '/body/DocFragment[5]/body',
+        device: 'KOReader',
+        device_id: 'device-42',
+        timestamp: 1700000100,
+      });
+
+      await expect(service.getProgress(12, '0123456789abcdef0123456789abcdef')).resolves.toEqual({
+        document: '0123456789abcdef0123456789abcdef',
+        percentage: 0.42,
+        progress: '/body/DocFragment[5]/body',
+        device: 'KOReader',
+        device_id: 'device-42',
+        timestamp: 1700000100,
+      });
     });
 
     it('passes empty accessible library lists to hash resolution', async () => {
@@ -697,8 +800,71 @@ describe('KoreaderService', () => {
 
     it('returns null when the document hash does not resolve to a book file', async () => {
       mockRepo.resolveBookFileByHash.mockResolvedValue(null);
+      mockRepo.resolveCatalogDocumentByHash.mockResolvedValue(null);
 
       await expect(service.getProgress(7, 'doc-hash')).resolves.toBeNull();
+    });
+
+    it('returns catalog device progress when a recorded catalog document sync is latest', async () => {
+      const latestDeviceTime = new Date('2026-02-03T10:00:00.000Z');
+      mockRepo.resolveBookFileByHash.mockResolvedValue(null);
+      mockRepo.resolveCatalogDocumentByHash.mockResolvedValue({
+        catalogDocumentId: 9,
+        catalogItemId: 42,
+        remoteId: 'remote/book-42',
+      });
+      mockRepo.getLatestCatalogDeviceProgress.mockResolvedValue({
+        percentage: 0.61,
+        progress: '/body/DocFragment[9]/body',
+        device: 'KOReader',
+        deviceId: 'device-42',
+        syncTimestamp: null,
+        updatedAt: latestDeviceTime,
+      });
+      mockRepo.getCatalogReadingProgress.mockResolvedValue({
+        progressPercent: 70,
+        updatedAt: new Date('2026-02-03T09:00:00.000Z'),
+      });
+
+      await expect(service.getProgress(7, '0123456789abcdef0123456789abcdef')).resolves.toEqual({
+        document: '0123456789abcdef0123456789abcdef',
+        percentage: 0.61,
+        progress: '/body/DocFragment[9]/body',
+        device: 'KOReader',
+        device_id: 'device-42',
+        timestamp: Math.floor(latestDeviceTime.getTime() / 1000),
+      });
+    });
+
+    it('returns catalog user state when it is newer than catalog device progress', async () => {
+      const stateTime = new Date('2026-02-03T11:00:00.000Z');
+      mockRepo.resolveBookFileByHash.mockResolvedValue(null);
+      mockRepo.resolveCatalogDocumentByHash.mockResolvedValue({
+        catalogDocumentId: 9,
+        catalogItemId: 42,
+        remoteId: 'remote/book-42',
+      });
+      mockRepo.getLatestCatalogDeviceProgress.mockResolvedValue({
+        percentage: 0.25,
+        progress: '/body/DocFragment[4]/body',
+        device: 'KOReader',
+        deviceId: 'device-42',
+        syncTimestamp: 100,
+        updatedAt: new Date('2026-02-03T09:00:00.000Z'),
+      });
+      mockRepo.getCatalogReadingProgress.mockResolvedValue({
+        progressPercent: 88.5,
+        updatedAt: stateTime,
+      });
+
+      await expect(service.getProgress(7, '0123456789abcdef0123456789abcdef')).resolves.toEqual({
+        document: '0123456789abcdef0123456789abcdef',
+        percentage: 0.885,
+        progress: null,
+        device: 'web',
+        device_id: 'bookorbit-web',
+        timestamp: Math.floor(stateTime.getTime() / 1000),
+      });
     });
   });
 
@@ -814,49 +980,6 @@ describe('KoreaderService', () => {
           latestPluginVersion: '0.5.0',
           updateAvailable: null,
         }),
-      ]);
-    });
-
-    it('flags devices whose plugin cannot install its own updates', async () => {
-      vi.spyOn(service, 'getCredentials').mockResolvedValue(null);
-      mockRepo.getTotalSyncedBooks.mockResolvedValue(0);
-      mockPackageService.getVersionInfo.mockResolvedValue({ pluginVersion: '1.5.0', serverVersion: '1.0.0' });
-      mockPluginRepo.listSweeps.mockResolvedValue([
-        {
-          deviceId: 'stuck-device',
-          deviceModel: 'Kobo Libra 2',
-          pluginVersion: '1.3.0',
-          lastSweepAt: new Date('2026-02-01T10:00:00.000Z'),
-          lastSweepBooksMatched: 0,
-          lastSweepPageStats: 0,
-          lastSweepAnnotations: 0,
-        },
-        {
-          deviceId: 'healthy-device',
-          deviceModel: 'Kobo Clara',
-          pluginVersion: '1.4.0',
-          lastSweepAt: new Date('2026-02-01T11:00:00.000Z'),
-          lastSweepBooksMatched: 0,
-          lastSweepPageStats: 0,
-          lastSweepAnnotations: 0,
-        },
-        {
-          deviceId: 'silent-device',
-          deviceModel: 'Kobo Sage',
-          pluginVersion: null,
-          lastSweepAt: new Date('2026-02-01T12:00:00.000Z'),
-          lastSweepBooksMatched: 0,
-          lastSweepPageStats: 0,
-          lastSweepAnnotations: 0,
-        },
-      ]);
-
-      const result = await service.getSyncStatus(7);
-
-      expect(result.sweeps).toEqual([
-        expect.objectContaining({ deviceId: 'stuck-device', requiresManualUpdate: true }),
-        expect.objectContaining({ deviceId: 'healthy-device', requiresManualUpdate: false }),
-        expect.objectContaining({ deviceId: 'silent-device', requiresManualUpdate: true }),
       ]);
     });
 

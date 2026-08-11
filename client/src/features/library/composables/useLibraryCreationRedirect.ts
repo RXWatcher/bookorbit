@@ -1,5 +1,6 @@
 import type { Library, SortSpec } from '@bookorbit/types'
 import { useRouter } from 'vue-router'
+import { libraryRouteForId } from '../lib/library-route'
 import { useLibraries } from './useLibraries'
 
 const DEFAULT_SORT_FOR_NEW_LIBRARY: SortSpec[] = [{ field: 'addedAt', dir: 'desc' }]
@@ -16,7 +17,7 @@ export function useLibraryCreationRedirect() {
   async function handleLibraryCreated(library: Pick<Library, 'id'>) {
     setDefaultSortForLibrary(library.id)
     await refreshLibraries()
-    await router.push({ name: 'library', params: { id: library.id } })
+    await router.push(libraryRouteForId(library.id))
   }
 
   return { handleLibraryCreated }

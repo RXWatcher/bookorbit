@@ -106,6 +106,9 @@ export interface UserReadingSessionTimelineItem {
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
+  source?: 'local' | 'warehouse';
+  mediaType?: 'ebook' | 'audiobook' | 'comic';
+  remoteId?: string;
 }
 
 export interface UserReadingSessionTimeline {

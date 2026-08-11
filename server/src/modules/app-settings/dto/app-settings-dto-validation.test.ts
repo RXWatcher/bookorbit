@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 
 import { UpdateAppSettingDto } from './update-app-setting.dto';
 import { UpdateBooleanSettingDto } from './update-boolean-setting.dto';
@@ -34,8 +35,13 @@ describe('App settings DTO validation', () => {
 
   it('validates default library access payload', async () => {
     expect((await errorsFor(UpdateDefaultLibraryAccessDto, { libraryIds: [1, 2] })).length).toBe(0);
+    expect(
+      (await errorsFor(UpdateDefaultLibraryAccessDto, { libraryIds: [CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID] }))
+        .length,
+    ).toBe(0);
     expect((await errorsFor(UpdateDefaultLibraryAccessDto, { libraryIds: [1, 1] })).length).toBeGreaterThan(0);
     expect((await errorsFor(UpdateDefaultLibraryAccessDto, { libraryIds: [0] })).length).toBeGreaterThan(0);
+    expect((await errorsFor(UpdateDefaultLibraryAccessDto, { libraryIds: [-4] })).length).toBeGreaterThan(0);
     expect((await errorsFor(UpdateDefaultLibraryAccessDto, { libraryIds: ['x'] })).length).toBeGreaterThan(0);
   });
 

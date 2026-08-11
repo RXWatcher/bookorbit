@@ -15,6 +15,8 @@ export const emailSendLog = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     bookId: integer('book_id').references(() => books.id, { onDelete: 'set null' }),
     bookFileId: integer('book_file_id').references(() => bookFiles.id, { onDelete: 'set null' }),
+    catalogMediaType: varchar('catalog_media_type', { length: 20 }),
+    catalogRemoteId: varchar('catalog_remote_id', { length: 128 }),
     providerId: integer('provider_id').references(() => emailProviders.id, { onDelete: 'set null' }),
     templateId: integer('template_id').references(() => emailTemplates.id, { onDelete: 'set null' }),
     toEmail: varchar('to_email', { length: 255 }).notNull(),
@@ -37,9 +39,15 @@ export const emailSendLog = pgTable(
     index('email_send_log_book_file_id_idx').on(t.bookFileId),
     index('email_send_log_created_at_idx').on(t.createdAt),
     index('email_send_log_status_next_retry_idx').on(t.status, t.nextRetryAt),
+    index('email_send_log_catalog_ref_idx').on(t.userId, t.catalogMediaType, t.catalogRemoteId),
     check('email_send_log_status_chk', sql`${t.status} in ('pending', 'sent', 'failed')`),
     check('email_send_log_attempt_count_nonnegative_chk', sql`${t.attemptCount} >= 0`),
     check('email_send_log_sent_after_created_chk', sql`${t.sentAt} is null or ${t.sentAt} >= ${t.createdAt}`),
+    check('email_send_log_catalog_media_type_chk', sql`${t.catalogMediaType} is null or ${t.catalogMediaType} in ('ebook', 'audiobook')`),
+    check(
+      'email_send_log_catalog_ref_pair_chk',
+      sql`(${t.catalogRemoteId} is null and ${t.catalogMediaType} is null) or (${t.catalogRemoteId} is not null and ${t.catalogMediaType} is not null)`,
+    ),
   ],
 );
 

@@ -1,0 +1,20 @@
+Feature: Native catalog ebook cover proxy
+Started: 2026-06-03 14:44 EDT
+Completed: 2026-06-03 14:53 EDT
+Status: Complete
+
+Scope:
+- Add the native ebook cover route for documented thumbnail, medium, and original sizes.
+- Reuse current-user catalog state checks before any live cover fetch.
+- Keep binary response handling native: image-only content types, ebook-safe errors, server-side credentials, and private browser caching.
+
+Verification so far:
+- pnpm run typecheck
+- pnpm run test
+- pnpm --filter server test -- src/modules/warehouse/warehouse-client.service.test.ts
+- pnpm --filter server test -- src/modules/warehouse/warehouse-catalog.service.test.ts
+- pnpm --filter server test -- src/modules/warehouse/warehouse-catalog.controller.test.ts
+
+Final verification:
+- pnpm run verify
+- pnpm run build:client

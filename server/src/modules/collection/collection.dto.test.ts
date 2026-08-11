@@ -40,12 +40,15 @@ describe('Collection DTO validation', () => {
   });
 
   describe('CollectionBooksDto', () => {
-    it('requires non-empty positive integer book ids', async () => {
+    it('accepts positive integer book ids', async () => {
       expect((await errorsFor(CollectionBooksDto, { bookIds: [1, 2, 3] })).length).toBe(0);
-      expect((await errorsFor(CollectionBooksDto, { bookIds: [] })).length).toBeGreaterThan(0);
       expect((await errorsFor(CollectionBooksDto, { bookIds: [1.5] })).length).toBeGreaterThan(0);
       expect((await errorsFor(CollectionBooksDto, { bookIds: [0] })).length).toBeGreaterThan(0);
       expect((await errorsFor(CollectionBooksDto, { bookIds: [-2] })).length).toBeGreaterThan(0);
+    });
+
+    it('rejects catalog item refs on the normal book membership payload', async () => {
+      expect((await errorsFor(CollectionBooksDto, { catalogItems: [{ mediaType: 'ebook', remoteId: 'remote-1' }] })).length).toBeGreaterThan(0);
     });
   });
 

@@ -19,6 +19,7 @@ import {
 import { bookFiles } from './books';
 import { bookmarks } from './reader';
 import { users } from './auth';
+import { warehouseCatalogItems } from './warehouse';
 
 export const koreaderUsers = pgTable(
   'koreader_users',
@@ -96,6 +97,67 @@ export const koreaderDeviceProgress = pgTable(
 
 export type KoreaderDeviceProgress = typeof koreaderDeviceProgress.$inferSelect;
 export type NewKoreaderDeviceProgress = typeof koreaderDeviceProgress.$inferInsert;
+
+export const koreaderCatalogDocuments = pgTable(
+  'koreader_catalog_documents',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    catalogItemId: integer('catalog_item_id')
+      .notNull()
+      .references(() => warehouseCatalogItems.id, { onDelete: 'cascade' }),
+    documentHash: varchar('document_hash', { length: 32 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('koreader_catalog_documents_user_hash_uidx').on(t.userId, t.documentHash),
+    index('koreader_catalog_documents_user_item_idx').on(t.userId, t.catalogItemId),
+    index('koreader_catalog_documents_hash_idx').on(t.documentHash),
+    check('koreader_catalog_documents_hash_chk', sql`${t.documentHash} ~ '^[0-9a-f]{32}$'`),
+  ],
+);
+
+export type KoreaderCatalogDocument = typeof koreaderCatalogDocuments.$inferSelect;
+export type NewKoreaderCatalogDocument = typeof koreaderCatalogDocuments.$inferInsert;
+
+export const koreaderCatalogDeviceProgress = pgTable(
+  'koreader_catalog_device_progress',
+  {
+    id: serial('id').primaryKey(),
+    catalogDocumentId: integer('catalog_document_id')
+      .notNull()
+      .references(() => koreaderCatalogDocuments.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    device: varchar('device', { length: 100 }).notNull().default('KOReader'),
+    deviceId: varchar('device_id', { length: 100 }).notNull(),
+    percentage: real('percentage'),
+    progress: text('progress'),
+    chapterIndex: integer('chapter_index'),
+    syncTimestamp: bigint('sync_timestamp', { mode: 'number' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('koreader_catalog_device_progress_doc_user_device_uidx').on(t.catalogDocumentId, t.userId, t.device, t.deviceId),
+    index('koreader_catalog_device_progress_user_updated_at_idx').on(t.userId, t.updatedAt),
+    index('koreader_catalog_device_progress_document_idx').on(t.catalogDocumentId),
+    check('koreader_catalog_device_progress_percentage_range_chk', sql`${t.percentage} is null or (${t.percentage} >= 0 and ${t.percentage} <= 1)`),
+  ],
+);
+
+export type KoreaderCatalogDeviceProgress = typeof koreaderCatalogDeviceProgress.$inferSelect;
+export type NewKoreaderCatalogDeviceProgress = typeof koreaderCatalogDeviceProgress.$inferInsert;
 
 export const koreaderDeviceSettings = pgTable(
   'koreader_device_settings',

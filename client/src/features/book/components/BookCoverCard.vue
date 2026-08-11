@@ -51,6 +51,15 @@ import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import BookCoverArtwork from './BookCoverArtwork.vue'
 import BookCoverSurface from './BookCoverSurface.vue'
 import { fetchAuthors } from '@/features/author/api/author'
+import {
+  bookCoverUrl,
+  bookDetailRoute,
+  bookDownloadUrl,
+  bookReaderRoute,
+  getBookCatalogSource,
+  isSourceBackedBook,
+} from '@/features/book/lib/source-backed-book'
+import { patchCatalogSourceUserState } from '@/features/warehouse/api/catalog-source.api'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -100,7 +109,10 @@ const openableFiles = computed(() => {
 })
 
 const { coverUrl, bumpVersion } = useCoverVersions()
-const coverSrc = computed(() => coverUrl(props.book.id, 'thumbnail', props.book.updatedAt ?? props.book.addedAt))
+const coverSrc = computed(() => bookCoverUrl(props.book, coverUrl, 'thumbnail'))
+const catalogSource = computed(() => getBookCatalogSource(props.book))
+const isSourceBacked = computed(() => isSourceBackedBook(props.book))
+const canUseLocalBookActions = computed(() => !isSourceBacked.value)
 
 const { refreshing, refreshWithFeedback } = useRefreshMetadata()
 const { isRefreshing } = useRefreshingBooks()
@@ -195,11 +207,7 @@ function handleArtworkError() {
 }
 
 function openFile(file: BookFileRef, mode?: 'peek') {
-  router.push({
-    name: 'reader',
-    params: { bookId: props.book.id, fileId: file.id },
-    query: mode === 'peek' ? { format: file.format ?? 'epub', mode } : { format: file.format ?? 'epub' },
-  })
+  router.push(bookReaderRoute(props.book, file, mode))
 }
 
 function peekPrimaryFile() {
@@ -208,7 +216,7 @@ function peekPrimaryFile() {
 }
 
 function openBookDetails() {
-  void router.push({ name: 'book-detail', params: { bookId: props.book.id } })
+  void router.push(bookDetailRoute(props.book))
 }
 
 function openSeriesDetails() {
@@ -323,6 +331,10 @@ onUnmounted(() => {
 })
 
 function openQuickView() {
+  if (isSourceBacked.value) {
+    openBookDetails()
+    return
+  }
   emit('action', 'quick-view')
 }
 
@@ -348,6 +360,12 @@ function isAudioFile(file: BookFileRef) {
 }
 
 function handleDownloadFile(file: BookFileRef) {
+  const sourceDownloadUrl = bookDownloadUrl(props.book)
+  if (sourceDownloadUrl) {
+    window.location.assign(sourceDownloadUrl)
+    return
+  }
+
   if (isMultiTrackAudio.value && isAudioFile(file)) {
     void exportBooks([props.book.id], false, 'audio')
     return
@@ -356,6 +374,7 @@ function handleDownloadFile(file: BookFileRef) {
 }
 
 function handleExportAll() {
+  if (isSourceBacked.value) return
   void exportBooks([props.book.id], true)
 }
 
@@ -376,7 +395,11 @@ async function handleSetStatus(status: ReadStatus) {
   const prev = localReadStatus.value
   localReadStatus.value = status
   try {
-    await setStatus(props.book.id, status)
+    if (catalogSource.value) {
+      await patchCatalogSourceUserState(catalogSource.value.mediaType, catalogSource.value.remoteId, { readStatus: status })
+    } else {
+      await setStatus(props.book.id, status)
+    }
   } catch {
     localReadStatus.value = prev
   }
@@ -639,8 +662,10 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                           t('book.file.primary')
                         }}</span>
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem @click="handleExportAll"> {{ t('book.download.allFormatsZip') }} </DropdownMenuItem>
+                      <DropdownMenuSeparator v-if="canUseLocalBookActions" />
+                      <DropdownMenuItem v-if="canUseLocalBookActions" @click="handleExportAll">
+                        {{ t('book.download.allFormatsZip') }}
+                      </DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
 
@@ -648,8 +673,8 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                     <BookText class="size-4 mr-2" />
                     {{ t('book.actions.bookDetails') }}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="hasPermission('library_edit_metadata')" />
-                  <DropdownMenuSub v-if="hasPermission('library_edit_metadata')">
+                  <DropdownMenuSeparator v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')" />
+                  <DropdownMenuSub v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')">
                     <DropdownMenuSubTrigger>
                       <Pencil class="size-4 mr-2" />
                       {{ t('book.actions.metadata') }}
@@ -671,7 +696,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                       </DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
-                  <DropdownMenuItem @click="emit('action', 'add-to-collection')">
+                  <DropdownMenuItem v-if="canUseLocalBookActions" @click="emit('action', 'add-to-collection')">
                     <FolderPlus class="size-4 mr-2" />
                     {{ t('book.actions.addToCollection') }}
                   </DropdownMenuItem>
@@ -696,13 +721,13 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                       </DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
-                  <DropdownMenuItem v-if="hasPermission('email_send')" @click="showSendDialog = true">
+                  <DropdownMenuItem v-if="canUseLocalBookActions && hasPermission('email_send')" @click="showSendDialog = true">
                     <Send class="size-4 mr-2" />
                     {{ t('book.actions.sendViaEmail') }}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="hasPermission('email_send') || hasPermission('library_delete_books')" />
+                  <DropdownMenuSeparator v-if="canUseLocalBookActions && (hasPermission('email_send') || hasPermission('library_delete_books'))" />
                   <DropdownMenuItem
-                    v-if="hasPermission('library_delete_books')"
+                    v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
                     class="text-destructive focus:text-destructive"
                     @click="emit('action', 'delete')"
                   >
@@ -781,8 +806,10 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                     t('book.file.primary')
                   }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="handleExportAll"> {{ t('book.download.allFormatsZip') }} </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="canUseLocalBookActions" />
+                <DropdownMenuItem v-if="canUseLocalBookActions" @click="handleExportAll">
+                  {{ t('book.download.allFormatsZip') }}
+                </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
@@ -790,8 +817,8 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
               <BookText class="size-4 mr-2" />
               {{ t('book.actions.bookDetails') }}
             </DropdownMenuItem>
-            <DropdownMenuSeparator v-if="hasPermission('library_edit_metadata')" />
-            <DropdownMenuSub v-if="hasPermission('library_edit_metadata')">
+            <DropdownMenuSeparator v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')" />
+            <DropdownMenuSub v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')">
               <DropdownMenuSubTrigger>
                 <Pencil class="size-4 mr-2" />
                 {{ t('book.actions.metadata') }}
@@ -813,7 +840,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem @click="emit('action', 'add-to-collection')">
+            <DropdownMenuItem v-if="canUseLocalBookActions" @click="emit('action', 'add-to-collection')">
               <FolderPlus class="size-4 mr-2" />
               {{ t('book.actions.addToCollection') }}
             </DropdownMenuItem>
@@ -830,13 +857,13 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem v-if="hasPermission('email_send')" @click="showSendDialog = true">
+            <DropdownMenuItem v-if="canUseLocalBookActions && hasPermission('email_send')" @click="showSendDialog = true">
               <Send class="size-4 mr-2" />
               {{ t('book.actions.sendViaEmail') }}
             </DropdownMenuItem>
-            <DropdownMenuSeparator v-if="hasPermission('email_send') || hasPermission('library_delete_books')" />
+            <DropdownMenuSeparator v-if="canUseLocalBookActions && (hasPermission('email_send') || hasPermission('library_delete_books'))" />
             <DropdownMenuItem
-              v-if="hasPermission('library_delete_books')"
+              v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
               class="text-destructive focus:text-destructive"
               @click="emit('action', 'delete')"
             >
@@ -859,7 +886,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
   </div>
 
   <SendBookDialog
-    v-if="showSendDialog"
+    v-if="showSendDialog && canUseLocalBookActions"
     :open="showSendDialog"
     :selection-payload="{ bookIds: [book.id] }"
     :selected-count="1"

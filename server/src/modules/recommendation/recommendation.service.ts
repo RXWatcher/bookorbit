@@ -1,11 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 
-import type { BookRecommendation, SeriesBookRecommendation } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
+import type { BookRecommendation, DashboardCatalogItem, GroupRule, SeriesBookRecommendation, WarehouseMediaType } from '@bookorbit/types';
 import { normalizeCoverAspectRatio } from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
+import type { WarehouseCatalogItemRow } from '../../db/schema';
 import { BookEmbedderService } from '../embedding/book-embedder.service';
 import { BookReadService } from '../book/book-read.service';
 import { LibraryService } from '../library/library.service';
+import { WarehouseRepository } from '../warehouse/warehouse.repository';
+import { catalogAuthorRefs, catalogSeriesRef } from '../warehouse/catalog-link-refs';
 import { AnnCandidate, CandidateMetadata, RecommendationRepository, TargetBookData } from './recommendation.repository';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 
@@ -13,6 +17,7 @@ const RECOMMENDATION_EVENT = 'book.recommendations';
 const SERIES_BOOKS_EVENT = 'book.series_books';
 const AUTHOR_BOOKS_EVENT = 'book.author_books';
 const MAX_RECOMMENDATIONS = 25;
+const MAX_CATALOG_RECOMMENDATIONS = 12;
 const DEFAULT_RATING_PROXIMITY = 0.5;
 const RATING_PROXIMITY_RANGE = 4;
 const SCORE_WEIGHTS = {
@@ -32,6 +37,7 @@ export class RecommendationService {
     private readonly bookReadService: BookReadService,
     private readonly libraryService: LibraryService,
     private readonly embedder: BookEmbedderService,
+    private readonly warehouseRepo: WarehouseRepository,
   ) {}
 
   async getRecommendations(bookId: number, user: RequestUser): Promise<BookRecommendation[]> {
@@ -107,6 +113,31 @@ export class RecommendationService {
       );
       throw err;
     }
+  }
+
+  async getCatalogRecommendations(bookId: number, user: RequestUser): Promise<DashboardCatalogItem[]> {
+    const libraryId = await this.bookReadService.findLibraryIdByBookId(bookId);
+    if (libraryId === null) throw new NotFoundException(`Book ${bookId} not found`);
+    await this.libraryService.verifyUserAccess(user.id, libraryId, user.isSuperuser);
+
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
+    const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
+    if (sourceBackedMediaTypes.length === 0) return [];
+
+    const target = (await this.recRepo.getTargetBookData(bookId)) ?? this.createFallbackTarget();
+    const filter = this.buildCatalogRecommendationFilter(target);
+    if (!filter) return [];
+
+    const result = await this.warehouseRepo.queryUserCatalogItems(user.id, {
+      includeAllCatalogItems: true,
+      filter,
+      page: 0,
+      limit: MAX_CATALOG_RECOMMENDATIONS,
+      ...(sourceBackedMediaTypes.length === 1 ? { mediaType: sourceBackedMediaTypes[0] } : {}),
+      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
+    });
+
+    return result.rows.map(mapCatalogRecommendation);
   }
 
   async getSeriesBooks(bookId: number, user: RequestUser): Promise<SeriesBookRecommendation[]> {
@@ -240,10 +271,70 @@ export class RecommendationService {
     return Math.max(0, Math.min(1, value));
   }
 
+  private normalizeSeries(seriesName: string | null): string | null {
+    if (!seriesName) return null;
+    const normalized = seriesName.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private buildCatalogRecommendationFilter(target: TargetBookData): GroupRule | null {
+    const rules: GroupRule['rules'] = [];
+    const seriesName = target.seriesName?.trim();
+    const authorNames = [...new Set(target.authorNames.map((name) => name.trim()).filter((name) => name.length > 0))].slice(0, 5);
+
+    if (seriesName) {
+      rules.push({ type: 'rule', field: 'series', operator: 'contains', value: seriesName });
+    }
+
+    if (authorNames.length > 0) {
+      rules.push({ type: 'rule', field: 'author', operator: 'includesAny', value: authorNames });
+    }
+
+    return rules.length > 0 ? { type: 'group', join: 'OR', rules } : null;
+  }
+
   private parseError(err: unknown): { errorClass: string; errorMessage: string } {
     if (err instanceof Error) {
       return { errorClass: err.constructor.name, errorMessage: sanitizeLogValue(err.message).slice(0, 200) };
     }
     return { errorClass: 'UnknownError', errorMessage: sanitizeLogValue(String(err)).slice(0, 200) };
   }
+}
+
+function mapCatalogRecommendation(row: WarehouseCatalogItemRow): DashboardCatalogItem {
+  const authorRefs = catalogAuthorRefs(row.authors);
+  const seriesRef = catalogSeriesRef(row.series);
+  return {
+    type: 'catalog-item',
+    mediaType: row.mediaType,
+    remoteId: row.remoteId,
+    title: row.title,
+    subtitle: row.subtitle ?? null,
+    seriesName: row.series ?? null,
+    seriesRef,
+    authors: authorRefs.map((author) => author.name),
+    authorRefs,
+    narrators: safeStringArray(row.narrators),
+    libraryName: sourceBackedLibraryName(row.mediaType),
+    formats: row.format ? [row.format] : [],
+    hasCover: row.hasCover,
+  };
+}
+
+function sourceBackedMediaTypesForLibraryIds(libraryIds: number[]): WarehouseMediaType[] {
+  const mediaTypes: WarehouseMediaType[] = [];
+  if (libraryIds.includes(CLOUD_EBOOK_LIBRARY_ID)) mediaTypes.push('ebook');
+  if (libraryIds.includes(CLOUD_AUDIO_LIBRARY_ID)) mediaTypes.push('audiobook');
+  if (libraryIds.includes(CLOUD_COMIC_LIBRARY_ID)) mediaTypes.push('comic');
+  return mediaTypes;
+}
+
+function sourceBackedLibraryName(mediaType: WarehouseMediaType): string {
+  if (mediaType === 'audiobook') return 'Audiobooks';
+  if (mediaType === 'comic') return 'Comics';
+  return 'Books';
+}
+
+function safeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }

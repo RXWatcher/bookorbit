@@ -232,12 +232,13 @@ export class KoreaderCatalogService {
     const entries = await this.opdsBookService.getRandomBooks(user.id, DASHBOARD_DISCOVER_LIMIT, user.isSuperuser, user.contentFilters);
     if (entries.length === 0) return [];
 
-    const bookIds = entries.map((entry) => entry.id);
+    const localEntries = entries.filter((entry): entry is OpdsBookEntry & { id: number } => typeof entry.id === 'number');
+    const bookIds = localEntries.map((entry) => entry.id);
     const [progressMap, statusMap] = await Promise.all([
       this.findBestProgressMap(user.id, bookIds),
       this.userBookStatusService.findByBookIds(user.id, bookIds),
     ]);
-    return entries.map((entry) => this.mapBookListItem(entry, progressMap.get(entry.id) ?? null, statusMap.get(entry.id)?.status ?? null));
+    return localEntries.map((entry) => this.mapBookListItem(entry, progressMap.get(entry.id) ?? null, statusMap.get(entry.id)?.status ?? null));
   }
 
   async getSectionEntries(user: RequestUser, section: string, query: { page?: number; q?: string } = {}): Promise<KoreaderCatalogSectionResponse> {
@@ -266,14 +267,17 @@ export class KoreaderCatalogService {
     const sort = this.mapSort(query.sort ?? 'recently_added', query.order);
     const { entries, total } = await this.opdsBookService.getBooksPage(user.id, sort, page, size, filters, user.isSuperuser, user.contentFilters);
 
-    const bookIds = entries.map((entry) => entry.id);
+    const localEntries = entries.filter((entry): entry is OpdsBookEntry & { id: number } => typeof entry.id === 'number');
+    const bookIds = localEntries.map((entry) => entry.id);
     const [progressMap, statusMap, seriesSummary] = await Promise.all([
       this.findBestProgressMap(user.id, bookIds),
       this.userBookStatusService.findByBookIds(user.id, bookIds),
       filters.seriesId !== undefined || filters.series ? this.computeSeriesSummary(user, filters) : Promise.resolve(null),
     ]);
 
-    const items = entries.map((entry) => this.mapBookListItem(entry, progressMap.get(entry.id) ?? null, statusMap.get(entry.id)?.status ?? null));
+    const items = localEntries.map((entry) =>
+      this.mapBookListItem(entry, progressMap.get(entry.id) ?? null, statusMap.get(entry.id)?.status ?? null),
+    );
     return this.paginate(items, total, page, size, query, seriesSummary);
   }
 
@@ -672,7 +676,7 @@ export class KoreaderCatalogService {
   private mapBookListItem(entry: OpdsBookEntry, progress: KoreaderCatalogProgress | null, readStatus: string | null): KoreaderCatalogBookListItem {
     const formats = this.uniqueFormats(entry.files.map((file) => file.format));
     return {
-      id: entry.id,
+      id: typeof entry.id === 'number' ? entry.id : 0,
       title: entry.title,
       authors: entry.authors,
       seriesId: entry.seriesId ?? null,

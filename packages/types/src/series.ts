@@ -1,4 +1,4 @@
-import type { BooksPage } from "./book";
+import type { BookCard } from "./book";
 
 export type SeriesSummary = {
   id: number;
@@ -28,6 +28,12 @@ export type SeriesDetail = {
   expectedBookCount: number | null;
 };
 
-export type SeriesBooksPage = BooksPage & {
+export type SeriesLibraryItem = BookCard;
+
+export type SeriesBooksPage = {
+  items: SeriesLibraryItem[];
+  total: number;
+  page: number;
+  size: number;
   seriesInfo: SeriesDetail;
 };

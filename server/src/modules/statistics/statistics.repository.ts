@@ -11,6 +11,13 @@ import { authors, bookAuthors, bookFiles, bookGenres, bookMetadata, books, genre
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
 
 type Db = NodePgDatabase<typeof schema>;
+type StatisticsDimensionValues = {
+  authors: string[];
+  series: string[];
+  publishers: string[];
+  genres: string[];
+  languages: string[];
+};
 
 @Injectable()
 export class StatisticsRepository {
@@ -202,6 +209,7 @@ export class StatisticsRepository {
       this.db
         .select({
           minScore: sql<number>`${bucketExpr}::int`,
+          maxScore: sql<number>`case when ${bucketExpr} >= 90 then 100 else (${bucketExpr} + 9) end::int`,
           count: sql<number>`count(*)::int`,
         })
         .from(books)
@@ -659,6 +667,64 @@ export class StatisticsRepository {
     };
   }
 
+  async getSummaryDimensionValues(
+    userId: number,
+    isSuperuser: boolean,
+    contentFilters?: ContentFilterRules | number[],
+    filterLibraryIds?: number[],
+  ): Promise<StatisticsDimensionValues> {
+    const accessible = await this.getAccessibleLibraryIds(userId, isSuperuser);
+    const { contentFilters: resolvedContentFilters, filterLibraryIds: resolvedFilterLibraryIds } = this.resolveOptionalFilters(
+      contentFilters,
+      filterLibraryIds,
+    );
+    const filter = this.libraryFilter(this.intersectLibraryIds(accessible, resolvedFilterLibraryIds));
+    const cfClauses = this.contentFilterClauses(isSuperuser, resolvedContentFilters);
+
+    const [authorRows, seriesRows, publisherRows, genreRows, languageRows] = await Promise.all([
+      this.db
+        .select({ value: authors.name })
+        .from(bookAuthors)
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .innerJoin(books, eq(books.id, bookAuthors.bookId))
+        .where(and(filter, ...cfClauses))
+        .groupBy(authors.name),
+      this.db
+        .select({ value: bookMetadata.seriesName })
+        .from(bookMetadata)
+        .innerJoin(books, eq(books.id, bookMetadata.bookId))
+        .where(and(isNotNull(bookMetadata.seriesName), filter, ...cfClauses))
+        .groupBy(bookMetadata.seriesName),
+      this.db
+        .select({ value: bookMetadata.publisher })
+        .from(bookMetadata)
+        .innerJoin(books, eq(books.id, bookMetadata.bookId))
+        .where(and(isNotNull(bookMetadata.publisher), filter, ...cfClauses))
+        .groupBy(bookMetadata.publisher),
+      this.db
+        .select({ value: genres.name })
+        .from(bookGenres)
+        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+        .innerJoin(books, eq(books.id, bookGenres.bookId))
+        .where(and(filter, ...cfClauses))
+        .groupBy(genres.name),
+      this.db
+        .select({ value: bookMetadata.language })
+        .from(bookMetadata)
+        .innerJoin(books, eq(books.id, bookMetadata.bookId))
+        .where(and(isNotNull(bookMetadata.language), filter, ...cfClauses))
+        .groupBy(bookMetadata.language),
+    ]);
+
+    return {
+      authors: stringValues(authorRows),
+      series: stringValues(seriesRows),
+      publishers: stringValues(publisherRows),
+      genres: stringValues(genreRows),
+      languages: stringValues(languageRows),
+    };
+  }
+
   async getGenreCooccurrence(
     userId: number,
     isSuperuser: boolean,
@@ -878,4 +944,8 @@ export class StatisticsRepository {
       .orderBy(desc(sql`count(*)`))
       .limit(50);
   }
+}
+
+function stringValues(rows: Array<{ value: string | null }>): string[] {
+  return rows.map((row) => row.value?.trim() ?? '').filter((value) => value.length > 0);
 }

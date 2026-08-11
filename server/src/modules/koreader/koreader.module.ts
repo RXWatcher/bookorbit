@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
 import { CommonModule } from '../../common/common.module';
 import { AchievementModule } from '../achievement/achievement.module';
@@ -46,7 +46,7 @@ import { KoreaderStatsService } from './koreader-stats.service';
     BookmarkModule,
     BrowseCountsModule,
     DashboardModule,
-    OpdsModule,
+    forwardRef(() => OpdsModule),
     PositionConverterModule,
     RecommendationModule,
   ],

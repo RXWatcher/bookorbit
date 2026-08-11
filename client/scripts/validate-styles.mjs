@@ -58,8 +58,7 @@ const errors = []
 const unusedAllowances = new Set(ALLOWED.keys())
 
 for (const file of await sourceFiles(sourceDirectory)) {
-  // normalise separators so the ALLOWED keys (POSIX-style) also match on Windows
-  const relativePath = path.relative(sourceDirectory, file).split(path.sep).join('/')
+  const relativePath = path.relative(sourceDirectory, file)
   const source = await readFile(file, 'utf8')
   const lines = source.split('\n')
 

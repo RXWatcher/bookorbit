@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Logger } from 'nestjs-pino';
 import type { ConfigType } from '@nestjs/config';
@@ -12,8 +12,10 @@ import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyCompress from '@fastify/compress';
+import type { FastifyReply } from 'fastify';
 import { appConfig } from './config/config';
 import { setupSwaggerDocs } from './swagger';
+import { canonicalizeSpaLibraryRouteUrl } from './common/utils/spa-library-route-redirect.utils';
 import {
   parseBooleanEnv,
   parseTrustProxy,
@@ -44,7 +46,7 @@ async function bootstrap() {
     done(null, payload);
   });
   // Reverse proxies can forward empty mutating requests with chunked transfer or an unsupported content type.
-  registerEmptyBodyContentTypeParser(fastify);
+  registerEmptyBodyContentTypeParser(fastify as never);
 
   // Echo pino-http's request ID so clients can correlate errors with server logs.
   fastify.addHook('onSend', (_request, reply, _payload, done) => {
@@ -58,7 +60,25 @@ async function bootstrap() {
   app.useWebSocketAdapter(new IoAdapter(app));
 
   app.setGlobalPrefix('api/v1', {
-    exclude: ['api/kobo/:deviceToken/(.*)', 'api/v3/(.*)', 'api/UserStorage/(.*)'],
+    exclude: [
+      'api/kobo/:deviceToken/(.*)',
+      'ping',
+      'status',
+      'login',
+      'api/libraries',
+      'api/libraries/:libraryId/items',
+      'api/items/:itemId',
+      { path: 'api/items/:itemId/cover', method: RequestMethod.GET },
+      { path: 'api/items/:itemId/download', method: RequestMethod.GET },
+      { path: 'api/items/:itemId/play', method: RequestMethod.POST },
+      { path: 'api/items/:itemId/tracks/:trackId/stream', method: RequestMethod.GET },
+      { path: 'api/items/:itemId/progress', method: RequestMethod.POST },
+      { path: 'api/items/:itemId/progress', method: RequestMethod.PATCH },
+      { path: 'api/session/local', method: RequestMethod.POST },
+      { path: 'api/session/local-all', method: RequestMethod.POST },
+      'api/v3/(.*)',
+      'api/UserStorage/(.*)',
+    ],
   });
 
   app.useGlobalPipes(
@@ -100,7 +120,11 @@ async function bootstrap() {
         if (request.url.startsWith('/api')) {
           return nestHandler(request, reply);
         }
-        return reply.sendFile('index.html');
+        const redirectUrl = canonicalizeSpaLibraryRouteUrl(request.url);
+        if (redirectUrl) {
+          return reply.redirect(redirectUrl, 302);
+        }
+        return (reply as unknown as FastifyReply & { sendFile(fileName: string): FastifyReply }).sendFile('index.html');
       });
     };
 

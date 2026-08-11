@@ -11,6 +11,7 @@ import {
   type UserBookStatus,
 } from '@bookorbit/types'
 import { api } from '@/lib/api'
+import { libraryRouteQueryValueForId } from '@/features/library/lib/library-route'
 import { toast } from 'vue-sonner'
 import { useCoverVersions } from './useCoverVersions'
 import { useRefreshingBooks } from './useRefreshingBooks'
@@ -87,7 +88,7 @@ export function useBookBulkActions(
   function getSelectionPayload(): BookSelectionPayload {
     if (querySelection?.value) {
       const { libraryId, filter, q, sort } = querySelection.value
-      return { query: { libraryId, filter, q, sort } }
+      return { query: { libraryId: bulkQueryLibraryIdValue(libraryId), filter, q, sort } }
     }
     return { bookIds: [...selectedIds.value] }
   }
@@ -422,4 +423,11 @@ export function useBookBulkActions(
     handleDeleteSelected,
     getSelectionPayload,
   }
+}
+
+function bulkQueryLibraryIdValue(libraryId: number | string | undefined): number | string | undefined {
+  if (libraryId === undefined) return undefined
+  if (typeof libraryId === 'string') return libraryId
+  const routeValue = libraryRouteQueryValueForId(libraryId)
+  return routeValue === String(libraryId) ? libraryId : routeValue
 }

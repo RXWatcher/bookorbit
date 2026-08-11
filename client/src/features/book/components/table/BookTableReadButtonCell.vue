@@ -7,6 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { FORMAT_TO_GROUP, READER_OPENABLE_FORMATS } from '@bookorbit/types'
 import type { BookCard, BookFileRef } from '@bookorbit/types'
 import { getFormatColor } from '@/features/book/lib/format-colors'
+import { bookReaderRoute } from '@/features/book/lib/source-backed-book'
 
 const props = defineProps<{
   book: BookCard
@@ -91,11 +92,7 @@ function formatBadgeStyle(format: string) {
 
 function openFile(file: BookFileRef | null, mode?: 'peek') {
   if (!file || props.book.status === 'missing') return
-  router.push({
-    name: 'reader',
-    params: { bookId: props.book.id, fileId: file.id },
-    query: mode === 'peek' ? { format: file.format ?? 'epub', mode } : { format: file.format ?? 'epub' },
-  })
+  router.push(bookReaderRoute(props.book, file, mode))
 }
 
 function openPrimaryFile() {

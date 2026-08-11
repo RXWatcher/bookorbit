@@ -36,6 +36,8 @@ const props = defineProps<{
   modelValue: GroupRule | undefined
   depth?: number
   preserveIncompleteRoot?: boolean
+  allowedFields?: RuleField[]
+  allowedOperators?: Partial<Record<RuleField, RuleOperator[]>>
 }>()
 
 const emit = defineEmits<{
@@ -101,8 +103,25 @@ const ENDPOINT_BY_FIELD: Partial<Record<RuleField, string>> = {
   language: '/api/v1/metadata/languages',
 }
 
-const { libraries, loading: librariesLoading, fetchLibraries } = useLibraries()
+const { libraries, loading: librariesLoading, fetchLibraries } = useLibraries({ includeSourceBacked: true })
 const libraryOptions = computed(() => libraries.value.map((library) => library.name).sort((a, b) => a.localeCompare(b)))
+const fieldOptions = computed(() => {
+  if (!props.allowedFields?.length) return RULE_FIELDS
+  const allowed = new Set(props.allowedFields)
+  return RULE_FIELDS.filter((field) => allowed.has(field))
+})
+
+function operatorOptions(field: RuleField): RuleOperator[] {
+  const allowed = props.allowedOperators?.[field]
+  // FIELD_OPERATORS is keyed by StaticRuleField; a custom field has its own
+  // set. operatorsForField (below) already handles that split — this used to
+  // index FIELD_OPERATORS with the wider RuleField directly, which is unsound
+  // and returned `any` for every custom field.
+  const options = operatorsForField(field)
+  if (!allowed?.length) return options
+  const allowedSet = new Set(allowed)
+  return options.filter((operator) => allowedSet.has(operator))
+}
 
 onMounted(() => {
   void fetchLibraries()
@@ -161,7 +180,15 @@ function makeEmptyRule(): LocalNode {
   return {
     id: nextId(),
     kind: 'rule',
-    rule: { field: 'title', operator: 'contains', provider: 'any', value: '', valueChips: [], valueTo: '', valueUnit: 'days' },
+    rule: {
+      field: fieldOptions.value[0] ?? 'title',
+      operator: 'contains',
+      provider: 'any',
+      value: '',
+      valueChips: [],
+      valueTo: '',
+      valueUnit: 'days',
+    },
   }
 }
 
@@ -290,7 +317,7 @@ function removeNode(index: number) {
 function onFieldChange(index: number) {
   const node = nodes.value[index]
   if (node?.kind !== 'rule') return
-  const validOps = operatorsForField(node.rule.field)
+  const validOps = operatorOptions(node.rule.field)
   if (!validOps.includes(node.rule.operator)) {
     node.rule.operator = validOps[0]!
   }
@@ -453,7 +480,7 @@ function showValueToInput(operator: RuleOperator): boolean {
           @change="onOperatorChange(index)"
           class="h-9 rounded-md border border-input bg-background text-foreground text-sm px-2 focus:outline-none focus:ring-2 focus:ring-primary shrink-0"
         >
-          <option v-for="op in operatorsForField(node.rule.field)" :key="op" :value="op">{{ operatorLabel(op) }}</option>
+          <option v-for="op in operatorOptions(node.rule.field)" :key="op" :value="op">{{ operatorLabel(op) }}</option>
         </select>
 
         <div
@@ -660,7 +687,13 @@ function showValueToInput(operator: RuleOperator): boolean {
           <div class="flex items-center justify-between mb-3">
             <span class="text-[10px] font-semibold uppercase tracking-widest text-primary">{{ t('book.filter.group') }}</span>
           </div>
-          <BookFilterBuilder :model-value="node.group" :depth="(depth ?? 0) + 1" @update:model-value="onSubGroupUpdate(index, $event)" />
+          <BookFilterBuilder
+            :model-value="node.group"
+            :depth="(depth ?? 0) + 1"
+            :allowed-fields="allowedFields"
+            :allowed-operators="allowedOperators"
+            @update:model-value="onSubGroupUpdate(index, $event)"
+          />
         </div>
         <button
           @click="removeNode(index)"

@@ -117,6 +117,28 @@ describe('validateEnv', () => {
     ).not.toThrow();
   });
 
+  it('accepts missing, empty, or 64-character hex warehouse encryption keys', () => {
+    for (const WAREHOUSE_ENCRYPTION_KEY of [undefined, '', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef']) {
+      expect(() =>
+        validateEnv({
+          ...BASE_ENV,
+          WAREHOUSE_ENCRYPTION_KEY,
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it('rejects invalid warehouse encryption key formats', () => {
+    for (const WAREHOUSE_ENCRYPTION_KEY of ['not-hex', '0123456789abcdef', 'g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef']) {
+      expect(() =>
+        validateEnv({
+          ...BASE_ENV,
+          WAREHOUSE_ENCRYPTION_KEY,
+        }),
+      ).toThrow('WAREHOUSE_ENCRYPTION_KEY must be empty or a 64-character hex key');
+    }
+  });
+
   it('accepts a custom library browse root path', () => {
     expect(() =>
       validateEnv({

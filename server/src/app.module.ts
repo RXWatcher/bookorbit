@@ -29,6 +29,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { CoverModule } from './modules/cover/cover.module';
 import { KoboModule } from './modules/kobo/kobo.module';
 import { LibraryModule } from './modules/library/library.module';
+import { LocalScanModule } from './modules/local-scan/local-scan.module';
 import { SmartScopeModule } from './modules/smart-scope/smart-scope.module';
 import { OpdsModule } from './modules/opds/opds.module';
 import { PathModule } from './modules/path/path.module';
@@ -67,6 +68,8 @@ import { AppInfoModule } from './modules/app-info/app-info.module';
 import { ReleaseNotesModule } from './modules/release-notes/release-notes.module';
 import { AchievementModule } from './modules/achievement/achievement.module';
 import { HardcoverModule } from './modules/hardcover/hardcover.module';
+import { WarehouseModule } from './modules/warehouse/warehouse.module';
+import { AudiobookshelfCompatModule } from './modules/audiobookshelf-compat/audiobookshelf-compat.module';
 import { ReadwiseModule } from './modules/readwise/readwise.module';
 import { StorygraphModule } from './modules/storygraph/storygraph.module';
 import { CustomMetadataModule } from './modules/custom-metadata/custom-metadata.module';
@@ -75,6 +78,7 @@ import { AccountActivityModule } from './modules/account-activity/account-activi
 import { SharedReadingInsightsModule } from './modules/shared-reading-insights/shared-reading-insights.module';
 import { BookDuplicatesModule } from './modules/book-duplicates/book-duplicates.module';
 import { BookMoveModule } from './modules/book-move/book-move.module';
+import { BookSearchModule } from './modules/book-search/book-search.module';
 
 @Module({
   imports: [
@@ -121,6 +125,7 @@ import { BookMoveModule } from './modules/book-move/book-move.module';
     CustomIconModule,
     RecommendationModule,
     KoboModule,
+    LocalScanModule,
     OpdsModule,
     BookmarkModule,
     AnnotationModule,
@@ -150,12 +155,15 @@ import { BookMoveModule } from './modules/book-move/book-move.module';
     ReleaseNotesModule,
     AchievementModule,
     HardcoverModule,
+    WarehouseModule,
+    AudiobookshelfCompatModule,
     ReadwiseModule,
     StorygraphModule,
     AccountActivityModule,
     SharedReadingInsightsModule,
     BookDuplicatesModule,
     BookMoveModule,
+    BookSearchModule,
     BrowseCountsModule,
   ],
   providers: [

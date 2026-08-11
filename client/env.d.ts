@@ -7,6 +7,7 @@ declare module 'vue-router' {
   interface RouteMeta {
     public?: boolean
     maxWidth?: string
+    permission?: string
     title?: string | ((to: RouteLocationNormalizedLoaded) => string)
   }
 }

@@ -1,7 +1,14 @@
 import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { DEFAULT_DOWNLOAD_PATTERN, DEFAULT_UPLOAD_PATTERN_BOOK_PER_FILE, DEFAULT_UPLOAD_PATTERN_BOOK_PER_FOLDER } from '@bookorbit/types';
+import {
+  CLOUD_AUDIO_LIBRARY_ID,
+  CLOUD_COMIC_LIBRARY_ID,
+  CLOUD_EBOOK_LIBRARY_ID,
+  DEFAULT_DOWNLOAD_PATTERN,
+  DEFAULT_UPLOAD_PATTERN_BOOK_PER_FILE,
+  DEFAULT_UPLOAD_PATTERN_BOOK_PER_FOLDER,
+} from '@bookorbit/types';
 
 vi.mock('../../common/utils/ssrf.utils', () => ({
   ensureSafeUrl: vi.fn().mockImplementation((url: string) => Promise.resolve(new URL(url.replace(/\/$/, '')))),
@@ -251,20 +258,29 @@ describe('AppSettingsService', () => {
     });
 
     it('normalizes stored IDs and drops IDs for deleted libraries', async () => {
-      repo.findByKey.mockResolvedValue({ key: 'default_library_access', value: JSON.stringify({ libraryIds: [3, 3, 5, -1, '7'] }) } as never);
+      repo.findByKey.mockResolvedValue({
+        key: 'default_library_access',
+        value: JSON.stringify({ libraryIds: [3, 3, CLOUD_EBOOK_LIBRARY_ID, 5, -4, '7'] }),
+      } as never);
       repo.findExistingLibraryIds.mockResolvedValue([5, 3]);
 
-      await expect(service.getDefaultLibraryAccess()).resolves.toEqual({ libraryIds: [3, 5] });
+      await expect(service.getDefaultLibraryAccess()).resolves.toEqual({ libraryIds: [3, CLOUD_EBOOK_LIBRARY_ID, 5] });
       expect(repo.findExistingLibraryIds).toHaveBeenCalledWith([3, 5]);
     });
 
     it('stores validated default library IDs', async () => {
       repo.findExistingLibraryIds.mockResolvedValue([2, 4]);
 
-      const result = await service.setDefaultLibraryAccess({ libraryIds: [2, 4] });
+      const result = await service.setDefaultLibraryAccess({
+        libraryIds: [2, CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, 4],
+      });
 
-      expect(result).toEqual({ libraryIds: [2, 4] });
-      expect(repo.upsert).toHaveBeenCalledWith('default_library_access', JSON.stringify({ libraryIds: [2, 4] }));
+      expect(result).toEqual({ libraryIds: [2, CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, 4] });
+      expect(repo.findExistingLibraryIds).toHaveBeenCalledWith([2, 4]);
+      expect(repo.upsert).toHaveBeenCalledWith(
+        'default_library_access',
+        JSON.stringify({ libraryIds: [2, CLOUD_EBOOK_LIBRARY_ID, CLOUD_AUDIO_LIBRARY_ID, CLOUD_COMIC_LIBRARY_ID, 4] }),
+      );
     });
 
     it('rejects unknown default library IDs', async () => {

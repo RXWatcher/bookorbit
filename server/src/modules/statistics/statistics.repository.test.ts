@@ -99,7 +99,7 @@ describe('StatisticsRepository', () => {
         [{ unknownCount: 2 }],
         [{ year: 2026, month: 0, count: 5 }],
         [{ year: 2026, month: 4, count: 3 }],
-        [{ minScore: 20, count: 7 }],
+        [{ minScore: 20, maxScore: 29, count: 7 }],
         [{ unknownCount: 1 }],
         [{ totalCount: 7, percentile25: 10, percentile50: 20, percentile75: 30, percentile90: 40 }],
         [
@@ -188,7 +188,7 @@ describe('StatisticsRepository', () => {
     await expect(repo.booksAddedOverTime(1, false, [1], 'monthly', 'all-time')).resolves.toEqual([{ year: 2026, month: 4, count: 3 }]);
 
     await expect(repo.metadataScoreDistribution(1, false, [1])).resolves.toEqual({
-      bins: [{ minScore: 20, count: 7 }],
+      bins: [{ minScore: 20, maxScore: 29, count: 7 }],
       unknownCount: 1,
       totalCount: 7,
       percentile25: 10,

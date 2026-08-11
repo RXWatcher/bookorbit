@@ -1,13 +1,30 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
+import * as schema from '../../../db/schema';
 import { KoboBookAccessService } from './kobo-book-access.service';
 
 describe('KoboBookAccessService', () => {
   function createService(options: {
     user?: { isSuperuser: boolean } | undefined;
     accessRows?: Array<{ libraryId: number }>;
+    selectRows?: unknown[];
     book?: { id: number; libraryId: number } | undefined;
   }) {
+    const selectRows = options.selectRows ?? options.accessRows ?? [];
+    const selectChain = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn(),
+      then: (onFulfilled: (value: unknown[]) => unknown, onRejected?: (error: unknown) => unknown) =>
+        Promise.resolve(selectRows).then(onFulfilled, onRejected),
+      catch: (onRejected: (error: unknown) => unknown) => Promise.resolve(selectRows).catch(onRejected),
+    };
+    selectChain.from.mockReturnValue(selectChain);
+    selectChain.innerJoin.mockReturnValue(selectChain);
+    selectChain.where.mockReturnValue(selectChain);
+    selectChain.limit.mockResolvedValue(selectRows);
+
     const db = {
       query: {
         users: {
@@ -17,11 +34,7 @@ describe('KoboBookAccessService', () => {
           findFirst: vi.fn().mockResolvedValue(options.book),
         },
       },
-      select: vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue(options.accessRows ?? []),
-        }),
-      }),
+      select: vi.fn().mockReturnValue(selectChain),
     };
 
     const contentFilterRepository = {
@@ -36,6 +49,7 @@ describe('KoboBookAccessService', () => {
     return {
       service: new KoboBookAccessService(db as never, contentFilterRepository as never),
       db,
+      selectChain,
       contentFilterRepository,
     };
   }
@@ -83,5 +97,16 @@ describe('KoboBookAccessService', () => {
     });
 
     await expect(service.assertBookAccessible(7, 42)).resolves.toBeUndefined();
+  });
+
+  it('resolves catalog ebook remote ids from cached ebook rows without user ownership rows', async () => {
+    const { service, selectChain } = createService({
+      selectRows: [{ remoteId: 'remote/book-42' }],
+    });
+
+    await expect(service.resolveCatalogEbookRemoteId(7, 42)).resolves.toBe('remote/book-42');
+
+    expect(selectChain.from).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+    expect(selectChain.innerJoin).not.toHaveBeenCalledWith(schema.warehouseUserItems, expect.anything());
   });
 });

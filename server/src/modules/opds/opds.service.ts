@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CLOUD_EBOOK_LIBRARY_ID } from '@bookorbit/types';
 
 import { esc, fileMimeType, OPDS_MIME_ACQ, OPDS_MIME_NAV, OPDS_MIME_SEARCH, xmlEl, xmlLink } from './opds-xml.helpers';
 import type { OpdsBookEntry } from './opds-book.service';
@@ -10,12 +11,12 @@ export class OpdsService {
   generateRootNavigation(): string {
     const now = new Date().toISOString();
     return this.wrapFeed(
-      'bookorbit OPDS Catalog',
+      'bookorbit OPDS Library',
       'urn:bookorbit:root',
       now,
       [xmlLink('self', BASE, OPDS_MIME_NAV), xmlLink('start', BASE, OPDS_MIME_NAV), xmlLink('search', `${BASE}/search.opds`, OPDS_MIME_SEARCH)],
       [
-        this.navEntry('urn:bookorbit:all', 'All Books', 'Browse the full catalog', `${BASE}/catalog`, now),
+        this.navEntry('urn:bookorbit:all', 'All Books', 'Browse the full library', `${BASE}/catalog`, now),
         this.navEntry('urn:bookorbit:recent', 'Recent Books', 'Recently added books', `${BASE}/recent`, now),
         this.navEntry('urn:bookorbit:surprise', 'Random Books', '25 random picks', `${BASE}/surprise`, now),
         this.navEntry('urn:bookorbit:libraries', 'Libraries', 'Browse by library', `${BASE}/libraries`, now),
@@ -30,7 +31,13 @@ export class OpdsService {
   generateLibrariesNavigation(libs: { id: number; name: string; bookCount: number }[]): string {
     const now = new Date().toISOString();
     const entries = libs.map((lib) =>
-      this.navEntry(`urn:bookorbit:library:${lib.id}`, lib.name, `${lib.bookCount} books`, `${BASE}/catalog?libraryId=${lib.id}`, now),
+      this.navEntry(
+        `urn:bookorbit:library:${opdsLibraryIdParam(lib.id)}`,
+        lib.name,
+        `${lib.bookCount} books`,
+        `${BASE}/catalog?libraryId=${opdsLibraryIdParam(lib.id)}`,
+        now,
+      ),
     );
     return this.wrapFeed('Libraries', 'urn:bookorbit:libraries', now, [xmlLink('self', `${BASE}/libraries`, OPDS_MIME_NAV)], entries);
   }
@@ -128,7 +135,7 @@ export class OpdsService {
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">',
       `  ${xmlEl('ShortName', 'bookorbit OPDS')}`,
-      `  ${xmlEl('Description', 'Search the bookorbit book catalog')}`,
+      `  ${xmlEl('Description', 'Search your bookorbit library')}`,
       `  <Url type="${esc(OPDS_MIME_ACQ)}" template="${esc(BASE)}/catalog?q={searchTerms}"/>`,
       '  <InputEncoding>UTF-8</InputEncoding>',
       '  <OutputEncoding>UTF-8</OutputEncoding>',
@@ -138,9 +145,12 @@ export class OpdsService {
 
   private bookEntry(book: OpdsBookEntry, coverToken: string): string {
     const lines: string[] = [];
+    const encodedBookId = encodeURIComponent(String(book.id));
+    const localBookBase = `${BASE}/${book.id}`;
+    const isCatalogEbook = book.kind === 'catalog-ebook';
     lines.push('<entry>');
     lines.push(`  ${xmlEl('title', book.title)}`);
-    lines.push(`  ${xmlEl('id', `urn:bookorbit:book:${book.id}`)}`);
+    lines.push(`  ${xmlEl('id', isCatalogEbook ? `urn:bookorbit:catalog:ebook:${encodedBookId}` : `urn:bookorbit:book:${book.id}`)}`);
     lines.push(`  ${xmlEl('updated', book.updatedAt.toISOString())}`);
 
     for (const author of book.authors) {
@@ -172,17 +182,16 @@ export class OpdsService {
     }
 
     if (book.hasCover) {
-      lines.push(`  ${xmlLink('http://opds-spec.org/image', `${BASE}/${book.id}/cover?t=${encodeURIComponent(coverToken)}`, 'image/jpeg')}`);
-      lines.push(
-        `  ${xmlLink('http://opds-spec.org/image/thumbnail', `${BASE}/${book.id}/thumbnail?t=${encodeURIComponent(coverToken)}`, 'image/jpeg')}`,
-      );
+      const coverHref = book.coverHref ?? `${localBookBase}/cover?t=${encodeURIComponent(coverToken)}`;
+      const thumbnailHref = book.thumbnailHref ?? `${localBookBase}/thumbnail?t=${encodeURIComponent(coverToken)}`;
+      lines.push(`  ${xmlLink('http://opds-spec.org/image', coverHref, 'image/jpeg')}`);
+      lines.push(`  ${xmlLink('http://opds-spec.org/image/thumbnail', thumbnailHref, 'image/jpeg')}`);
     }
 
     for (const file of book.files) {
       const mime = fileMimeType(file.format);
-      lines.push(
-        `  ${xmlLink('http://opds-spec.org/acquisition', `${BASE}/${book.id}/download?fileId=${file.id}`, mime, file.format.toUpperCase())}`,
-      );
+      const href = file.href ?? `${localBookBase}/download?fileId=${file.id}`;
+      lines.push(`  ${xmlLink('http://opds-spec.org/acquisition', href, mime, file.format.toUpperCase())}`);
     }
 
     lines.push('</entry>');
@@ -228,4 +237,9 @@ export class OpdsService {
     lines.push('</feed>');
     return lines.join('\n');
   }
+}
+
+function opdsLibraryIdParam(libraryId: number): string {
+  if (libraryId === CLOUD_EBOOK_LIBRARY_ID) return 'ebooks';
+  return String(libraryId);
 }

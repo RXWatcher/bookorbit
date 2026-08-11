@@ -4,6 +4,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type {
   ChordDiagramData,
+  WarehouseMediaType,
   ReadingSessionSource,
   UserCompletionTimelinePoint,
   UserDailyReadingStat,
@@ -48,6 +49,9 @@ type SessionTimelineItemRow = {
   startedAt: Date;
   endedAt: Date;
   durationSeconds: number;
+  itemSource?: 'local' | 'warehouse';
+  mediaType?: WarehouseMediaType;
+  remoteId?: string;
 };
 type SessionTimelineSessionRow = SessionTimelineItemRow & {
   libraryId: number;
@@ -87,6 +91,19 @@ export class UserStatisticsRepository {
     if (libraryIds === null) return undefined;
     if (libraryIds.length === 0) return sql`false`;
     return inArray(userReadingDailyStats.libraryId, libraryIds);
+  }
+
+  private warehouseMediaTypeFilter(mediaTypes: WarehouseMediaType[]) {
+    if (mediaTypes.length === 0) return sql`false`;
+    return inArray(schema.warehouseReadingSessions.mediaType, mediaTypes);
+  }
+
+  private warehouseMediaTypeSql(mediaTypes: WarehouseMediaType[]) {
+    if (mediaTypes.length === 0) return sql`false`;
+    return sql`wrs.media_type in (${sql.join(
+      mediaTypes.map((mediaType) => sql`${mediaType}`),
+      sql`, `,
+    )})`;
   }
 
   private startOfUtcDay(date: Date): Date {
@@ -166,6 +183,23 @@ export class UserStatisticsRepository {
       .orderBy(userReadingDailyStats.day);
   }
 
+  async getCatalogDailyReadingStats(userId: number, mediaTypes: WarehouseMediaType[], days = 365): Promise<UserDailyReadingStat[]> {
+    const mediaFilter = this.warehouseMediaTypeFilter(mediaTypes);
+    const since = this.sinceDateForDays(days);
+
+    return this.db
+      .select({
+        day: sql<string>`date_trunc('day', ${schema.warehouseReadingSessions.startedAt})::date::text`,
+        readingSeconds: sql<number>`coalesce(sum(${schema.warehouseReadingSessions.durationSeconds}), 0)::int`,
+        progressDelta: sql<number>`coalesce(sum(${schema.warehouseReadingSessions.progressDelta}), 0)::float`,
+        eventsCount: sql<number>`count(*)::int`,
+      })
+      .from(schema.warehouseReadingSessions)
+      .where(and(eq(schema.warehouseReadingSessions.userId, userId), gte(schema.warehouseReadingSessions.startedAt, since), mediaFilter))
+      .groupBy(sql`date_trunc('day', ${schema.warehouseReadingSessions.startedAt})::date`)
+      .orderBy(sql`date_trunc('day', ${schema.warehouseReadingSessions.startedAt})::date`);
+  }
+
   async getPeakReadingHours(
     userId: number,
     isSuperuser: boolean,
@@ -206,6 +240,37 @@ export class UserStatisticsRepository {
       .orderBy(sessionBuckets.hour);
   }
 
+  async getCatalogPeakReadingHours(
+    userId: number,
+    mediaTypes: WarehouseMediaType[],
+    days = 365,
+  ): Promise<{ hour: number; format: string; source: ReadingSessionSource | null; readingSeconds: number; eventsCount: number }[]> {
+    const mediaFilter = this.warehouseMediaTypeFilter(mediaTypes);
+    const since = this.sinceDateForDays(days);
+    const hourExpr = sql<number>`extract(hour from ${schema.warehouseReadingSessions.startedAt})::int`;
+    const formatExpr = sql<string>`upper(coalesce(${schema.warehouseCatalogItems.format}, ${schema.warehouseReadingSessions.mediaType}::text, 'UNKNOWN'))`;
+
+    return this.db
+      .select({
+        hour: hourExpr,
+        format: formatExpr,
+        source: sql<ReadingSessionSource | null>`null`,
+        readingSeconds: sql<number>`coalesce(sum(${schema.warehouseReadingSessions.durationSeconds}), 0)::int`,
+        eventsCount: sql<number>`count(*)::int`,
+      })
+      .from(schema.warehouseReadingSessions)
+      .leftJoin(
+        schema.warehouseCatalogItems,
+        and(
+          eq(schema.warehouseCatalogItems.mediaType, schema.warehouseReadingSessions.mediaType),
+          eq(schema.warehouseCatalogItems.remoteId, schema.warehouseReadingSessions.remoteId),
+        ),
+      )
+      .where(and(eq(schema.warehouseReadingSessions.userId, userId), gte(schema.warehouseReadingSessions.startedAt, since), mediaFilter))
+      .groupBy(hourExpr, formatExpr)
+      .orderBy(hourExpr);
+  }
+
   async getSessionTimelineItems(
     userId: number,
     isSuperuser: boolean,
@@ -224,6 +289,7 @@ export class UserStatisticsRepository {
         bookTitle: bookMetadata.title,
         bookFormat: sql<string | null>`nullif(${bookFiles.format}, '')`,
         source: readingSessions.source,
+        itemSource: sql<'local'>`'local'`,
         startedAt: readingSessions.startedAt,
         endedAt: readingSessions.endedAt,
         durationSeconds: readingSessions.durationSeconds,
@@ -241,6 +307,49 @@ export class UserStatisticsRepository {
         ),
       )
       .orderBy(readingSessions.startedAt)
+      .limit(limit);
+  }
+
+  async getCatalogSessionTimelineItems(
+    userId: number,
+    mediaTypes: WarehouseMediaType[],
+    sinceInclusive: Date,
+    untilExclusive: Date,
+    limit = 3000,
+  ): Promise<SessionTimelineItemRow[]> {
+    const mediaFilter = this.warehouseMediaTypeFilter(mediaTypes);
+
+    return this.db
+      .select({
+        sessionId: schema.warehouseReadingSessions.id,
+        bookId: sql<number>`-${schema.warehouseCatalogItems.id}`,
+        bookTitle: schema.warehouseCatalogItems.title,
+        bookFormat: sql<string | null>`nullif(${schema.warehouseCatalogItems.format}, '')`,
+        startedAt: schema.warehouseReadingSessions.startedAt,
+        endedAt: schema.warehouseReadingSessions.endedAt,
+        durationSeconds: schema.warehouseReadingSessions.durationSeconds,
+        source: sql<ReadingSessionSource | null>`null`,
+        itemSource: sql<'warehouse'>`'warehouse'`,
+        mediaType: schema.warehouseReadingSessions.mediaType,
+        remoteId: schema.warehouseReadingSessions.remoteId,
+      })
+      .from(schema.warehouseReadingSessions)
+      .innerJoin(
+        schema.warehouseCatalogItems,
+        and(
+          eq(schema.warehouseCatalogItems.mediaType, schema.warehouseReadingSessions.mediaType),
+          eq(schema.warehouseCatalogItems.remoteId, schema.warehouseReadingSessions.remoteId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.warehouseReadingSessions.userId, userId),
+          lt(schema.warehouseReadingSessions.startedAt, untilExclusive),
+          gt(schema.warehouseReadingSessions.endedAt, sinceInclusive),
+          mediaFilter,
+        ),
+      )
+      .orderBy(schema.warehouseReadingSessions.startedAt)
       .limit(limit);
   }
 
@@ -460,6 +569,37 @@ export class UserStatisticsRepository {
       .orderBy(dayOfWeekExpr);
   }
 
+  async getCatalogFavoriteReadingDays(
+    userId: number,
+    mediaTypes: WarehouseMediaType[],
+    days = 365,
+  ): Promise<{ dayOfWeek: number; source: ReadingSessionSource | null; format: string; readingSeconds: number; eventsCount: number }[]> {
+    const mediaFilter = this.warehouseMediaTypeFilter(mediaTypes);
+    const since = this.sinceDateForDays(days);
+    const dayOfWeekExpr = sql<number>`extract(dow from ${schema.warehouseReadingSessions.startedAt})::int`;
+    const formatExpr = sql<string>`upper(coalesce(${schema.warehouseCatalogItems.format}, ${schema.warehouseReadingSessions.mediaType}::text, 'UNKNOWN'))`;
+
+    return this.db
+      .select({
+        dayOfWeek: dayOfWeekExpr,
+        source: sql<ReadingSessionSource | null>`null`,
+        format: formatExpr,
+        readingSeconds: sql<number>`coalesce(sum(${schema.warehouseReadingSessions.durationSeconds}), 0)::int`,
+        eventsCount: sql<number>`count(*)::int`,
+      })
+      .from(schema.warehouseReadingSessions)
+      .leftJoin(
+        schema.warehouseCatalogItems,
+        and(
+          eq(schema.warehouseCatalogItems.mediaType, schema.warehouseReadingSessions.mediaType),
+          eq(schema.warehouseCatalogItems.remoteId, schema.warehouseReadingSessions.remoteId),
+        ),
+      )
+      .where(and(eq(schema.warehouseReadingSessions.userId, userId), gte(schema.warehouseReadingSessions.startedAt, since), mediaFilter))
+      .groupBy(dayOfWeekExpr, formatExpr)
+      .orderBy(dayOfWeekExpr);
+  }
+
   async getCompletionTimeline(
     userId: number,
     isSuperuser: boolean,
@@ -631,6 +771,29 @@ export class UserStatisticsRepository {
       .groupBy(dayExpr, readingSessions.source);
   }
 
+  async getCatalogGenreReadingTime(
+    userId: number,
+    mediaTypes: WarehouseMediaType[],
+    days = 365,
+  ): Promise<{ genre: string; source: ReadingSessionSource | null; readingSeconds: number }[]> {
+    const since = this.sinceDateForDays(days).toISOString();
+    const rows = await this.db.execute<{ genre: string; reading_seconds: number }>(sql`
+      select genre.value as genre, coalesce(sum(wrs.duration_seconds), 0)::int as reading_seconds
+      from warehouse_reading_sessions wrs
+      inner join warehouse_catalog_items wci on wci.media_type = wrs.media_type and wci.remote_id = wrs.remote_id
+      cross join lateral jsonb_array_elements_text(wci.genres) as genre(value)
+      where wrs.user_id = ${userId}
+        and wrs.started_at >= ${since}::timestamp
+        and ${this.warehouseMediaTypeSql(mediaTypes)}
+        and genre.value <> ''
+      group by genre.value
+      order by reading_seconds desc
+      limit 30
+    `);
+
+    return rows.rows.map((row) => ({ genre: row.genre, source: null, readingSeconds: Number(row.reading_seconds) }));
+  }
+
   async getReadingPacePoints(userId: number, isSuperuser: boolean, filterLibraryIds?: number[], days = 1825): Promise<UserReadingPacePoint[]> {
     const accessible = await this.getAccessibleLibraryIds(userId, isSuperuser);
     const libraryFilter = this.libraryFilter(this.intersectLibraryIds(accessible, filterLibraryIds));
@@ -662,6 +825,37 @@ export class UserStatisticsRepository {
       durationSeconds: r.durationSeconds,
       progressDelta: r.progressDelta!,
       bucket: toReadingSessionSourceBucket(r.source),
+      format: r.format,
+    }));
+  }
+
+  async getCatalogReadingPacePoints(userId: number, mediaTypes: WarehouseMediaType[], days = 1825): Promise<UserReadingPacePoint[]> {
+    const mediaFilter = this.warehouseMediaTypeFilter(mediaTypes);
+    const since = this.sinceDateForDays(days);
+
+    const rows = await this.db
+      .select({
+        durationSeconds: schema.warehouseReadingSessions.durationSeconds,
+        progressDelta: schema.warehouseReadingSessions.progressDelta,
+        format: sql<string>`upper(${schema.warehouseReadingSessions.mediaType}::text)`,
+      })
+      .from(schema.warehouseReadingSessions)
+      .where(
+        and(
+          eq(schema.warehouseReadingSessions.userId, userId),
+          gte(schema.warehouseReadingSessions.startedAt, since),
+          isNotNull(schema.warehouseReadingSessions.progressDelta),
+          gt(schema.warehouseReadingSessions.progressDelta, 0),
+          mediaFilter,
+        ),
+      )
+      .orderBy(schema.warehouseReadingSessions.startedAt)
+      .limit(2000);
+
+    return rows.map((r) => ({
+      durationSeconds: r.durationSeconds,
+      progressDelta: r.progressDelta!,
+      bucket: toReadingSessionSourceBucket(null),
       format: r.format,
     }));
   }
@@ -723,6 +917,46 @@ export class UserStatisticsRepository {
       .then((rows) => rows.map((r) => ({ ...r, endProgress: r.endProgress! })));
   }
 
+  async getCatalogCompletionRaceRawSessions(
+    userId: number,
+    mediaTypes: WarehouseMediaType[],
+    days = 1825,
+    limit = 15,
+  ): Promise<{ bookId: number; title: string | null; startedAt: Date; endProgress: number }[]> {
+    const since = this.sinceDateForDays(days).toISOString();
+    const rows = await this.db.execute<{ book_id: number; title: string | null; started_at: Date; end_progress: number }>(sql`
+      with top_items as (
+        select wrs.media_type, wrs.remote_id, count(*) as total
+        from warehouse_reading_sessions wrs
+        where wrs.user_id = ${userId}
+          and wrs.started_at >= ${since}::timestamp
+          and wrs.end_progress is not null
+          and ${this.warehouseMediaTypeSql(mediaTypes)}
+        group by wrs.media_type, wrs.remote_id
+        order by total desc
+        limit ${limit}
+      )
+      select
+        -wci.id::int as book_id,
+        wci.title,
+        wrs.started_at,
+        wrs.end_progress::float as end_progress
+      from warehouse_reading_sessions wrs
+      inner join top_items ti on ti.media_type = wrs.media_type and ti.remote_id = wrs.remote_id
+      inner join warehouse_catalog_items wci on wci.media_type = wrs.media_type and wci.remote_id = wrs.remote_id
+      where wrs.user_id = ${userId}
+        and wrs.end_progress is not null
+      order by wci.id, wrs.started_at
+    `);
+
+    return rows.rows.map((row) => ({
+      bookId: Number(row.book_id),
+      title: row.title,
+      startedAt: new Date(row.started_at),
+      endProgress: Number(row.end_progress),
+    }));
+  }
+
   async getSessionArchetypePoints(
     userId: number,
     isSuperuser: boolean,
@@ -743,6 +977,34 @@ export class UserStatisticsRepository {
       .innerJoin(books, eq(books.id, readingSessions.bookId))
       .where(and(eq(readingSessions.userId, userId), gte(readingSessions.startedAt, since), gte(readingSessions.durationSeconds, 300), libraryFilter))
       .orderBy(readingSessions.startedAt)
+      .limit(2000);
+
+    return rows.map((r) => ({
+      hour: Number(r.hour),
+      durationMinutes: Number(r.durationMinutes),
+      dayOfWeek: Number(r.dayOfWeek),
+    }));
+  }
+
+  async getCatalogSessionArchetypePoints(userId: number, mediaTypes: WarehouseMediaType[], days = 365): Promise<UserSessionArchetypePoint[]> {
+    const mediaFilter = this.warehouseMediaTypeFilter(mediaTypes);
+    const since = this.sinceDateForDays(days);
+    const hourExpr = sql<number>`extract(hour from ${schema.warehouseReadingSessions.startedAt}) + extract(minute from ${schema.warehouseReadingSessions.startedAt}) / 60.0`;
+    const durationExpr = sql<number>`${schema.warehouseReadingSessions.durationSeconds} / 60.0`;
+    const dowExpr = sql<number>`extract(dow from ${schema.warehouseReadingSessions.startedAt})::int`;
+
+    const rows = await this.db
+      .select({ hour: hourExpr, durationMinutes: durationExpr, dayOfWeek: dowExpr })
+      .from(schema.warehouseReadingSessions)
+      .where(
+        and(
+          eq(schema.warehouseReadingSessions.userId, userId),
+          gte(schema.warehouseReadingSessions.startedAt, since),
+          gte(schema.warehouseReadingSessions.durationSeconds, 300),
+          mediaFilter,
+        ),
+      )
+      .orderBy(schema.warehouseReadingSessions.startedAt)
       .limit(2000);
 
     return rows.map((r) => ({
@@ -824,6 +1086,67 @@ export class UserStatisticsRepository {
     return {
       nodes: [...authorNames.map((n) => ({ name: n })), ...genreNames.map((n) => ({ name: n }))],
       links: rows.rows.map((r) => ({ source: r.author, target: r.genre, value: r.reading_seconds })),
+    };
+  }
+
+  async getCatalogAuthorGenreChord(
+    userId: number,
+    mediaTypes: WarehouseMediaType[],
+    days = 1825,
+    authorLimit = 12,
+    genreLimit = 12,
+  ): Promise<ChordDiagramData> {
+    const since = this.sinceDateForDays(days).toISOString();
+    const rows = await this.db.execute<{ author: string; genre: string; reading_seconds: number }>(sql`
+      with source_sessions as (
+        select wrs.duration_seconds, wci.authors, wci.genres
+        from warehouse_reading_sessions wrs
+        inner join warehouse_catalog_items wci on wci.media_type = wrs.media_type and wci.remote_id = wrs.remote_id
+        where wrs.user_id = ${userId}
+          and wrs.started_at >= ${since}::timestamp
+          and ${this.warehouseMediaTypeSql(mediaTypes)}
+      ),
+      expanded as (
+        select
+          nullif(author.value, '') as author,
+          nullif(genre.value, '') as genre,
+          ss.duration_seconds
+        from source_sessions ss
+        cross join lateral jsonb_array_elements_text(ss.authors) with ordinality as author(value, author_ord)
+        cross join lateral jsonb_array_elements_text(ss.genres) with ordinality as genre(value, genre_ord)
+        where author.author_ord = 1 and genre.genre_ord = 1
+      ),
+      top_authors as (
+        select author, sum(duration_seconds) as total
+        from expanded
+        where author is not null
+        group by author
+        order by total desc
+        limit ${authorLimit}
+      ),
+      top_genres as (
+        select genre, sum(duration_seconds) as total
+        from expanded
+        where genre is not null
+        group by genre
+        order by total desc
+        limit ${genreLimit}
+      )
+      select e.author, e.genre, sum(e.duration_seconds)::int as reading_seconds
+      from expanded e
+      inner join top_authors ta on ta.author = e.author
+      inner join top_genres tg on tg.genre = e.genre
+      group by e.author, e.genre
+      having sum(e.duration_seconds) > 0
+      order by reading_seconds desc
+    `);
+
+    if (rows.rows.length === 0) return { nodes: [], links: [] };
+    const authorNames = [...new Set(rows.rows.map((r) => r.author))];
+    const genreNames = [...new Set(rows.rows.map((r) => r.genre))];
+    return {
+      nodes: [...authorNames.map((name) => ({ name })), ...genreNames.map((name) => ({ name }))],
+      links: rows.rows.map((row) => ({ source: row.author, target: row.genre, value: Number(row.reading_seconds) })),
     };
   }
 

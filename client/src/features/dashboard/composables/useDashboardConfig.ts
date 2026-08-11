@@ -24,6 +24,8 @@ export const DEFAULT_SCROLLERS: ScrollerConfig[] = [
   { id: '5', type: 'continue-listening', label: 'Continue Listening', enabled: true, order: 4, limit: 20 },
   { id: '6', type: 'want-to-read', label: 'Want to Read', enabled: false, order: 5, limit: 20 },
   { id: '4', type: 'up-next-in-series', label: 'Up Next in Series', enabled: false, order: 6, limit: 20 },
+  { id: '7', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 7, limit: 20 },
+  { id: '8', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 8, limit: 20 },
 ]
 
 // Persisted-only. Shelf headings and the type selector resolve their text from the active
@@ -36,6 +38,13 @@ export const SCROLLER_LABELS: Record<ScrollerType, string> = {
   'recently-added': 'Recently Added',
   random: 'Discover Something New',
   'smart-scope': 'Smart Scope',
+  'catalog-additions': 'Library Additions',
+  'catalog-discovery': 'Explore Libraries',
+}
+
+const LEGACY_DEFAULT_SCROLLER_LABELS: Partial<Record<ScrollerType, Set<string>>> = {
+  'catalog-additions': new Set(['Catalog Additions']),
+  'catalog-discovery': new Set(['Explore Catalog']),
 }
 
 const VALID_SCROLLER_TYPES = new Set<ScrollerType>(SCROLLER_TYPES)
@@ -94,7 +103,8 @@ function normalizeScroller(value: unknown, index: number): ScrollerConfig | null
   if (typeof raw.type !== 'string' || !VALID_SCROLLER_TYPES.has(raw.type as ScrollerType)) return null
 
   const type = raw.type as ScrollerType
-  const label = typeof raw.label === 'string' && raw.label.trim().length > 0 ? raw.label.trim() : SCROLLER_LABELS[type]
+  const rawLabel = typeof raw.label === 'string' ? raw.label.trim() : ''
+  const label = rawLabel.length === 0 || LEGACY_DEFAULT_SCROLLER_LABELS[type]?.has(rawLabel) ? SCROLLER_LABELS[type] : rawLabel
   const smartScopeId = type === 'smart-scope' ? normalizeSmartScopeId(raw.smartScopeId) : undefined
 
   return {

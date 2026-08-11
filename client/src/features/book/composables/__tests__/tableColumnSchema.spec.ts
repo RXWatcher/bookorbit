@@ -31,7 +31,7 @@ function makeField(overrides: Partial<CustomMetadataFieldSummary> = {}): CustomM
 }
 
 function makeBook(overrides: Partial<BookCard> = {}): BookCard {
-  return {
+  const base: BookCard = {
     id: 1,
     status: 'present',
     coverAspectRatio: '2/3',
@@ -60,8 +60,9 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
     narrators: [],
     tags: [],
     customMetadata: [],
-    ...overrides,
   }
+
+  return Object.assign(base, overrides)
 }
 
 describe('tableColumnSchema', () => {

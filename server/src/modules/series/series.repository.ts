@@ -13,8 +13,8 @@ import type { SeriesBookSort } from './dto/list-series-books.dto';
 
 type Db = NodePgDatabase<typeof schema>;
 
-type SeriesSummaryRow = {
-  id: number;
+export type SeriesSummaryRow = {
+  id?: number;
   name: string;
   bookCount: number;
   readCount: number;
@@ -164,6 +164,65 @@ export class SeriesRepository {
     }));
 
     return { items, total, page: params.page, size: params.size };
+  }
+
+  async findSummaries(params: {
+    q?: string;
+    libraryIds: number[];
+    userId: number;
+    author?: string;
+    contentFilters?: ContentFilterRules;
+  }): Promise<SeriesSummaryRow[]> {
+    const libraryFilter = this.buildLibraryFilter(params.libraryIds);
+    const filterClauses = params.contentFilters ? buildContentFilterClauses(params.contentFilters, this.db) : [];
+
+    const conditions: SQL[] = [isNotNull(bookMetadata.seriesId), libraryFilter, ...filterClauses];
+
+    if (params.q) {
+      const qPattern = `%${this.escapeLikePattern(params.q)}%`;
+      const authorNameMatch = this.buildAuthorNameMatchCondition(qPattern);
+      conditions.push(sql`(${accentInsensitiveIlike(bookSeries.name, qPattern)} OR ${authorNameMatch})`);
+    }
+
+    if (params.author) {
+      const authorPattern = `%${this.escapeLikePattern(params.author)}%`;
+      conditions.push(this.buildAuthorNameMatchCondition(authorPattern));
+    }
+
+    const rows = await this.db
+      .select({
+        id: bookSeries.id,
+        name: bookSeries.name,
+        bookCount: sql<number>`count(distinct ${books.id})::int`,
+        readCount: sql<number>`count(distinct CASE WHEN ${userBookStatus.status} = 'read' THEN ${books.id} END)::int`,
+        lastAddedAt: sql<string | null>`max(${books.addedAt})::text`,
+      })
+      .from(books)
+      .innerJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .innerJoin(bookSeries, eq(bookSeries.id, bookMetadata.seriesId))
+      .leftJoin(userBookStatus, and(eq(userBookStatus.bookId, books.id), eq(userBookStatus.userId, params.userId)))
+      .where(and(...conditions)!)
+      .groupBy(bookSeries.id, bookSeries.name);
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const seriesIds = rows.map((r) => r.id);
+    const [authorData, coverData] = await Promise.all([
+      this.fetchAuthorsForSeries(seriesIds, params.libraryIds, params.contentFilters),
+      this.fetchCoverBookIds(seriesIds, params.libraryIds, params.contentFilters),
+    ]);
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      bookCount: row.bookCount,
+      readCount: row.readCount,
+      authors: authorData.get(row.id) ?? [],
+      coverBookIds: coverData.get(row.id) ?? [],
+      lastAddedAt: row.lastAddedAt,
+    }));
   }
 
   async countSeries(params: { libraryIds: number[]; contentFilters?: ContentFilterRules }): Promise<number> {

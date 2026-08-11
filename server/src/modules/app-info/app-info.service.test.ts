@@ -15,7 +15,7 @@ function makeConfig(version = 'v1.2.3', bookDockPath = '/data/book-dock'): jest.
   } as unknown as jest.Mocked<ConfigService>;
 }
 
-function makeAppSettings(enabled = true): jest.Mocked<AppSettingsService> {
+function makeAppSettings(enabled = false): jest.Mocked<AppSettingsService> {
   return {
     isUpdateCheckEnabled: vi.fn().mockResolvedValue(enabled),
     getMaxUploadSizeMb: vi.fn().mockResolvedValue(500),
