@@ -18,12 +18,12 @@ an incomplete view of what actually exists.
 
 Measured on the application host against the live catalogue on 2026-08-10.
 
-| Media     | Source path (under `/mnt/sharedrives/zd-storage-ceph-books`) | On disk, absent from warehouse | In warehouse, absent from disk |
-| --------- | ------------------------------------------------------------ | ------------------------------ | ------------------------------ |
-| ebook     | `ebooks/Books_English`                                       | 7,108                          | 25                             |
-| audiobook | `audiobooks/Audiobooks_English`                              | 58,102                         | 452                            |
-| comic     | `comics/English`                                             | about 7                        | 0                              |
-| magazine  | `magazines/Magazines_English`                                | about 74,400 (all of it)       | not applicable                 |
+| Media     | Source path (under `/mnt/library-share`) | On disk, absent from warehouse | In warehouse, absent from disk |
+| --------- | ---------------------------------------- | ------------------------------ | ------------------------------ |
+| ebook     | `ebooks/Books_English`                   | 7,108                          | 25                             |
+| audiobook | `audiobooks/Audiobooks_English`          | 58,102                         | 452                            |
+| comic     | `comics/English`                         | about 7                        | 0                              |
+| magazine  | `magazines/Magazines_English`            | about 74,400 (all of it)       | not applicable                 |
 
 Roughly 139,600 items are invisible in BookOrbit today. The 477 reverse cases are catalogue rows
 whose files have moved or been deleted.
@@ -48,7 +48,7 @@ whose files have moved or been deleted.
 ingests from. A catalogue row's `raw_payload.calibre_path` (for example
 `Diana Xarissa/Joy and Jealousy (17937)`) resolves exactly as a directory on the share.
 Audiobooks carry the equivalent in `raw_payload.files[].storage_key`, an absolute path under
-`/media/zd-storage-ceph-books/...` that maps onto `/mnt/sharedrives/zd-storage-ceph-books/...`.
+`/media/library-share/...` that maps onto `/mnt/library-share/...`.
 
 Deduplication is therefore an exact key join for ebooks and audiobooks, not fuzzy matching.
 Filename matching is useless and must not be used: the warehouse stores
@@ -146,7 +146,7 @@ resolution reads from `local_path` and must reject any path that escapes the con
 after normalisation, since `local_path` reaches the filesystem layer.
 
 Consequence to accept deliberately: the mount becomes a hard runtime dependency for local items.
-If `/mnt/sharedrives` is unavailable, local items fail while warehouse items keep working. The
+If `/mnt/library-share` is unavailable, local items fail while warehouse items keep working. The
 resolver returns a clear error for that case rather than a generic 500.
 
 ## Data flow
@@ -163,7 +163,7 @@ resolver returns a clear error for that case rather than a generic 500.
 ## Testing
 
 - Unit tests per match strategy, including the known traps: filename matching must not be used,
-  the `/media/` to `/mnt/sharedrives/` rewrite, and `.caltrash` and `.calnotes` exclusion.
+  the `/media/` to `/mnt/library-share/` rewrite, and `.caltrash` and `.calnotes` exclusion.
 - A regression test asserting the sync performs no delete against `warehouse_catalog_items`,
   protecting local rows.
 - A path traversal test on `local_path` resolution.

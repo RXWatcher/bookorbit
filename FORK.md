@@ -1,18 +1,18 @@
-# BookOrbit on this LXC — what our copy does differently
+# BookOrbit fork — what our copy does differently
 
-Written 2026-08-05. This container does **not** run the published
-`ghcr.io/bookorbit/bookorbit` image. It runs `bookorbit:custom`, built here from
-a source snapshot in `/opt/bookorbit`. This file records how that source differs
-from upstream, because nothing else on the box says so.
+Written 2026-08-05. This fork does **not** run the published
+`ghcr.io/bookorbit/bookorbit` image. It runs a locally built image, from a
+source snapshot rather than a clone. This file records how that source differs
+from upstream, because nothing else in the tree says so.
 
 ## Provenance
 
-| | |
-| --- | --- |
-| Upstream project | https://github.com/bookorbit/bookorbit |
-| Our base | **v2.3.0** (released 2026-07-18) |
-| Source | `book-orbit-main.zip`, downloaded 2026-07-30 |
-| Git history | **none** — the zip is a plain snapshot, no `.git` |
+|                  |                                                   |
+| ---------------- | ------------------------------------------------- |
+| Upstream project | https://github.com/bookorbit/bookorbit            |
+| Our base         | **v2.3.0** (released 2026-07-18)                  |
+| Source           | `book-orbit-main.zip`, downloaded 2026-07-30      |
+| Git history      | **none** — the zip is a plain snapshot, no `.git` |
 
 The base was identified by diffing the snapshot against every plausible upstream
 ref and taking the closest match. v2.3.0 differs by 322 entries; the next best
@@ -59,7 +59,7 @@ Other local additions: `.gitlab-ci.yml` (+341 lines) and the
 ## Build deviation — read this before rebuilding
 
 The image was **not** built from the Dockerfile as shipped. Upstream's
-Dockerfile runs `pnpm install --frozen-lockfile`, which fails here:
+Dockerfile runs `pnpm install --frozen-lockfile`, which fails against this snapshot:
 
 ```
 ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY  Broken lockfile:
@@ -68,8 +68,8 @@ no entry for 'ajv-keywords@3.5.2(ajv@6.15.0)' in pnpm-lock.yaml
 
 `pnpm-lock.yaml` is out of sync with `package.json` — the signature of editing
 dependencies without regenerating the lockfile. To get a build, the Dockerfile
-was patched to `--no-frozen-lockfile`. The original is preserved as
-`/opt/bookorbit/Dockerfile.orig`.
+was patched to `--no-frozen-lockfile`. The original is preserved alongside it as
+`Dockerfile.orig`.
 
 **Consequence:** dependency versions are no longer pinned. This build resolved
 transitive dependencies fresh and may not match what upstream intended. If the
@@ -82,12 +82,12 @@ real fix is to regenerate the lockfile in the source and restore
 Measured, not estimated — by committing our snapshot onto v2.3.0 and dry-running
 a merge of upstream `main`:
 
-| | |
-| --- | --- |
-| Files we changed vs v2.3.0 | 516 |
-| Files upstream changed v2.3.0 → main | 922 |
-| Files touched by both | 87 |
-| **Files that actually conflict** | **28** |
+|                                      |        |
+| ------------------------------------ | ------ |
+| Files we changed vs v2.3.0           | 516    |
+| Files upstream changed v2.3.0 → main | 922    |
+| Files touched by both                | 87     |
+| **Files that actually conflict**     | **28** |
 
 28 conflicts is real work but tractable. They cluster in the places Book
 Warehouse hooks into core services:
@@ -108,32 +108,17 @@ There is no upgrade path via image pull — the published image does not contain
 Book Warehouse. Updating means merging upstream into our source:
 
 1. `git clone https://github.com/bookorbit/bookorbit.git`
-2. `git checkout -B fork v2.3.0` and overlay `/opt/bookorbit` onto it, then
+2. `git checkout -B fork v2.3.0` and overlay the deployment source onto it, then
    commit (use `--no-verify`; the husky pre-commit hook rejects the snapshot)
 3. `git merge origin/main` and resolve the 28 conflicts, keeping warehouse
    integration points intact
 4. Regenerate `pnpm-lock.yaml` so `--frozen-lockfile` works again
 5. Rebuild: `docker build -t bookorbit:custom .`
-6. `docker compose up -d` in `/opt/bookorbit`
+6. `docker compose up -d` in the deployment source directory
 
 **Back up the database first.** The warehouse migration chain is ours; an
 upstream migration change could interact with it badly, and 0032–0047 have no
 upstream counterpart to fall back on.
-
-## This deployment
-
-| | |
-| --- | --- |
-| Container | CT 139 `bookorbit` on ns18 |
-| Source | `/opt/bookorbit` (patched Dockerfile; `.orig` alongside) |
-| Image | `bookorbit:custom`, built locally |
-| Stack | app + Postgres via `docker compose`, port 3000 |
-| Books | `/books` — CephFS `zd-storage-ceph-books`, **read-only** |
-| State | `/var/lib/bookorbit` (100 G volume); `/opt/bookorbit/data` symlinks there |
-| Secrets | `/opt/bookorbit/.env`, mode 600, generated at deploy |
-| Exposure | tailnet + LAN only; not public |
-
----
 
 # Merge log — 2026-08-05: upstream `main` (v2.4.0-era) merged in
 
@@ -142,12 +127,12 @@ Warehouse. 28 conflicts.
 
 ## How conflicts were resolved
 
-| Approach | Count |
-| --- | --- |
-| Kept both sides (each added something distinct) | 12 |
-| Took ours (warehouse-critical) | 8 |
-| Took upstream (dead or refactored code) | 6 |
-| Hand-merged | 2 |
+| Approach                                        | Count |
+| ----------------------------------------------- | ----- |
+| Kept both sides (each added something distinct) | 12    |
+| Took ours (warehouse-critical)                  | 8     |
+| Took upstream (dead or refactored code)         | 6     |
+| Hand-merged                                     | 2     |
 
 ## Two files needed rebuilding, not patching
 
@@ -178,7 +163,7 @@ treatment.** They are where Book Warehouse binds most tightly to core services.
   favour of ours, which carries the catalog/library navigation. The most
   visible user-facing regression from this merge.
 - **`smart-scope.service.ts` took upstream's refactor**, so its `bookService.
-  globalQuery` calls became `bookReadService.countWhere` /
+globalQuery` calls became `bookReadService.countWhere` /
   `executeBooksQuery`. `BookReadService` had to be added to the constructor.
 
 ## Notification categories
@@ -190,13 +175,14 @@ lack it** and will show the raw key until translated.
 
 ## Traps hit (worth knowing before the next merge)
 
-Git conflicts here routinely place two *different* methods against each other,
+Git conflicts here routinely place two _different_ methods against each other,
 with the closing brace as shared trailing context. Naively keeping both sides
 nests one method inside the other — it compiles as far as brace counting goes
 but is structurally wrong. It happened in `series.repository.ts` (caught by
 inspection) and again in `opds-book.service.ts` (caught only by the build).
 
 Check after any resolution:
+
 1. no conflict markers
 2. brace balance zero
 3. **every `this.x()` call resolves to a definition in the file**

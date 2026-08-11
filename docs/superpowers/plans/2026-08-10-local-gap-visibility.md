@@ -591,7 +591,7 @@ git commit -m "feat(local-scan): add ebook calibre path match strategy"
 
 ### Task 6: Audiobook match strategy
 
-Catalogue side key is the directory part of `raw_payload.files[].storage_key`, which is absolute and prefixed `/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/`. That prefix maps onto the scan root, so it is stripped to produce a root relative key.
+Catalogue side key is the directory part of `raw_payload.files[].storage_key`, which is absolute and prefixed `/media/library-share/audiobooks/Audiobooks_English/`. That prefix maps onto the scan root, so it is stripped to produce a root relative key.
 
 **Files:**
 
@@ -608,7 +608,7 @@ Catalogue side key is the directory part of `raw_payload.files[].storage_key`, w
 ```typescript
 import { AudiobookMatchStrategy } from "./audiobook-match.strategy";
 
-const PREFIX = "/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/";
+const PREFIX = "/media/library-share/audiobooks/Audiobooks_English/";
 
 describe("AudiobookMatchStrategy", () => {
   const strategy = new AudiobookMatchStrategy(PREFIX);
@@ -1396,7 +1396,7 @@ import type { LocalMatchStrategy, LocalScanSummary } from "./local-scan.types";
 import { walkFiles } from "./local-scan.walker";
 
 const AUDIOBOOK_REMOTE_PREFIX =
-  "/media/zd-storage-ceph-books/audiobooks/Audiobooks_English/";
+  "/media/library-share/audiobooks/Audiobooks_English/";
 const CATALOG_BATCH_SIZE = 5000;
 const INSERT_BATCH_SIZE = 500;
 const DEFAULT_EXCLUDES = [".caltrash", ".calnotes"];
@@ -1692,9 +1692,9 @@ The three in scope roots for this plan, on the application host. The magazines r
 
 ```sql
 insert into local_scan_roots (media_type, absolute_path) values
-  ('ebook',     '/mnt/sharedrives/zd-storage-ceph-books/ebooks/Books_English'),
-  ('audiobook', '/mnt/sharedrives/zd-storage-ceph-books/audiobooks/Audiobooks_English'),
-  ('comic',     '/mnt/sharedrives/zd-storage-ceph-books/comics/English')
+  ('ebook',     '/mnt/library-share/ebooks/Books_English'),
+  ('audiobook', '/mnt/library-share/audiobooks/Audiobooks_English'),
+  ('comic',     '/mnt/library-share/comics/English')
 on conflict do nothing;
 ```
 
