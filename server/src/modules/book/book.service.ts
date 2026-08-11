@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { access, readdir, rm, stat, rename } from 'fs/promises';
-import { inArray, type SQL } from 'drizzle-orm';
+import { and, inArray, type SQL } from 'drizzle-orm';
 
 import { bookCoverDirPath, bookThumbnailPath, findPreferredBookCoverFileName } from '../../common/book-cover-storage';
 import { MAX_BOOK_QUERY_OFFSET_ROWS, isBookQueryOffsetWithinLimit } from '../../common/constants/pagination.constants';
@@ -1356,8 +1356,12 @@ export class BookService {
     const hasAudioLibrary = libs.some((l) => l.id === CLOUD_AUDIO_LIBRARY_ID);
     const hasComicLibrary = libs.some((l) => l.id === CLOUD_COMIC_LIBRARY_ID);
 
+    // BookSearchQuery has no filter concept, so a request carrying both a search term and a
+    // filter must take the merge path, which applies the filter through queryBuilder.buildWhere
+    // and querySourceBackedGlobalWindow.
     const trimmedSearchTerm = query.q?.trim();
-    if (trimmedSearchTerm) {
+    const hasActiveFilter = (query.filter?.rules?.length ?? 0) > 0;
+    if (trimmedSearchTerm && !hasActiveFilter) {
       const providerPage = await this.globalQueryViaSearchProvider(user, query, trimmedSearchTerm, accessibleLibraryIds);
       if (providerPage) return providerPage;
     }
@@ -1429,7 +1433,7 @@ export class BookService {
     if (result.provider !== 'meilisearch') return null;
 
     return {
-      items: await this.loadSearchResultItemsInOrder(user, result.ids),
+      items: await this.loadSearchResultItemsInOrder(user, result.ids, accessibleLibraryIds),
       total: result.total,
       page: query.pagination.page,
       size: query.pagination.size,
@@ -1438,7 +1442,7 @@ export class BookService {
 
   /** Loads rows for a page of search result ids and restores the provider's order. A plain
    *  `IN` lookup returns rows in arbitrary order, so the caller cannot rely on it for ranking. */
-  private async loadSearchResultItemsInOrder(user: RequestUser, ids: string[]): Promise<LibraryBookItem[]> {
+  private async loadSearchResultItemsInOrder(user: RequestUser, ids: string[], accessibleLibraryIds: number[]): Promise<LibraryBookItem[]> {
     const nativeBookIds: number[] = [];
     const catalogRemoteIdsByMediaType = new Map<WarehouseMediaType, string[]>();
 
@@ -1455,7 +1459,7 @@ export class BookService {
     }
 
     const [nativeItems, catalogItemGroups] = await Promise.all([
-      this.loadNativeItemsByIds(user.id, nativeBookIds),
+      this.loadNativeItemsByIds(user.id, nativeBookIds, accessibleLibraryIds),
       Promise.all(
         Array.from(catalogRemoteIdsByMediaType.entries()).map(([mediaType, remoteIds]) =>
           this.warehouseCatalog ? this.warehouseCatalog.getCatalogItemsByRemoteIds(user, mediaType, remoteIds) : Promise.resolve([]),
@@ -1477,10 +1481,13 @@ export class BookService {
     return ids.map((id) => itemsById.get(id)).filter((item): item is LibraryBookItem => item !== undefined);
   }
 
-  private async loadNativeItemsByIds(userId: number, bookIds: number[]): Promise<BookCard[]> {
-    if (bookIds.length === 0) return [];
+  /** The search index is the first line of defence, but it can lag a permission change, so
+   *  this restricts to accessibleLibraryIds again at read time, the same way the merge path's
+   *  own `where` clause does. */
+  private async loadNativeItemsByIds(userId: number, bookIds: number[], accessibleLibraryIds: number[]): Promise<BookCard[]> {
+    if (bookIds.length === 0 || accessibleLibraryIds.length === 0) return [];
 
-    const page = await this.executeBooksQuery(userId, inArray(books.id, bookIds), {
+    const page = await this.executeBooksQuery(userId, and(inArray(books.id, bookIds), inArray(books.libraryId, accessibleLibraryIds)), {
       sort: [],
       pagination: { page: 0, size: bookIds.length },
     });

@@ -1,5 +1,7 @@
+import { and, inArray } from 'drizzle-orm';
 import type { RequestUser } from '../../common/types/request-user';
 import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { books } from '../../db/schema';
 import { BookService } from './book.service';
 
 function makeUser(overrides?: Partial<RequestUser>): RequestUser {
@@ -161,6 +163,93 @@ describe('globalQuery search routing', () => {
     expect(warehouseCatalog.getCatalogItemsByRemoteIds).toHaveBeenCalledWith(user, 'ebook', ['aaa-alphabetically-first']);
     expect(queryBuilder.buildWhere).not.toHaveBeenCalled();
     expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ q: 'dune', userId: 7, accessibleLibraryIds: [3] }));
+  });
+
+  it('restores provider order within a single media type even when the row loader returns rows in a different order', async () => {
+    const { service, bookSearchService, warehouseCatalog } = makeService();
+    const user = makeUser({ id: 7 });
+
+    // Two ids land in the SAME media type group (ebook), so a single getCatalogItemsByRemoteIds
+    // call must resolve both. The provider wants "second" before "first", but the loader (like
+    // a real `WHERE remote_id IN (...)` query) hands rows back in the opposite order. A naive
+    // implementation that just concatenates whatever the loader returned, ignoring the
+    // requested id order, would produce [firstCard, secondCard] here and this test would catch it.
+    const ids = ['catalog:ebook:second', 'catalog:ebook:first'];
+    bookSearchService.search.mockResolvedValue({ ids, total: 2, page: 0, size: 10, provider: 'meilisearch' });
+
+    const firstCard = makeBookCard({ title: 'First Row From DB', catalogSource: { mediaType: 'ebook', remoteId: 'first' } });
+    const secondCard = makeBookCard({ title: 'Second Row From DB', catalogSource: { mediaType: 'ebook', remoteId: 'second' } });
+    warehouseCatalog.getCatalogItemsByRemoteIds.mockResolvedValue([firstCard, secondCard]);
+
+    const result = await service.globalQuery(user, {
+      filter: null,
+      sort: [],
+      pagination: { page: 0, size: 10 },
+      q: 'dune',
+    } as never);
+
+    expect(result.items).toEqual([secondCard, firstCard]);
+    expect(warehouseCatalog.getCatalogItemsByRemoteIds).toHaveBeenCalledWith(user, 'ebook', ['second', 'first']);
+  });
+
+  it('excludes a native search result whose library is not in the user accessible library ids', async () => {
+    const { service, bookSearchService, libraryService } = makeService();
+    const user = makeUser({ id: 7 });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }]);
+    // The index returns a native id for a book in library 99, which the user cannot access.
+    // A stale or lagging index is the first line of defence's failure mode; the read-time
+    // library filter is what must still exclude it.
+    bookSearchService.search.mockResolvedValue({
+      ids: ['native:10', 'native:20'],
+      total: 2,
+      page: 0,
+      size: 10,
+      provider: 'meilisearch',
+    });
+    const accessibleBook = makeBookCard({ id: 10, title: 'Accessible Book' });
+    const executeBooksQuerySpy = vi
+      .spyOn(service, 'executeBooksQuery')
+      .mockResolvedValue({ items: [accessibleBook], total: 1, page: 0, size: 2 } as never);
+
+    const result = await service.globalQuery(user, {
+      filter: null,
+      sort: [],
+      pagination: { page: 0, size: 10 },
+      q: 'dune',
+    } as never);
+
+    expect(result.items).toEqual([accessibleBook]);
+    // The where clause passed to executeBooksQuery must restrict to accessibleLibraryIds, not
+    // just the requested book ids, so a book in an inaccessible library is excluded at read
+    // time even if the search index still lists it.
+    expect(executeBooksQuerySpy).toHaveBeenCalledWith(
+      7,
+      and(inArray(books.id, [10, 20]), inArray(books.libraryId, [3])),
+      expect.objectContaining({ pagination: { page: 0, size: 2 } }),
+    );
+  });
+
+  it('keeps the existing merge when a filter is present alongside a search term', async () => {
+    const { service, bookSearchService, libraryService } = makeService();
+    const user = makeUser({ id: 7 });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }]);
+    const localBook = makeBookCard({ id: 5, title: 'Local Dune' });
+    vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 } as never);
+    const filter = {
+      type: 'group',
+      join: 'AND',
+      rules: [{ type: 'rule', field: 'genre', operator: 'includesAny', value: ['Sci-Fi'] }],
+    };
+
+    const result = await service.globalQuery(user, {
+      filter,
+      sort: [],
+      pagination: { page: 0, size: 10 },
+      q: 'dune',
+    } as never);
+
+    expect(bookSearchService.search).not.toHaveBeenCalled();
+    expect(result).toEqual({ items: [localBook], total: 1, page: 0, size: 10 });
   });
 
   it('keeps the existing merge when there is no search term', async () => {
