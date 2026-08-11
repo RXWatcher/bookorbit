@@ -49,15 +49,22 @@ function migrationPrefix(idx: number): string {
 describe('Book Warehouse migration journal', () => {
   it('preserves the original warehouse migration timestamps in a separate journal', () => {
     const journal = readJournal();
+    const legacyCount = LEGACY_WAREHOUSE_TIMESTAMPS.size;
 
-    expect(journal.entries.map((entry) => entry.tag)).toEqual([...LEGACY_WAREHOUSE_TIMESTAMPS.keys()]);
+    // The lineage this pins is closed: these are the migrations Drizzle generated,
+    // each with a meta/ snapshot. Everything after them is hand written and has no
+    // snapshot by design, so only the leading run is compared tag for tag.
+    expect(journal.entries.slice(0, legacyCount).map((entry) => entry.tag)).toEqual([...LEGACY_WAREHOUSE_TIMESTAMPS.keys()]);
 
     for (const entry of journal.entries) {
       const prefix = migrationPrefix(entry.idx);
 
       expect(entry.tag.startsWith(`${prefix}_`)).toBe(true);
-      expect(entry.when).toBe(LEGACY_WAREHOUSE_TIMESTAMPS.get(entry.tag));
       expect(existsSync(fileURLToPath(new URL(`./${entry.tag}.sql`, warehouseMigrationsDirUrl)))).toBe(true);
+
+      if (!LEGACY_WAREHOUSE_TIMESTAMPS.has(entry.tag)) continue;
+
+      expect(entry.when).toBe(LEGACY_WAREHOUSE_TIMESTAMPS.get(entry.tag));
       expect(existsSync(fileURLToPath(new URL(`./meta/${prefix}_snapshot.json`, warehouseMigrationsDirUrl)))).toBe(true);
     }
   });

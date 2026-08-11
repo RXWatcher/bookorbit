@@ -156,7 +156,7 @@ export class OpdsService {
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">',
       `  ${xmlEl('ShortName', 'bookorbit OPDS')}`,
-      `  ${xmlEl('Description', 'Search the bookorbit book catalog')}`,
+      `  ${xmlEl('Description', 'Search your bookorbit library')}`,
       `  <Url type="${esc(OPDS_MIME_ACQ)}" template="${esc(SEARCH_TEMPLATE)}"/>`,
       '  <InputEncoding>UTF-8</InputEncoding>',
       '  <OutputEncoding>UTF-8</OutputEncoding>',

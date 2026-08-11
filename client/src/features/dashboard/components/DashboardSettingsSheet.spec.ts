@@ -205,7 +205,7 @@ describe('DashboardSettingsSheet', () => {
     await saveButton?.trigger('click')
 
     expect(storedRows()[0]).toBe(2)
-    expect(storedRows().slice(1)).toEqual([1, 1, 1, 1, 1])
+    expect(storedRows().slice(1)).toEqual([1, 1, 1, 1, 1, 1, 1])
   })
 
   it('discards a row change when the sheet is cancelled and reopened', async () => {

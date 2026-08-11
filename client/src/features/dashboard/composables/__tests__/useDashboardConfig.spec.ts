@@ -83,6 +83,7 @@ describe('useDashboardConfig', () => {
       enabled: true,
       order: 7,
       limit: 20,
+      rows: 1,
     })
     expect((SCROLLER_LABELS as Record<string, string>)['catalog-additions']).toBe('Library Additions')
     expect(DEFAULT_SCROLLERS).toContainEqual({
@@ -92,6 +93,7 @@ describe('useDashboardConfig', () => {
       enabled: true,
       order: 8,
       limit: 20,
+      rows: 1,
     })
     expect((SCROLLER_LABELS as Record<string, string>)['catalog-discovery']).toBe('Explore Libraries')
 
@@ -114,6 +116,7 @@ describe('useDashboardConfig', () => {
         enabled: true,
         order: 1,
         limit: 12,
+        rows: 1,
       },
     ])
   })
@@ -132,9 +135,9 @@ describe('useDashboardConfig', () => {
     const { scrollers } = useDashboardConfig()
 
     expect(scrollers.value).toEqual([
-      { id: '5', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 1, limit: 20 },
-      { id: '6', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 2, limit: 20 },
-      { id: '7', type: 'catalog-additions', label: 'Wishlist Drops', enabled: true, order: 3, limit: 20 },
+      { id: '5', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 1, limit: 20, rows: 1 },
+      { id: '6', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 2, limit: 20, rows: 1 },
+      { id: '7', type: 'catalog-additions', label: 'Wishlist Drops', enabled: true, order: 3, limit: 20, rows: 1 },
     ])
   })
 
@@ -311,7 +314,7 @@ describe('useDashboardConfig', () => {
     const { DEFAULT_SCROLLERS, useDashboardConfig } = await import('../useDashboardConfig')
     const { scrollers, addScroller } = useDashboardConfig()
 
-    expect(DEFAULT_SCROLLERS.map((scroller) => scroller.rows)).toEqual([1, 1, 1, 1, 1, 1])
+    expect(DEFAULT_SCROLLERS.map((scroller) => scroller.rows)).toEqual([1, 1, 1, 1, 1, 1, 1, 1])
 
     addScroller('random')
 

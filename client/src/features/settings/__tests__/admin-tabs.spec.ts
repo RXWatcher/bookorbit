@@ -3,12 +3,12 @@ import { ADMIN_TABS, ADMIN_TAB_INFO, normalizeAdminTab } from '../lib/admin-tabs
 
 describe('admin-tabs', () => {
   describe('ADMIN_TABS', () => {
-    it('contains exactly users, account activity, oidc, magic-links, and server-fonts', () => {
-      expect(ADMIN_TABS).toEqual(['users', 'account-activity', 'oidc', 'magic-links', 'server-fonts'])
+    it('contains exactly users, account activity, oidc, magic-links, server-fonts, and local-scan', () => {
+      expect(ADMIN_TABS).toEqual(['users', 'account-activity', 'oidc', 'magic-links', 'server-fonts', 'local-scan'])
     })
 
-    it('has length 5', () => {
-      expect(ADMIN_TABS.length).toBe(5)
+    it('has length 6', () => {
+      expect(ADMIN_TABS.length).toBe(6)
     })
 
     it('places server-fonts immediately after magic-links', () => {

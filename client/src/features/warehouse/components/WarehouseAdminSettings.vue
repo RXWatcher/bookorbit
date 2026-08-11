@@ -5,6 +5,7 @@ import type { WarehouseCacheStatus, WarehouseCatalogSyncState, WarehouseCatalogS
 import IconPicker from '@/components/IconPicker.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { SECRET_INPUT_ATTRS } from '@/lib/secret-input'
 import { useLibraries } from '@/features/library/composables/useLibraries'
 import {
   clearWarehouseCache,
@@ -433,7 +434,14 @@ onUnmounted(stopManualSyncProgressPolling)
 
         <div class="space-y-2">
           <label for="catalog-source-api-key" class="text-sm font-medium text-foreground">API key</label>
-          <Input id="catalog-source-api-key" v-model="form.apiKey" type="password" autocomplete="off" :placeholder="apiKeyPlaceholder" />
+          <Input
+            id="catalog-source-api-key"
+            v-model="form.apiKey"
+            v-bind="SECRET_INPUT_ATTRS"
+            type="text"
+            class="input-secret"
+            :placeholder="apiKeyPlaceholder"
+          />
           <p v-if="form.apiKeyConfigured" class="text-xs text-muted-foreground">A stored key is already configured.</p>
         </div>
 

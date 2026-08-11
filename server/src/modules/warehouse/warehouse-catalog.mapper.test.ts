@@ -183,6 +183,8 @@ describe('mapWarehouseEbookCatalogItemRow', () => {
       publisher: null,
       identifiers: {},
       format: null,
+      fileSizeBytes: null,
+      publishedYear: null,
       hasCover: false,
       upstreamCreatedAt: null,
       upstreamUpdatedAt: null,

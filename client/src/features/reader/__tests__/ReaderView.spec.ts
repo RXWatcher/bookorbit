@@ -39,6 +39,10 @@ vi.mock('vue-sonner', () => ({
 }))
 
 vi.mock('../pdf-v4/PdfV4ReaderView.vue', () => ({
+  // defineAsyncComponent only unwraps `default` when the resolved module is
+  // marked as ESM; without this Vue treats the namespace object as the
+  // component and probes it for internal flags that the mock cannot provide.
+  __esModule: true,
   default: defineComponent({
     name: 'PdfV4ReaderView',
     setup(_, { attrs }) {
