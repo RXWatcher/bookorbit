@@ -83,7 +83,7 @@
       "language": {
         "title": "Language",
         "description": "Choose the language used across the interface.",
-        "label": "Interface language",
+        "label": "Language",
         "loadError": "Failed to load the selected language",
         "saveError": "Failed to save language preference"
       },
@@ -464,7 +464,8 @@
         "book-covers": "Book Covers",
         "icons": "Icons",
         "layout": "Layout",
-        "behavior": "Behavior"
+        "behavior": "Behavior",
+        "language": "Language"
       }
     },
     "account": {
@@ -4755,6 +4756,13 @@
       "dark": "Dark",
       "system": "System"
     },
+    "languagePicker": {
+      "searchPlaceholder": "Search languages",
+      "suggested": "Suggested",
+      "all": "All languages",
+      "results": "Results",
+      "empty": "No languages match \"{query}\""
+    },
     "userAvatar": {
       "profilePicture": "Profile picture",
       "profilePictureOf": "{name} profile picture"
@@ -7107,7 +7115,8 @@
       "book-covers": "Book Covers",
       "icons": "Icons",
       "layout": "Display Layout",
-      "behavior": "Library Behavior"
+      "behavior": "Library Behavior",
+      "language": "Language"
     },
     "reader": {
       "general": "Reader Settings",

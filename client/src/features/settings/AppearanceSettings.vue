@@ -5,6 +5,7 @@ import { ACCENT_PASTEL, ACCENT_VIVID, BACKGROUND_OPTIONS, useThemeStore } from '
 import AppearanceBehaviorSettings from './AppearanceBehaviorSettings.vue'
 import AppearanceBookCoverSettings from './AppearanceBookCoverSettings.vue'
 import AppearanceIconsSettings from './AppearanceIconsSettings.vue'
+import AppearanceLanguageSettings from './AppearanceLanguageSettings.vue'
 import AppearanceLayoutSettings from './AppearanceLayoutSettings.vue'
 import AppearanceThemeSettings from './AppearanceThemeSettings.vue'
 import SettingsPageHeader from './SettingsPageHeader.vue'
@@ -59,4 +60,5 @@ const themeLabel = computed(() => t(`settings.appearance.themeMode.${themeStore.
   <AppearanceIconsSettings v-else-if="activeTab === 'icons'" />
   <AppearanceLayoutSettings v-else-if="activeTab === 'layout'" />
   <AppearanceBehaviorSettings v-else-if="activeTab === 'behavior'" />
+  <AppearanceLanguageSettings v-else-if="activeTab === 'language'" />
 </template>
