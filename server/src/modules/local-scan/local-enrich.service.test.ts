@@ -2,9 +2,11 @@ import * as fs from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+// Typed against the real module so the mock cannot invent a field name. A hand written
+// shape here is what let `entry.fileName` reach production when the field is `name`.
 const cbzMocks = vi.hoisted(() => ({
-  readCbzZipIndex: vi.fn<(path: string) => Promise<{ entries: Array<{ fileName: string }> } | null>>(),
-  extractCbzZipEntry: vi.fn<() => Promise<Buffer | null>>(),
+  readCbzZipIndex: vi.fn<typeof import('../../common/cbz-zip-reader').readCbzZipIndex>(),
+  extractCbzZipEntry: vi.fn<typeof import('../../common/cbz-zip-reader').extractCbzZipEntry>(),
 }));
 vi.mock('../../common/cbz-zip-reader', () => cbzMocks);
 
@@ -124,7 +126,10 @@ describe('LocalEnrichService', () => {
     });
 
     it('prefers an embedded ComicInfo.xml', async () => {
-      cbzMocks.readCbzZipIndex.mockResolvedValue({ entries: [{ fileName: 'ComicInfo.xml' }] });
+      cbzMocks.readCbzZipIndex.mockResolvedValue({
+        entries: [{ name: 'ComicInfo.xml', compression: 0, compressedSize: 1, uncompressedSize: 1, localHeaderOffset: 0, dataStart: 0 }],
+        comment: null,
+      });
       cbzMocks.extractCbzZipEntry.mockResolvedValue(Buffer.from(COMIC_XML, 'utf8'));
       const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
 

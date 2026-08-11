@@ -2,7 +2,7 @@ import { readdir, readFile } from 'fs/promises';
 import { basename, dirname, join } from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 
-import { extractCbzZipEntry, readCbzZipIndex } from '../../common/cbz-zip-reader';
+import { extractCbzZipEntry, readCbzZipIndex, type CbzZipIndex } from '../../common/cbz-zip-reader';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { parseComicInfo } from './comic-info.parser';
 import { LocalScanRepository, type LocalEnrichmentValues } from './local-scan.repository';
@@ -73,21 +73,20 @@ export class LocalEnrichService {
 
   /** Roughly 95% of these archives carry a scraped ComicInfo.xml, which beats any filename. */
   private async comicInfoFromArchive(localPath: string): Promise<LocalEnrichmentValues | null> {
-    let index;
-    try {
-      index = await readCbzZipIndex(localPath);
-    } catch {
-      return null;
-    }
-    if (!index) return null;
-
-    const entry = index.entries.find((candidate) => basename(candidate.fileName).toLowerCase() === 'comicinfo.xml');
-    if (!entry) return null;
-
+    // Annotated rather than inferred: an untyped `let` here becomes an evolving any and
+    // silently disables checking of the entry shape below.
+    let index: CbzZipIndex | null;
     let raw: Buffer | null;
     try {
+      index = await readCbzZipIndex(localPath);
+      if (!index) return null;
+
+      const entry = index.entries.find((candidate) => basename(candidate.name).toLowerCase() === 'comicinfo.xml');
+      if (!entry) return null;
+
       raw = await extractCbzZipEntry(localPath, entry);
     } catch {
+      // One unreadable archive must not abort a 61k row run.
       return null;
     }
     if (!raw) return null;
