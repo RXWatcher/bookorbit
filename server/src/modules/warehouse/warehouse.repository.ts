@@ -314,6 +314,8 @@ type UserCatalogItemsQuery = {
   includeAllCatalogItems?: boolean;
   mediaType?: WarehouseMediaType;
   mediaTypes?: WarehouseMediaType[];
+  /** Restricts to exactly these remote ids, e.g. loading rows for a set of search result ids. */
+  remoteIds?: string[];
   q?: string;
   sort?: SortSpec[];
   page?: number;
@@ -1960,7 +1962,7 @@ export class WarehouseRepository {
     const includeAllCatalogItems = query.includeAllCatalogItems === true;
     const mediaTypes = query.mediaTypes?.length ? query.mediaTypes : undefined;
 
-    if (smartScopeWhere === null || query.mediaTypes?.length === 0) {
+    if (smartScopeWhere === null || query.mediaTypes?.length === 0 || query.remoteIds?.length === 0) {
       return { rows: [], total: 0, page, limit };
     }
 
@@ -1970,6 +1972,7 @@ export class WarehouseRepository {
       includeAllCatalogItems ? undefined : eq(schema.warehouseUserItems.userId, userId),
       query.mediaType ? eq(schema.warehouseCatalogItems.mediaType, query.mediaType) : undefined,
       mediaTypes ? inArray(schema.warehouseCatalogItems.mediaType, mediaTypes) : undefined,
+      query.remoteIds ? inArray(schema.warehouseCatalogItems.remoteId, query.remoteIds) : undefined,
       smartScopeWhere,
       q ? buildCatalogSearchWhere(q) : undefined,
       ...contentFilterClauses,

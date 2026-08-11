@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 
 import { AchievementModule } from '../achievement/achievement.module';
 import { AppSettingsModule } from '../app-settings/app-settings.module';
+import { BookSearchModule } from '../book-search/book-search.module';
 import { EmbeddingModule } from '../embedding/embedding.module';
 import { FileWriteModule } from '../file-write/file-write.module';
 import { LibraryModule } from '../library/library.module';
@@ -11,6 +12,7 @@ import { MetadataModule } from '../metadata/metadata.module';
 import { MetadataFetchModule } from '../metadata-fetch/metadata-fetch.module';
 import { MetadataScoreModule } from '../metadata-score/metadata-score.module';
 import { NarratorModule } from '../narrator/narrator.module';
+import { UserModule } from '../user/user.module';
 import { UserBookNoteModule } from '../user-book-note/user-book-note.module';
 import { UserBookStatusModule } from '../user-book-status/user-book-status.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
@@ -37,8 +39,10 @@ import { ReadingAttemptController } from './reading-attempt.controller';
     NarratorModule,
     UserBookNoteModule,
     UserBookStatusModule,
+    UserModule,
     AchievementModule,
     WarehouseModule,
+    BookSearchModule,
   ],
   controllers: [BookController, ReadingAttemptController],
   providers: [BookService, BookRepository, BookReadService, BookSortBuilder, BookQueryBuilder, BookAuthorSortKeyBackfillService],

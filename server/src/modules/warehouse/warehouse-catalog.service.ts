@@ -834,6 +834,26 @@ export class WarehouseCatalogService {
     };
   }
 
+  /** Loads a specific set of catalogue rows by remote id, e.g. resolving search result ids
+   *  into cards. Order is not guaranteed; callers that need a specific order must restore it
+   *  themselves from the returned items' catalogSource. */
+  async getCatalogItemsByRemoteIds(user: RequestUser, mediaType: WarehouseMediaType, remoteIds: string[]): Promise<BookCard[]> {
+    if (remoteIds.length === 0 || !(await this.isCatalogEnabled())) {
+      return [];
+    }
+
+    const page = await this.repository.queryUserCatalogItems(user.id, {
+      includeAllCatalogItems: true,
+      mediaType,
+      remoteIds,
+      page: 0,
+      limit: remoteIds.length,
+      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
+    });
+
+    return page.rows.map(mapWarehouseCatalogItemToBookCard);
+  }
+
   async queryLibraryJumpBuckets(user: RequestUser, mediaType: WarehouseMediaType, query: BookQuery): Promise<JumpBucketsResponse> {
     if (!jumpBucketKindForSort(query.sort)) {
       throw new BadRequestException('jump buckets are not available for this sort');

@@ -47,6 +47,7 @@ import {
 } from '@bookorbit/types';
 import type {
   AudiobookChapter,
+  BookCard,
   BookCommunityRating,
   BookKoboState,
   BookMetadataRefreshPreviewFields,
@@ -96,6 +97,9 @@ import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service'
 import { WarehouseRepository } from '../warehouse/warehouse.repository';
 import { ComicMetadataRepository } from '../metadata/comic-metadata.repository';
 import { CustomMetadataService } from '../custom-metadata/custom-metadata.service';
+import { BookSearchService } from '../book-search/book-search.service';
+import { catalogDocumentId, nativeDocumentId } from '../book-search/book-search-document.mapper';
+import { ContentFilterRepository } from '../user/content-filter.repository';
 import { BookDetailDto } from './dto/book-detail.dto';
 import type { BulkMetadataField } from './dto/bulk-set-metadata.dto';
 import type { BulkEditFieldsDto } from './dto/bulk-edit-metadata.dto';
@@ -351,6 +355,28 @@ function sortLibraryBookItems(items: LibraryBookItem[], sort: BookQuery['sort'],
     .map(({ item }) => item);
 }
 
+type ParsedSearchDocumentId = { source: 'native'; bookId: number } | { source: 'catalog'; mediaType: WarehouseMediaType; remoteId: string };
+
+/** Reverses catalogDocumentId/nativeDocumentId. A catalogue remote id may itself contain
+ *  colons, so only the first two segments are treated as delimiters. */
+function parseSearchDocumentId(id: string): ParsedSearchDocumentId | null {
+  if (id.startsWith('native:')) {
+    const bookId = Number(id.slice('native:'.length));
+    return Number.isFinite(bookId) ? { source: 'native', bookId } : null;
+  }
+
+  if (id.startsWith('catalog:')) {
+    const rest = id.slice('catalog:'.length);
+    const separatorIndex = rest.indexOf(':');
+    if (separatorIndex === -1) return null;
+    const mediaType = rest.slice(0, separatorIndex) as WarehouseMediaType;
+    const remoteId = rest.slice(separatorIndex + 1);
+    return remoteId ? { source: 'catalog', mediaType, remoteId } : null;
+  }
+
+  return null;
+}
+
 type MetadataSaveResult = {
   book: BookDetailDto;
   write: WriteResult | null;
@@ -405,6 +431,8 @@ export class BookService {
     @Optional() private readonly warehouseCatalog?: WarehouseCatalogService,
     @Optional() private readonly seriesMemberships?: SeriesMembershipService,
     @Optional() private readonly seriesExpectedCount?: SeriesExpectedCountService,
+    @Optional() private readonly bookSearchService?: BookSearchService,
+    @Optional() private readonly contentFilterRepository?: ContentFilterRepository,
   ) {
     this.appDataPath = this.config.get<string>('storage.appDataPath')!;
   }
@@ -1327,6 +1355,13 @@ export class BookService {
     const hasEbookLibrary = libs.some((l) => l.id === CLOUD_EBOOK_LIBRARY_ID);
     const hasAudioLibrary = libs.some((l) => l.id === CLOUD_AUDIO_LIBRARY_ID);
     const hasComicLibrary = libs.some((l) => l.id === CLOUD_COMIC_LIBRARY_ID);
+
+    const trimmedSearchTerm = query.q?.trim();
+    if (trimmedSearchTerm) {
+      const providerPage = await this.globalQueryViaSearchProvider(user, query, trimmedSearchTerm, accessibleLibraryIds);
+      if (providerPage) return providerPage;
+    }
+
     const { page, size } = query.pagination;
     const windowSize = (page + 1) * size;
     const effectiveSort: BookQuery['sort'] = query.sort.length > 0 ? query.sort : [{ field: 'title', dir: 'asc' }];
@@ -1362,6 +1397,94 @@ export class BookService {
       page,
       size,
     };
+  }
+
+  /**
+   * Routes a global search through the configured search provider. Returns null when the
+   * provider is unavailable or fell back to SQL, so the caller runs the merge path instead
+   * (the SQL provider's own ranking already comes back through that path's ordering rules).
+   *
+   * Meilisearch returns a ranked page of document ids rather than rows, so the result is
+   * returned in exactly that order. Re-sorting it, even to apply the requested sort field,
+   * would throw away the ranking this method exists to preserve.
+   */
+  private async globalQueryViaSearchProvider(
+    user: RequestUser,
+    query: BookQuery,
+    q: string,
+    accessibleLibraryIds: number[],
+  ): Promise<LibraryBooksPage | null> {
+    if (!this.bookSearchService) return null;
+
+    const contentFilters = this.isSuperuser(user) ? undefined : await this.contentFilterRepository?.findByUserIdWithNames(user.id);
+    const result = await this.bookSearchService.search({
+      q,
+      page: query.pagination.page,
+      size: query.pagination.size,
+      userId: user.id,
+      accessibleLibraryIds,
+      contentFilters,
+    });
+
+    if (result.provider !== 'meilisearch') return null;
+
+    return {
+      items: await this.loadSearchResultItemsInOrder(user, result.ids),
+      total: result.total,
+      page: query.pagination.page,
+      size: query.pagination.size,
+    };
+  }
+
+  /** Loads rows for a page of search result ids and restores the provider's order. A plain
+   *  `IN` lookup returns rows in arbitrary order, so the caller cannot rely on it for ranking. */
+  private async loadSearchResultItemsInOrder(user: RequestUser, ids: string[]): Promise<LibraryBookItem[]> {
+    const nativeBookIds: number[] = [];
+    const catalogRemoteIdsByMediaType = new Map<WarehouseMediaType, string[]>();
+
+    for (const id of ids) {
+      const parsed = parseSearchDocumentId(id);
+      if (!parsed) continue;
+      if (parsed.source === 'native') {
+        nativeBookIds.push(parsed.bookId);
+      } else {
+        const remoteIds = catalogRemoteIdsByMediaType.get(parsed.mediaType) ?? [];
+        remoteIds.push(parsed.remoteId);
+        catalogRemoteIdsByMediaType.set(parsed.mediaType, remoteIds);
+      }
+    }
+
+    const [nativeItems, catalogItemGroups] = await Promise.all([
+      this.loadNativeItemsByIds(user.id, nativeBookIds),
+      Promise.all(
+        Array.from(catalogRemoteIdsByMediaType.entries()).map(([mediaType, remoteIds]) =>
+          this.warehouseCatalog ? this.warehouseCatalog.getCatalogItemsByRemoteIds(user, mediaType, remoteIds) : Promise.resolve([]),
+        ),
+      ),
+    ]);
+
+    const itemsById = new Map<string, LibraryBookItem>();
+    for (const item of nativeItems) {
+      itemsById.set(nativeDocumentId(item.id), item);
+    }
+    for (const group of catalogItemGroups) {
+      for (const item of group) {
+        if (!item.catalogSource) continue;
+        itemsById.set(catalogDocumentId(item.catalogSource.mediaType, item.catalogSource.remoteId), item);
+      }
+    }
+
+    return ids.map((id) => itemsById.get(id)).filter((item): item is LibraryBookItem => item !== undefined);
+  }
+
+  private async loadNativeItemsByIds(userId: number, bookIds: number[]): Promise<BookCard[]> {
+    if (bookIds.length === 0) return [];
+
+    const page = await this.executeBooksQuery(userId, inArray(books.id, bookIds), {
+      sort: [],
+      pagination: { page: 0, size: bookIds.length },
+    });
+    return page.items;
   }
 
   private async querySourceBackedGlobalWindow(
