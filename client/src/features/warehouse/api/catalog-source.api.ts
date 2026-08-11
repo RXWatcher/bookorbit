@@ -545,6 +545,14 @@ export function catalogSourceEbookCoverUrl(remoteId: string, size: 'thumbnail' |
   return `${LIBRARY_EBOOKS_PATH}/${encodeURIComponent(remoteId)}/cover/${encodeURIComponent(size)}`
 }
 
+/**
+ * The cover is page one downscaled and cached server side. Pointing a grid at the raw
+ * page endpoint pulls the full print resolution image, which is megabytes per tile.
+ */
+export function catalogSourceComicCoverUrl(remoteId: string, size: 'thumbnail' | 'original' = 'thumbnail'): string {
+  return `${LIBRARY_COMICS_PATH}/${encodeURIComponent(remoteId)}/cover?size=${size}`
+}
+
 export function catalogSourceComicPageImageUrl(remoteId: string, pageIndex = 0): string {
   return `${LIBRARY_COMICS_PATH}/${encodeURIComponent(remoteId)}/pages/${encodeURIComponent(pageIndex)}`
 }

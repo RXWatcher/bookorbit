@@ -12,7 +12,7 @@ import { useBookStatus } from '@/features/book/composables/useBookStatus'
 import { useNeglectedGemsWidget } from '../../composables/useNeglectedGemsWidget'
 import {
   catalogSourceAudiobookCoverUrl,
-  catalogSourceComicPageImageUrl,
+  catalogSourceComicCoverUrl,
   catalogSourceEbookCoverUrl,
   patchCatalogSourceUserState,
 } from '@/features/warehouse/api/catalog-source.api'
@@ -49,7 +49,7 @@ function gemCoverUrl(gem: NeglectedGem): string | null {
   if (!gem.hasCover) return null
   if (!isCatalogGem(gem)) return coverUrl(gem.bookId)
   if (gem.mediaType === 'audiobook') return catalogSourceAudiobookCoverUrl(gem.remoteId)
-  if (gem.mediaType === 'comic') return catalogSourceComicPageImageUrl(gem.remoteId)
+  if (gem.mediaType === 'comic') return catalogSourceComicCoverUrl(gem.remoteId)
   return catalogSourceEbookCoverUrl(gem.remoteId, 'medium')
 }
 

@@ -2,8 +2,8 @@ import type { BookCard, BookFileRef, WarehouseMediaType } from '@bookorbit/types
 import {
   catalogSourceAudiobookCoverUrl,
   catalogSourceAudiobookDownloadUrl,
+  catalogSourceComicCoverUrl,
   catalogSourceComicDownloadUrl,
-  catalogSourceComicPageImageUrl,
   catalogSourceEbookCoverUrl,
   catalogSourceEbookDownloadUrl,
 } from '@/features/warehouse/api/catalog-source.api'
@@ -53,7 +53,7 @@ export function sourceBackedBookCoverUrl(book: BookCard, type: 'thumbnail' | 'co
   const source = getBookCatalogSource(book)
   if (!source) return null
 
-  if (source.mediaType === 'comic') return catalogSourceComicPageImageUrl(source.remoteId)
+  if (source.mediaType === 'comic') return catalogSourceComicCoverUrl(source.remoteId, type === 'thumbnail' ? 'thumbnail' : 'original')
   if (source.mediaType === 'audiobook') return catalogSourceAudiobookCoverUrl(source.remoteId)
 
   return catalogSourceEbookCoverUrl(source.remoteId, type === 'thumbnail' ? 'thumbnail' : 'original')

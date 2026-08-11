@@ -37,6 +37,14 @@ export class WarehouseCatalogCoverCacheService {
     return this.writeCover('ebook', sourceKey, remoteId, size, response);
   }
 
+  async readComicCover(sourceKey: string, remoteId: string, size: string): Promise<WarehouseBinaryResponse | null> {
+    return this.readCover('comic', sourceKey, remoteId, size);
+  }
+
+  async writeComicCover(sourceKey: string, remoteId: string, size: string, response: WarehouseBinaryResponse): Promise<WarehouseBinaryResponse> {
+    return this.writeCover('comic', sourceKey, remoteId, size, response);
+  }
+
   async readAudiobookCover(sourceKey: string, remoteId: string): Promise<WarehouseBinaryResponse | null> {
     return this.readCover('audiobook', sourceKey, remoteId, 'cover');
   }

@@ -30,7 +30,7 @@ type RawComicCatalogQuery = Partial<Record<keyof WarehouseComicCatalogQuery, Cat
 type RawComicSeriesQuery = Partial<Record<keyof WarehouseComicSeriesQuery, CatalogQueryValue>>;
 type RawAudiobookCatalogQuery = Partial<Record<keyof WarehouseAudiobookCatalogQuery, CatalogQueryValue>>;
 type RawComicRequestQuery = Partial<Record<keyof WarehouseRequestListQuery, CatalogQueryValue>>;
-type BinaryContentKind = 'ebook-cover' | 'audiobook-cover' | 'comic-page' | 'audio' | 'ebook' | 'comic';
+type BinaryContentKind = 'ebook-cover' | 'audiobook-cover' | 'comic-cover' | 'comic-page' | 'audio' | 'ebook' | 'comic';
 type PublicComicCatalogItem = Omit<WarehouseComicCatalogItem, 'id' | 'source'> & { id: string };
 type PublicComicCatalogPage = Omit<WarehouseComicCatalogPage, 'items'> & { items: PublicComicCatalogItem[] };
 
@@ -323,6 +323,17 @@ export class WarehouseLibraryMediaController {
   @Get('comics/items/:remoteId/pages')
   listComicPages(@CurrentUser() user: RequestUser, @Param('remoteId') remoteId: string) {
     return this.catalog.listComicPages(user, remoteId);
+  }
+
+  @Get('comics/items/:remoteId/cover')
+  async getComicCover(
+    @CurrentUser() user: RequestUser,
+    @Param('remoteId') remoteId: string,
+    @Res() reply: FastifyReply,
+    @Query('size') size?: string,
+  ) {
+    const binary = await this.catalog.getComicCover(user, remoteId, size === 'original' ? 'original' : 'thumbnail');
+    return sendBinaryResponse(reply, binary, 'comic-cover');
   }
 
   @Get('comics/items/:remoteId/pages/:pageIndex')
@@ -663,7 +674,10 @@ function safeContentType(contentType: string, expectedContent: BinaryContentKind
   const normalized = contentType.trim() || DEFAULT_BINARY_CONTENT_TYPE;
   const mediaType = normalized.split(';', 1)[0]?.trim().toLowerCase() ?? '';
 
-  if ((expectedContent === 'ebook-cover' || expectedContent === 'audiobook-cover') && mediaType.startsWith('image/')) {
+  if (
+    (expectedContent === 'ebook-cover' || expectedContent === 'audiobook-cover' || expectedContent === 'comic-cover') &&
+    mediaType.startsWith('image/')
+  ) {
     return mediaType;
   }
 

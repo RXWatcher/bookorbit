@@ -60,6 +60,7 @@ import { jumpBucketKindForSort } from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
 import type { WarehouseCatalogItemRow } from '../../db/schema';
 import { mapWarehouseAudiobookCatalogItemRow, mapWarehouseAudiobookDetail, mapWarehouseEbookCatalogItemRow } from './warehouse-catalog.mapper';
+import { toComicCoverThumbnail } from './comic-cover-thumbnail';
 import { WarehouseClientService, type WarehouseBinaryResponse } from './warehouse-client.service';
 import { WarehouseCatalogCoverCacheService } from './warehouse-catalog-cover-cache.service';
 import { LocalContentService } from '../local-scan/local-content.service';
@@ -1171,6 +1172,28 @@ export class WarehouseCatalogService {
     } catch {
       throw new BadGatewayException(COMIC_MEDIA_UNAVAILABLE_MESSAGE);
     }
+  }
+
+  /**
+   * The warehouse has no comic cover endpoint, only page images at full print resolution,
+   * so the cover is page one downscaled here and cached. Without this a grid of posters
+   * pulls megabytes per tile.
+   */
+  async getComicCover(user: RequestUser, remoteId: string, size: string): Promise<WarehouseBinaryResponse> {
+    const request = await this.comicBinaryRequest(user, remoteId);
+
+    const cached = await this.coverCache.readComicCover(request.sourceKey, remoteId, size);
+    if (cached) return cached;
+
+    let page: WarehouseBinaryResponse;
+    try {
+      page = await this.client.getComicPageImage({ ...comicClientRequest(request), pageIndex: 0 });
+    } catch {
+      throw new BadGatewayException(COMIC_MEDIA_UNAVAILABLE_MESSAGE);
+    }
+
+    const rendered = size === 'original' ? page : await toComicCoverThumbnail(page);
+    return this.coverCache.writeComicCover(request.sourceKey, remoteId, size, rendered);
   }
 
   async getEbookCover(user: RequestUser, remoteId: string, size: string): Promise<WarehouseBinaryResponse> {

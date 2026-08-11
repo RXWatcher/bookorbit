@@ -8,11 +8,7 @@ import { useCoverVersions } from '@/features/book/composables/useCoverVersions'
 import BookCoverArtwork from '@/features/book/components/BookCoverArtwork.vue'
 import BookCoverSurface from '@/features/book/components/BookCoverSurface.vue'
 import { useHighlightOfTheDayWidget } from '../../composables/useHighlightOfTheDayWidget'
-import {
-  catalogSourceAudiobookCoverUrl,
-  catalogSourceComicPageImageUrl,
-  catalogSourceEbookCoverUrl,
-} from '@/features/warehouse/api/catalog-source.api'
+import { catalogSourceAudiobookCoverUrl, catalogSourceComicCoverUrl, catalogSourceEbookCoverUrl } from '@/features/warehouse/api/catalog-source.api'
 import { catalogLibraryItemRoute } from '@/features/warehouse/lib/catalog-item-route'
 
 const { data, loading, error } = useHighlightOfTheDayWidget()
@@ -37,7 +33,7 @@ function highlightCoverUrl(item: HighlightOfTheDayWidgetData): string | null {
   if (!item.hasCover) return null
   if (!isCatalogHighlight(item)) return coverUrl(item.bookId)
   if (item.mediaType === 'audiobook') return catalogSourceAudiobookCoverUrl(item.remoteId)
-  if (item.mediaType === 'comic') return catalogSourceComicPageImageUrl(item.remoteId)
+  if (item.mediaType === 'comic') return catalogSourceComicCoverUrl(item.remoteId)
   return catalogSourceEbookCoverUrl(item.remoteId, 'medium')
 }
 

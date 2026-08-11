@@ -38,7 +38,7 @@ vi.mock('@/features/book/composables/useCoverVersions', () => ({
 
 vi.mock('@/features/warehouse/api/catalog-source.api', () => ({
   catalogSourceAudiobookCoverUrl: (remoteId: string) => `/audio-covers/${remoteId}`,
-  catalogSourceComicPageImageUrl: (remoteId: string) => `/comic-pages/${remoteId}/0`,
+  catalogSourceComicCoverUrl: (remoteId: string) => `/comic-covers/${remoteId}`,
   catalogSourceEbookCoverUrl: (remoteId: string, size: string) => `/ebook-covers/${remoteId}/${size}`,
   patchCatalogSourceUserState: mocks.patchCatalogSourceUserState,
 }))
@@ -186,7 +186,7 @@ describe('NeglectedGemsWidget', () => {
 
     const wrapper = mount(NeglectedGemsWidget)
 
-    expect(wrapper.get('img').attributes('src')).toBe('/comic-pages/comic-901/0')
+    expect(wrapper.get('img').attributes('src')).toBe('/comic-covers/comic-901')
 
     await wrapper.get('[data-testid="neglected-gem-cover"]').trigger('click')
     expect(mocks.push).toHaveBeenCalledWith({
