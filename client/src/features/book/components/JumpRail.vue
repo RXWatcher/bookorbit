@@ -97,8 +97,14 @@ function slotAtClientY(clientY: number): RailSlot | null {
   if (!el || list.length === 0) return null
   const rect = el.getBoundingClientRect()
   if (rect.height <= 0) return null
-  const ratio = Math.min(0.999, Math.max(0, (clientY - rect.top) / rect.height))
-  return list[Math.floor(ratio * list.length)] ?? null
+  // The indicator sits at RAIL_PAD_PX + index * SLOT_PX, so the hit test has to
+  // read the cursor with that same geometry. Mapping it proportionally across
+  // the measured height instead only agrees when the rail happens to be
+  // exactly pad*2 + slots*SLOT_PX tall, and drifts further the lower the
+  // cursor goes, which left the highlight sitting letters away near the end of
+  // the alphabet.
+  const index = Math.floor((clientY - rect.top - RAIL_PAD_PX) / SLOT_PX)
+  return list[Math.min(list.length - 1, Math.max(0, index))] ?? null
 }
 
 function nearestAvailable(slot: RailSlot | null): RailSlot | null {
@@ -138,8 +144,12 @@ function handlePointerDown(event: PointerEvent) {
 
 function handlePointerMove(event: PointerEvent) {
   if (event.pointerType === 'mouse') {
-    const slot = slotAtClientY(event.clientY)
-    hoveredIndex.value = slot?.bucket ? slots.value.indexOf(slot) : null
+    // The rail draws every letter, so the cursor spends much of its travel over
+    // letters that hold no books. Snapping to the nearest letter that does,
+    // the way dragging already does, keeps the indicator under the cursor
+    // instead of blinking out whenever it crosses an empty one.
+    const slot = nearestAvailable(slotAtClientY(event.clientY))
+    hoveredIndex.value = slot ? slots.value.indexOf(slot) : null
   }
   if (scrubbing.value) scrubTo(event.clientY, event.pointerType)
 }

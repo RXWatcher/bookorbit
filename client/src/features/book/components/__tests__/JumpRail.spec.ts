@@ -332,20 +332,42 @@ describe('JumpRail', () => {
     expect(wrapper.emitted('jump')).toEqual([[LETTER_BUCKETS[0]], [LETTER_BUCKETS[2]]])
   })
 
-  it('tracks mouse hover only for available slots and clears it on leave', async () => {
+  it('keeps the hover indicator on the nearest available slot and clears it on leave', async () => {
+    // The rail draws every letter, so the cursor spends much of its travel over
+    // letters holding no books. Clearing the indicator there made it blink out
+    // rather than follow the cursor; it now snaps the way dragging does.
     const wrapper = mountRail()
     preparePointerRail(wrapper)
 
     await firePointer(wrapper, 'pointerenter', { pointerType: 'mouse' })
+    // Slots start after the rail's 8px padding and are 20px tall, so 25 is the
+    // first slot, '#'.
     await firePointer(wrapper, 'pointermove', { clientY: 25, pointerType: 'mouse' })
 
-    expect(wrapper.get('button[data-key="A"]').classes()).toContain('scale-[1.35]')
+    expect(wrapper.get('button[data-key="#"]').classes()).toContain('scale-[1.35]')
 
+    // 82 lands on 'C', which holds no books, so the indicator snaps back to the
+    // nearest letter that does rather than blinking out.
     await firePointer(wrapper, 'pointermove', { clientY: 82, pointerType: 'mouse' })
-    expect(wrapper.get('button[data-key="A"]').classes()).not.toContain('scale-[1.35]')
+    expect(wrapper.get('button[data-key="A"]').classes()).toContain('scale-[1.35]')
 
     await firePointer(wrapper, 'pointerleave', { pointerType: 'mouse' })
     expect(wrapper.get('button[data-key="A"]').classes()).not.toContain('scale-[1.35]')
+  })
+
+  it('reads the cursor with the same geometry the indicator is drawn with', async () => {
+    // The hit test used to map the cursor proportionally across the measured
+    // height, which only matches when the rail is exactly pad*2 + slots*20
+    // tall. The error grew towards the bottom, so letters late in the alphabet
+    // highlighted the wrong slot.
+    const wrapper = mountRail()
+    preparePointerRail(wrapper)
+    await firePointer(wrapper, 'pointerenter', { pointerType: 'mouse' })
+
+    // Centre of slot 13 ('M', the last bucket) is 8 + 13 * 20 + 10.
+    await firePointer(wrapper, 'pointermove', { clientY: 8 + 13 * 20 + 10, pointerType: 'mouse' })
+
+    expect(wrapper.get('button[data-key="M"]').classes()).toContain('scale-[1.35]')
   })
 
   it('ignores pointer input when the rail has no measurable height', async () => {
