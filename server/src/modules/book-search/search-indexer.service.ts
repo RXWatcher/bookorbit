@@ -10,6 +10,7 @@ import { SearchIndexRepository } from './search-index.repository';
 
 const DRAIN_BATCH_SIZE = 500;
 const REBUILD_BATCH_SIZE = 1000;
+const REBUILD_INDEX_PREFIX = 'bookorbit_books_rebuild_';
 
 interface OutboxEvent {
   id: number;
@@ -71,8 +72,19 @@ export class SearchIndexerService {
       return { applied: 0, failed: 0 };
     }
 
-    const config = await this.settings.get();
-    const client = await this.clientFor();
+    let config: Awaited<ReturnType<BookSearchSettingsService['get']>>;
+    let client: MeilisearchClient;
+    try {
+      config = await this.settings.get();
+      client = await this.clientFor();
+    } catch (error) {
+      const errorClass = error instanceof Error ? error.name : 'UnknownError';
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[search_index.drain] [fail] durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${sanitizeLogValue(message)}" - failed to prepare meilisearch client, outbox left untouched`,
+      );
+      throw error;
+    }
 
     const upserts = events.filter((event) => event.operation === 'upsert');
     const deletes = events.filter((event) => event.operation === 'delete');
@@ -124,15 +136,37 @@ export class SearchIndexerService {
     return { applied, failed };
   }
 
+  /** Best effort only: the cleanup outcome must never change which error the caller sees,
+   *  because the original failure is what explains why the rebuild did not complete. */
+  private async cleanupFailedRebuild(client: MeilisearchClient, index: string): Promise<void> {
+    if (!index.startsWith(REBUILD_INDEX_PREFIX)) return;
+
+    try {
+      const config = await this.settings.get();
+      if (index === config.activeIndex) return;
+
+      await client.deleteIndex(index);
+    } catch (cleanupError) {
+      const errorClass = cleanupError instanceof Error ? cleanupError.name : 'UnknownError';
+      const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      this.logger.error(
+        `[search_index.rebuild_cleanup] [fail] index="${sanitizeLogValue(index)}" errorClass=${errorClass} error="${sanitizeLogValue(message)}" - failed to delete orphaned rebuild index`,
+      );
+    }
+  }
+
   async rebuild(): Promise<{ indexed: number; index: string }> {
     const startedAt = Date.now();
-    const index = `bookorbit_books_rebuild_${Date.now()}`;
+    const index = `${REBUILD_INDEX_PREFIX}${Date.now()}`;
+    let client: MeilisearchClient | undefined;
+    let created = false;
 
     this.logger.log(`[search_index.rebuild] [start] index="${sanitizeLogValue(index)}" - rebuild started`);
 
     try {
-      const client = await this.clientFor();
+      client = await this.clientFor();
       await client.createIndex(index);
+      created = true;
       await client.applySettings(index);
 
       let indexed = 0;
@@ -160,6 +194,11 @@ export class SearchIndexerService {
       this.logger.error(
         `[search_index.rebuild] [fail] index="${sanitizeLogValue(index)}" durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${sanitizeLogValue(message)}" - rebuild failed, previous index remains active`,
       );
+
+      if (created && client) {
+        await this.cleanupFailedRebuild(client, index);
+      }
+
       throw error;
     }
   }

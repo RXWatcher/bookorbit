@@ -79,6 +79,10 @@ export class MeilisearchClient {
     });
   }
 
+  async deleteIndex(index: string): Promise<void> {
+    await this.request(`/indexes/${index}`, { method: 'DELETE' });
+  }
+
   async addDocuments(index: string, documents: BookSearchDocument[]): Promise<void> {
     await this.request(`/indexes/${index}/documents`, {
       method: 'PUT',
