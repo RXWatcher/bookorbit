@@ -16,6 +16,7 @@ import { AbsExceptionFilter } from '../abs-exception.filter';
 import { AbsHttpException } from '../abs-errors';
 import { decodeAbsId } from '../abs-id.util';
 import { AbsAuthGuard } from '../auth/abs-auth.guard';
+import { AbsAllowQueryToken } from '../auth/abs-query-token.decorator';
 import { AbsCatalogService } from '../services/abs-catalog.service';
 import { AbsPlaybackService, type StartSessionBody } from '../services/abs-playback.service';
 import { AbsStreamService } from '../services/abs-stream.service';
@@ -89,6 +90,7 @@ export class AbsItemsController {
    */
   @Get(':id/file/:fileid')
   @UseGuards(AbsAuthGuard)
+  @AbsAllowQueryToken()
   async streamFileInline(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -111,6 +113,7 @@ export class AbsItemsController {
    */
   @Get(':id/file/:fileid/download')
   @UseGuards(AbsAuthGuard)
+  @AbsAllowQueryToken()
   async downloadFile(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -130,6 +133,7 @@ export class AbsItemsController {
   /** Download a whole item as a zip of its content files (ENDPOINTS.md §2 — `jwt+canDownload`). */
   @Get(':id/download')
   @UseGuards(AbsAuthGuard)
+  @AbsAllowQueryToken()
   async downloadItem(@CurrentUser() user: RequestUser, @Param('id') id: string, @Res() reply: FastifyReply): Promise<void> {
     const bookId = decodeAbsId('libraryItem', id);
     if (bookId === null) throw AbsHttpException.notFound();

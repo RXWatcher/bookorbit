@@ -8,6 +8,7 @@ import { LibraryService } from '../../library/library.service';
 import { AbsExceptionFilter } from '../abs-exception.filter';
 import { AbsHttpException } from '../abs-errors';
 import { decodeAbsId } from '../abs-id.util';
+import { clampAbsPagination } from '../abs-pagination.util';
 import { AbsAuthGuard } from '../auth/abs-auth.guard';
 import { toAbsLibrary } from '../mappers/abs-library.mapper';
 import { AbsCatalogService, parseAbsSort } from '../services/abs-catalog.service';
@@ -73,7 +74,9 @@ export class AbsLibrariesController {
   /** Title/author search within the library. */
   @Get(':id/search')
   async search(@CurrentUser() user: RequestUser, @Param('id') id: string, @Query() query: Record<string, string>): Promise<Record<string, unknown>> {
-    return this.catalogService.search(user, this.requireLibraryId(id), query.q ?? '', Math.max(0, toInt(query.limit, 12)));
+    // Search reaches SQL LIMIT too, so it takes the same ceiling as the browse endpoint.
+    const { limit } = clampAbsPagination(toInt(query.limit, 12), 0);
+    return this.catalogService.search(user, this.requireLibraryId(id), query.q ?? '', limit);
   }
 
   /** Series in the library (paginated). */
@@ -106,9 +109,11 @@ export class AbsLibrariesController {
   }
 
   private parseQuery(query: Record<string, string>) {
+    // Clamped, not just floored: limit/page reach SQL LIMIT/OFFSET on the items endpoint.
+    const { limit, page } = clampAbsPagination(toInt(query.limit, 0), toInt(query.page, 0));
     return {
-      limit: Math.max(0, toInt(query.limit, 0)),
-      page: Math.max(0, toInt(query.page, 0)),
+      limit,
+      page,
       sort: parseAbsSort(query.sort),
       rawSort: query.sort,
       desc: query.desc === '1',

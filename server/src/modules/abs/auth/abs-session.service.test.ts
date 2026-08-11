@@ -16,14 +16,48 @@ function makeTokenService(): AbsTokenService {
 
 describe('AbsSessionService#createSession', () => {
   it('persists a session row and returns the minted token pair', async () => {
-    const values = vi.fn().mockResolvedValue(undefined);
+    const returning = vi.fn().mockResolvedValue([{ id: 'sess-abc' }]);
+    const values = vi.fn(() => ({ returning }));
     const db = { insert: vi.fn(() => ({ values })) } as unknown as Db;
-    const service = new AbsSessionService(makeTokenService(), db);
+    const tokenService = makeTokenService();
+    const service = new AbsSessionService(tokenService, db);
 
     const tokens = await service.createSession(7, 'alice', { ipAddress: '1.2.3.4', userAgent: 'app' });
     expect(tokens.accessToken).toBeTruthy();
     expect(tokens.refreshToken).toBeTruthy();
     expect(values).toHaveBeenCalledWith(expect.objectContaining({ userId: 7, refreshToken: tokens.refreshToken }));
+    // The access token must carry the persisted row id, or logout cannot revoke it.
+    expect(tokenService.verifyAccessToken(tokens.accessToken)?.sid).toBe('sess-abc');
+  });
+});
+
+describe('AbsSessionService#findActiveSession', () => {
+  const tokenService = makeTokenService();
+
+  function serviceWith(session: unknown) {
+    const db = { query: { absSessions: { findFirst: vi.fn().mockResolvedValue(session) } } } as unknown as Db;
+    return new AbsSessionService(tokenService, db);
+  }
+
+  it('returns the row for a live session', async () => {
+    const service = serviceWith({ id: 'sess-1', userId: 7, expiresAt: new Date(Date.now() + 60_000) });
+    expect(await service.findActiveSession('sess-1')).toEqual({ id: 'sess-1', userId: 7 });
+  });
+
+  it('returns null once the session has been deleted (logout)', async () => {
+    expect(await serviceWith(undefined).findActiveSession('sess-1')).toBeNull();
+  });
+
+  it('returns null for a lapsed session even though the row still exists', async () => {
+    const service = serviceWith({ id: 'sess-1', userId: 7, expiresAt: new Date(Date.now() - 1) });
+    expect(await service.findActiveSession('sess-1')).toBeNull();
+  });
+
+  it('returns null without querying when the token carries no sid', async () => {
+    const findFirst = vi.fn();
+    const db = { query: { absSessions: { findFirst } } } as unknown as Db;
+    expect(await new AbsSessionService(tokenService, db).findActiveSession(undefined)).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });
 

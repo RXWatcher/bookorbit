@@ -34,18 +34,37 @@ export class AbsSessionService {
     @Inject(DB) private readonly db: NodePgDatabase<typeof schema>,
   ) {}
 
-  /** Mint a fresh access+refresh pair and persist a new session row (login). */
+  /**
+   * Mint a fresh access+refresh pair and persist a new session row (login). The row is inserted
+   * first so the access token can carry its id as `sid`. That binding is what makes logout revoke
+   * the access token rather than only the refresh token.
+   */
   async createSession(userId: number, username: string, ctx: AbsSessionContext): Promise<AbsTokenPair> {
-    const accessToken = this.tokenService.signAccessToken(userId, username);
     const { token: refreshToken, expiresAt } = this.tokenService.signRefreshToken(userId, username);
-    await this.db.insert(schema.absSessions).values({
-      userId,
-      refreshToken,
-      expiresAt,
-      ipAddress: ctx.ipAddress?.slice(0, 64),
-      userAgent: ctx.userAgent?.slice(0, 512),
-    });
+    const [row] = await this.db
+      .insert(schema.absSessions)
+      .values({
+        userId,
+        refreshToken,
+        expiresAt,
+        ipAddress: ctx.ipAddress?.slice(0, 64),
+        userAgent: ctx.userAgent?.slice(0, 512),
+      })
+      .returning({ id: schema.absSessions.id });
+    const accessToken = this.tokenService.signAccessToken(userId, username, row.id);
     return { accessToken, refreshToken };
+  }
+
+  /**
+   * Resolve the `abs_sessions` row an access token's `sid` points at, or null when it is gone or
+   * lapsed. `AbsAuthGuard` calls this on every request: a logout deletes the row, so the access
+   * token stops working at once instead of staying live for the rest of its hour.
+   */
+  async findActiveSession(sessionId: string | undefined | null): Promise<{ id: string; userId: number } | null> {
+    if (!sessionId) return null;
+    const session = await this.db.query.absSessions.findFirst({ where: eq(schema.absSessions.id, sessionId) });
+    if (!session || session.expiresAt.getTime() <= Date.now()) return null;
+    return { id: session.id, userId: session.userId };
   }
 
   /**
@@ -65,7 +84,7 @@ export class AbsSessionService {
     if (session.lastRefreshToken === presentedToken && session.refreshToken !== presentedToken) {
       const graceOk = session.lastRefreshTokenExpiresAt && session.lastRefreshTokenExpiresAt.getTime() > Date.now();
       if (graceOk) {
-        const accessToken = this.tokenService.signAccessToken(payload.userId, payload.username);
+        const accessToken = this.tokenService.signAccessToken(payload.userId, payload.username, session.id);
         return { accessToken, refreshToken: session.refreshToken };
       }
       throw AbsHttpException.json(401, { error: 'Invalid refresh token' });
@@ -77,7 +96,7 @@ export class AbsSessionService {
       throw AbsHttpException.json(401, { error: 'Refresh token expired' });
     }
 
-    const accessToken = this.tokenService.signAccessToken(payload.userId, payload.username);
+    const accessToken = this.tokenService.signAccessToken(payload.userId, payload.username, session.id);
     const { token: newRefreshToken, expiresAt } = this.tokenService.signRefreshToken(payload.userId, payload.username);
 
     // Optimistic concurrency: only rotate if the current token is still the one we read.

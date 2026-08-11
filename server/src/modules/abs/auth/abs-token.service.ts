@@ -17,6 +17,9 @@ export interface AbsTokenPayload {
   username: string;
   jti: string;
   type: AbsTokenType;
+  /** `abs_sessions.id` this token belongs to. Present on access tokens; the guard resolves it so
+   *  a deleted session (logout) revokes the access token immediately. */
+  sid: string;
   iat?: number;
   exp?: number;
 }
@@ -36,8 +39,9 @@ export class AbsTokenService {
     this.secret = config.get<string>('auth.jwtSecret') ?? 'change-me-in-production';
   }
 
-  signAccessToken(userId: number, username: string): string {
-    return this.sign(userId, username, 'access', ABS_ACCESS_TOKEN_EXPIRY_SECONDS);
+  /** `sessionId` is the `abs_sessions` row the token is bound to; the guard requires it to resolve. */
+  signAccessToken(userId: number, username: string, sessionId: string): string {
+    return this.sign(userId, username, 'access', ABS_ACCESS_TOKEN_EXPIRY_SECONDS, sessionId);
   }
 
   /** Returns the refresh JWT and the absolute expiry used to stamp the session row. */
@@ -47,10 +51,15 @@ export class AbsTokenService {
     return { token, expiresAt };
   }
 
-  /** Verify signature + expiry; returns null on any failure so callers map to the right status. */
+  /**
+   * Verify signature + expiry; returns null on any failure so callers map to the right status.
+   * A missing `sid` is rejected: without it the guard cannot check revocation, so an access token
+   * minted before session binding must not authenticate.
+   */
   verifyAccessToken(token: string): AbsTokenPayload | null {
     const payload = this.verify(token);
-    return payload && payload.type === 'access' ? payload : null;
+    if (!payload || payload.type !== 'access') return null;
+    return typeof payload.sid === 'string' && payload.sid.length > 0 ? payload : null;
   }
 
   verifyRefreshToken(token: string): AbsTokenPayload | null {
@@ -58,9 +67,9 @@ export class AbsTokenService {
     return payload && payload.type === 'refresh' ? payload : null;
   }
 
-  private sign(userId: number, username: string, type: AbsTokenType, expiresInSeconds: number): string {
+  private sign(userId: number, username: string, type: AbsTokenType, expiresInSeconds: number, sessionId?: string): string {
     return this.jwtService.sign(
-      { userId, username, type },
+      { userId, username, type, ...(sessionId ? { sid: sessionId } : {}) },
       { secret: this.secret, algorithm: 'HS256', expiresIn: expiresInSeconds, jwtid: randomUUID() },
     );
   }
