@@ -1,3 +1,4 @@
+import { TtlCache } from '../../common/utils/ttl-cache';
 import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import type {
   AcquisitionLagPoint,
@@ -134,6 +135,12 @@ type CatalogStatisticsDimensionValues = {
 @Injectable()
 export class WarehouseCatalogService {
   private readonly logger = new Logger(WarehouseCatalogService.name);
+  /**
+   * A minute is long enough to collapse the repeated opens of a rail, which
+   * happen seconds apart, and short enough that a catalogue sync shows up
+   * without any invalidation wiring between the sync and this service.
+   */
+  private readonly jumpBucketsCache = new TtlCache<JumpBucketsResponse>(60_000, 64);
 
   constructor(
     private readonly repository: WarehouseRepository,
@@ -864,14 +871,26 @@ export class WarehouseCatalogService {
       return { buckets: [], total: 0, kind: jumpBucketKindForSort(query.sort) ?? 'letter', granularity: null };
     }
 
-    return this.repository.queryUserCatalogJumpBuckets(user.id, {
+    const contentFilters = user.isSuperuser ? undefined : user.contentFilters;
+    // Buckets scan the whole media type, about 900ms on a 242k row library,
+    // and only change when the catalogue is synced. The rail asks for them
+    // every time it opens, so the same answer is served from memory until the
+    // next sync clears it. The key carries everything that changes the result,
+    // including the user, because content filters are per user.
+    const cacheKey = JSON.stringify([user.id, mediaType, query.sort, query.filter ?? null, query.q ?? null, contentFilters ?? null]);
+    const cached = this.jumpBucketsCache.get(cacheKey);
+    if (cached) return cached;
+
+    const buckets = await this.repository.queryUserCatalogJumpBuckets(user.id, {
       includeAllCatalogItems: true,
       mediaType,
       filter: query.filter,
       q: query.q,
       sort: query.sort,
-      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
+      contentFilters,
     });
+    this.jumpBucketsCache.set(cacheKey, buckets);
+    return buckets;
   }
 
   async bulkSetReadStatusForQuery(

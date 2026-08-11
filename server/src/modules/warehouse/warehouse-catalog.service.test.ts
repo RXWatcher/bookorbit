@@ -1151,6 +1151,28 @@ describe('WarehouseCatalogService', () => {
     });
   });
 
+  it('serves repeated jump rail opens from memory, but never across users', async () => {
+    // The bucket query scans the whole media type, about 900ms on a 242k row
+    // library, and the rail asks for it every time it opens.
+    repo.findSettings.mockResolvedValue(makeSettingsRow());
+    repo.queryUserCatalogJumpBuckets.mockResolvedValue({ buckets: [{ key: 'A', label: 'A', index: 0 }], total: 12 });
+    const query = { sort: [{ field: 'title', dir: 'asc' }], pagination: { page: 0, size: 50 } } as const;
+
+    await service.queryLibraryJumpBuckets(makeUser({ id: 42 }), 'comic', query);
+    await service.queryLibraryJumpBuckets(makeUser({ id: 42 }), 'comic', query);
+
+    expect(repo.queryUserCatalogJumpBuckets).toHaveBeenCalledTimes(1);
+
+    // Content filters are per user, so a second user must not read the first
+    // user's buckets out of the cache.
+    await service.queryLibraryJumpBuckets(makeUser({ id: 43 }), 'comic', query);
+    expect(repo.queryUserCatalogJumpBuckets).toHaveBeenCalledTimes(2);
+
+    // A different media type is a different rail.
+    await service.queryLibraryJumpBuckets(makeUser({ id: 42 }), 'ebook', query);
+    expect(repo.queryUserCatalogJumpBuckets).toHaveBeenCalledTimes(3);
+  });
+
   it('rejects unsupported source-backed library jump bucket sorts like native libraries', async () => {
     repo.findSettings.mockResolvedValue(makeSettingsRow());
 
