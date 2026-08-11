@@ -1138,6 +1138,11 @@ export class WarehouseCatalogService {
   }
 
   async getComicPageImage(user: RequestUser, remoteId: string, pageIndex: number, range?: string): Promise<WarehouseBinaryResponse> {
+    // A local comic is a cbz on the mount, so the whole archive is returned and the reader
+    // extracts the page, rather than the warehouse rendering it server side.
+    const local = await this.localBinary(COMIC_MEDIA_TYPE, remoteId, 'file', range);
+    if (local) return local;
+
     const request = await this.comicBinaryRequest(user, remoteId);
 
     try {
@@ -1461,15 +1466,24 @@ export class WarehouseCatalogService {
     }
   }
 
-  streamAudiobook(user: RequestUser, remoteId: string, range?: string): Promise<WarehouseBinaryResponse> {
+  async streamAudiobook(user: RequestUser, remoteId: string, range?: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(AUDIOBOOK_MEDIA_TYPE, remoteId, 'file', range);
+    if (local) return local;
+
     return this.fetchAudiobookBinary(user, remoteId, (request) => this.client.streamAudiobook(request), range);
   }
 
-  downloadAudiobook(user: RequestUser, remoteId: string, range?: string): Promise<WarehouseBinaryResponse> {
+  async downloadAudiobook(user: RequestUser, remoteId: string, range?: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(AUDIOBOOK_MEDIA_TYPE, remoteId, 'file', range);
+    if (local) return local;
+
     return this.fetchAudiobookBinary(user, remoteId, (request) => this.client.downloadAudiobook(request), range);
   }
 
   async downloadAudiobookFile(user: RequestUser, remoteId: string, fileId: string, range?: string): Promise<WarehouseBinaryResponse> {
+    const local = await this.localBinary(AUDIOBOOK_MEDIA_TYPE, remoteId, 'file', range);
+    if (local) return local;
+
     const request = await this.audiobookBinaryRequest(user, remoteId);
 
     try {

@@ -19,15 +19,17 @@ export class ProviderConfigController {
 
   @Get()
   async getConfig() {
+    // Statuses are computed from the real config, but the response carries the redacted one.
     const config = await this.service.getConfig();
     const statuses = await this.service.getProviderStatuses(config);
-    return { config, statuses };
+    return { config: await this.service.getRedactedConfig(), statuses };
   }
 
   @Put()
   @HttpCode(HttpStatus.OK)
-  updateConfig(@Body() dto: UpdateProviderConfigDto) {
-    return this.service.updateConfig(dto);
+  async updateConfig(@Body() dto: UpdateProviderConfigDto) {
+    await this.service.updateConfig(dto);
+    return this.service.getRedactedConfig();
   }
 
   @Post(':key/test')

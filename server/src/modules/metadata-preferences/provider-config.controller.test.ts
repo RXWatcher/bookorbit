@@ -11,6 +11,7 @@ describe('ProviderConfigController', () => {
   beforeEach(() => {
     service = {
       getConfig: vi.fn(),
+      getRedactedConfig: vi.fn(),
       getProviderStatuses: vi.fn(),
       updateConfig: vi.fn(),
       testProvider: vi.fn(),
@@ -21,7 +22,7 @@ describe('ProviderConfigController', () => {
 
   it('returns both provider config and computed statuses', async () => {
     const config = {
-      google: { enabled: true, apiKey: 'key' },
+      google: { enabled: true, apiKey: 'AIzaSyDistinctiveSecret' },
       amazon: { enabled: true, domain: 'amazon.com', cookie: '' },
       goodreads: { enabled: true },
       hardcover: { enabled: false, apiKey: '' },
@@ -29,14 +30,20 @@ describe('ProviderConfigController', () => {
     };
     const statuses = [{ key: 'google', enabled: true, configured: true, label: 'Google Books' }];
 
+    const redacted = { ...config, google: { enabled: true, apiKey: '__redacted__' } };
+
     service.getConfig.mockResolvedValue(config as never);
+    service.getRedactedConfig.mockResolvedValue(redacted as never);
     service.getProviderStatuses.mockResolvedValue(statuses as never);
 
     const result = await controller.getConfig();
 
-    expect(service.getConfig).toHaveBeenCalledTimes(1);
+    // Statuses are computed from the real config, but the response must carry the redacted
+    // one. Returning real keys here is what exposed a live Google Books key and a Hardcover
+    // token to anyone who could reach this endpoint.
     expect(service.getProviderStatuses).toHaveBeenCalledWith(config);
-    expect(result).toEqual({ config, statuses });
+    expect(result).toEqual({ config: redacted, statuses });
+    expect(JSON.stringify(result)).not.toContain('AIzaSyDistinctiveSecret');
   });
 
   it('delegates config updates', async () => {
@@ -45,10 +52,12 @@ describe('ProviderConfigController', () => {
       amazon: { cookie: 'session' },
     };
     service.updateConfig.mockResolvedValue({} as never);
+    service.getRedactedConfig.mockResolvedValue({ google: { enabled: false, apiKey: '' } } as never);
 
-    await controller.updateConfig(patch as never);
+    const result = await controller.updateConfig(patch as never);
 
     expect(service.updateConfig).toHaveBeenCalledWith(patch);
+    expect(JSON.stringify(result)).not.toContain('AIza');
   });
 
   it('delegates provider test requests', async () => {
