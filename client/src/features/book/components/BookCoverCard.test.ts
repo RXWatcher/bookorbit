@@ -35,6 +35,11 @@ vi.mock('@/features/book/lib/book-card-mapper', () => ({
   mergeBookCardWithDetail: vi.fn<(_card: unknown, detail: unknown) => unknown>((_card: unknown, detail: unknown) => detail),
 }))
 
+const mockLibraryReadOnly = ref(false)
+vi.mock('@/composables/useLibraryReadOnly', () => ({
+  useLibraryReadOnly: () => ({ libraryReadOnly: mockLibraryReadOnly }),
+}))
+
 const mockHasPermission = vi.fn<() => boolean>().mockReturnValue(true)
 vi.mock('@/features/auth/composables/usePermissions', () => ({
   usePermissions: () => ({ hasPermission: mockHasPermission }),
@@ -236,6 +241,7 @@ describe('BookCoverCard', () => {
     mockGridCardPrimaryLabel.value = 'hidden'
     mockGridCardSecondaryLabel.value = 'hidden'
     mockCardInfoMode.value = 'hover-overlay'
+    mockLibraryReadOnly.value = false
     mockThumbnailClickAction.value = 'reader'
     mockFetchAuthors.mockResolvedValue({
       items: [{ id: 7, name: 'Frank Herbert', sortName: null, bookCount: 1, lastAddedAt: '2024-01-01T00:00:00Z' }],
@@ -750,6 +756,17 @@ describe('BookCoverCard', () => {
       })
 
       expect(menuLabels(wrapper)).not.toContain('Move to library')
+    })
+
+    it('hides file mutating actions on a read-only instance', () => {
+      mockLibraryReadOnly.value = true
+      const labels = menuLabels(mountCard({ book: makeBook(), allowMoveToLibrary: true }))
+
+      expect(labels).not.toContain('Move to library')
+      expect(labels).not.toContain('Delete')
+      // Read-only is about storage, not the database: these must survive.
+      expect(labels).toContain('Add to Collection')
+      expect(labels).toContain('Edit Metadata')
     })
 
     it('still offers move to library for a filesystem book', () => {

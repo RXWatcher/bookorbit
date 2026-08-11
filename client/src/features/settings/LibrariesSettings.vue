@@ -21,6 +21,7 @@ import {
   CalendarClock,
 } from '@lucide/vue'
 import SettingsPageHeader from './SettingsPageHeader.vue'
+import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
 import { toast } from 'vue-sonner'
 import { api } from '@/lib/api'
 import {
@@ -57,6 +58,36 @@ const { handleLibraryCreated } = useLibraryCreationRedirect()
 const { subscribeLibrary, getProgress, isScanning, progressMap, getCoverRefreshProgress, isRefreshingCovers } = useScanProgress()
 const canSyncSourceBackedLibraries = computed(() => hasPermission('manage_app_settings'))
 const filesystemLibraries = computed(() => libraries.value.filter((lib) => !isSourceBackedLibrary(lib)))
+
+const libraryReadOnly = ref(false)
+const savingReadOnly = ref(false)
+
+async function loadReadOnly() {
+  const res = await api('/api/v1/app-settings/library-read-only')
+  if (!res.ok) return
+  const data = (await res.json()) as { enabled: boolean }
+  libraryReadOnly.value = data.enabled
+}
+
+async function toggleReadOnly() {
+  if (savingReadOnly.value) return
+  const next = !libraryReadOnly.value
+  savingReadOnly.value = true
+  try {
+    const res = await api('/api/v1/app-settings/library-read-only', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: next }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    libraryReadOnly.value = next
+    toast.success(next ? t('settings.admin.libraries.readOnly.enabled') : t('settings.admin.libraries.readOnly.disabled'))
+  } catch {
+    toast.error(t('settings.admin.libraries.readOnly.failed'))
+  } finally {
+    savingReadOnly.value = false
+  }
+}
 
 const stats = ref<Record<number, LibraryStats>>({})
 const scanningAll = ref(false)
@@ -123,6 +154,7 @@ function subscribeAll() {
 }
 
 onMounted(async () => {
+  void loadReadOnly()
   getSocket()
   await fetchLibraries()
   subscribeAll()
@@ -338,6 +370,16 @@ function coverRefreshLabel(libraryId: number): string {
       </button>
     </div>
   </SettingsPageHeader>
+
+  <div class="mb-4 rounded-lg border border-border bg-card/50 p-4">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold">{{ t('settings.admin.libraries.readOnly.title') }}</p>
+        <p class="mt-1 text-xs text-muted-foreground">{{ t('settings.admin.libraries.readOnly.description') }}</p>
+      </div>
+      <ToggleSwitch :model-value="libraryReadOnly" :disabled="savingReadOnly" class="shrink-0" @update:model-value="toggleReadOnly" />
+    </div>
+  </div>
   <div
     class="md:hidden sticky top-0 z-20 mb-4 -mx-4 px-4 py-2 border-y border-border/70 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75"
   >

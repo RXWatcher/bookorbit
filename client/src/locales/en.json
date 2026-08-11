@@ -1099,7 +1099,14 @@
         "scanFailedWithError": "Failed: {error}",
         "scanFailed": "Scan failed",
         "refreshingCovers": "Refreshing covers {pct}% ({processed}/{total})",
-        "coversRefreshed": "Covers refreshed ({count} processed)"
+        "coversRefreshed": "Covers refreshed ({count} processed)",
+        "readOnly": {
+          "title": "Read-only library",
+          "description": "Never write to library storage. Uploads, the book dock, moves, renames and deletes are refused. Manage files with your own tools and re-scan.",
+          "enabled": "Read-only mode enabled",
+          "disabled": "Read-only mode disabled",
+          "failed": "Failed to update read-only mode"
+        }
       },
       "authorEnrichment": {
         "configuration": "Configuration",

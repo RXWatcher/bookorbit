@@ -9,8 +9,10 @@ const updateAvailable = ref<boolean | null>(null)
 const latestVersion = ref<string | null>(null)
 const bookDockPath = ref('')
 const maxUploadSizeMb = ref(500)
+const libraryReadOnly = ref(false)
 const isLoading = ref(false)
 const error = ref<string | null>(null)
+let loadOncePromise: Promise<void> | null = null
 
 export function useAppInfo() {
   async function loadAppInfo() {
@@ -26,6 +28,7 @@ export function useAppInfo() {
       latestVersion.value = data.latestVersion
       bookDockPath.value = data.bookDockPath ?? ''
       maxUploadSizeMb.value = data.maxUploadSizeMb ?? 500
+      libraryReadOnly.value = data.libraryReadOnly ?? false
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to load app info'
     } finally {
@@ -33,5 +36,23 @@ export function useAppInfo() {
     }
   }
 
-  return { version, updateAvailable, latestVersion, bookDockPath, maxUploadSizeMb, isLoading, error, loadAppInfo }
+  // Components that only need a flag should not each trigger a request, and
+  // loadAppInfo no-ops while a load is already running rather than awaiting it.
+  function ensureAppInfoLoaded(): Promise<void> {
+    loadOncePromise ??= loadAppInfo()
+    return loadOncePromise
+  }
+
+  return {
+    version,
+    updateAvailable,
+    latestVersion,
+    bookDockPath,
+    maxUploadSizeMb,
+    libraryReadOnly,
+    isLoading,
+    error,
+    loadAppInfo,
+    ensureAppInfoLoaded,
+  }
 }

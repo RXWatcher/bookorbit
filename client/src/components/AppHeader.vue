@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useLibraryReadOnly } from '@/composables/useLibraryReadOnly'
 import {
   ArrowLeft,
   Search,
@@ -68,6 +69,9 @@ const route = useRoute()
 const { user, logout } = useAuth()
 const { open: openChangePassword } = useChangePasswordDialog()
 const { hasPermission, isDemoRestrictedAccount } = usePermissions()
+const { libraryReadOnly } = useLibraryReadOnly()
+// A read-only instance refuses uploads server-side, so do not offer them.
+const canUploadToLibrary = computed(() => hasPermission('library_upload') && !libraryReadOnly.value)
 const { onLibraryUploadCompleted } = useLibraryUploadEvents()
 const { subscribe: subscribeNotifications } = useNotifications()
 const { hasUnseen: hasUnseenWhatsNew } = useWhatsNew()
@@ -644,7 +648,7 @@ function formatBadgeStyle(fmt: string) {
               <Trophy :size="15" class="mr-2 text-muted-foreground" />
               {{ t('components.appHeader.achievements') }}
             </DropdownMenuItem>
-            <DropdownMenuItem v-if="hasPermission('library_upload')" @click="uploadOpen = true">
+            <DropdownMenuItem v-if="canUploadToLibrary" @click="uploadOpen = true">
               <Upload :size="15" class="mr-2 text-muted-foreground" />
               {{ t('components.appHeader.uploadBooks') }}
             </DropdownMenuItem>
@@ -738,7 +742,7 @@ function formatBadgeStyle(fmt: string) {
             <TooltipContent>{{ t('components.appHeader.achievements') }}</TooltipContent>
           </Tooltip>
 
-          <Tooltip v-if="hasPermission('library_upload')">
+          <Tooltip v-if="canUploadToLibrary">
             <TooltipTrigger as-child>
               <Button data-tour="upload-button" variant="ghost" size="icon" :class="controlClass" @click="uploadOpen = true">
                 <Upload :size="15" />

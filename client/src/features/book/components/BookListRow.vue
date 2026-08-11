@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { BookCard, BookFileRef } from '@bookorbit/types'
+import { useLibraryReadOnly } from '@/composables/useLibraryReadOnly'
 import { getBookMediaProfile } from '@bookorbit/types'
 import BookCoverArtwork from './BookCoverArtwork.vue'
 import BookCoverSurface from './BookCoverSurface.vue'
@@ -65,6 +66,11 @@ const showSendDialog = ref(false)
 const catalogSource = computed(() => getBookCatalogSource(props.book))
 const isSourceBacked = computed(() => isSourceBackedBook(props.book))
 const canUseLocalBookActions = computed(() => !isSourceBacked.value)
+
+const { libraryReadOnly } = useLibraryReadOnly()
+// Narrower than canUseLocalBookActions: only actions that mutate files on disk.
+// Editing metadata, collections and email stay available on a read-only instance.
+const canWriteLibraryFiles = computed(() => canUseLocalBookActions.value && !libraryReadOnly.value)
 
 const collapsedSeries = computed(() => props.book.collapsedSeries ?? null)
 const isCollapsedSeries = computed(() => collapsedSeries.value !== null)
@@ -448,7 +454,10 @@ function handleRowClick(event: MouseEvent) {
             <RefreshCw v-else class="size-4 mr-2" />
             {{ t('book.actions.refreshMetadata') }}
           </DropdownMenuItem>
-          <DropdownMenuItem v-if="canUseLocalBookActions && allowMoveToLibrary && hasPermission('library_edit_metadata')" @click="emit('action', 'move-to-library')">
+          <DropdownMenuItem
+            v-if="canWriteLibraryFiles && allowMoveToLibrary && hasPermission('library_edit_metadata')"
+            @click="emit('action', 'move-to-library')"
+          >
             <FolderInput class="size-4 mr-2" />
             {{ t('book.move.action') }}
           </DropdownMenuItem>
@@ -460,9 +469,9 @@ function handleRowClick(event: MouseEvent) {
             <Send class="size-4 mr-2" />
             {{ t('book.actions.sendViaEmail') }}
           </DropdownMenuItem>
-          <DropdownMenuSeparator v-if="canUseLocalBookActions && hasPermission('library_delete_books')" />
+          <DropdownMenuSeparator v-if="canWriteLibraryFiles && hasPermission('library_delete_books')" />
           <DropdownMenuItem
-            v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
+            v-if="canWriteLibraryFiles && hasPermission('library_delete_books')"
             class="text-destructive focus:text-destructive"
             @click="emit('action', 'delete')"
           >

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { BookCard, BookFileRef, CoverAspectRatio } from '@bookorbit/types'
+import { useLibraryReadOnly } from '@/composables/useLibraryReadOnly'
 import { FORMAT_TO_GROUP, getBookMediaProfile, READER_OPENABLE_FORMATS } from '@bookorbit/types'
 import { getFormatColor } from '../lib/format-colors'
 import { computed, inject, ref, watch, onMounted, onUnmounted } from 'vue'
@@ -115,6 +116,11 @@ const coverSrc = computed(() => bookCoverUrl(props.book, coverUrl, 'thumbnail'))
 const catalogSource = computed(() => getBookCatalogSource(props.book))
 const isSourceBacked = computed(() => isSourceBackedBook(props.book))
 const canUseLocalBookActions = computed(() => !isSourceBacked.value)
+
+const { libraryReadOnly } = useLibraryReadOnly()
+// Narrower than canUseLocalBookActions: only actions that mutate files on disk.
+// Editing metadata, collections and email stay available on a read-only instance.
+const canWriteLibraryFiles = computed(() => canUseLocalBookActions.value && !libraryReadOnly.value)
 
 const { refreshing, refreshWithFeedback } = useRefreshMetadata()
 const { isRefreshing } = useRefreshingBooks()
@@ -703,7 +709,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                     {{ t('book.actions.addToCollection') }}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    v-if="canUseLocalBookActions && allowMoveToLibrary && hasPermission('library_edit_metadata')"
+                    v-if="canWriteLibraryFiles && allowMoveToLibrary && hasPermission('library_edit_metadata')"
                     @click="emit('action', 'move-to-library')"
                   >
                     <FolderInput class="size-4 mr-2" />
@@ -730,9 +736,11 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                     <Send class="size-4 mr-2" />
                     {{ t('book.actions.sendViaEmail') }}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="canUseLocalBookActions && (hasPermission('email_send') || hasPermission('library_delete_books'))" />
+                  <DropdownMenuSeparator
+                    v-if="canUseLocalBookActions && (hasPermission('email_send') || (canWriteLibraryFiles && hasPermission('library_delete_books')))"
+                  />
                   <DropdownMenuItem
-                    v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
+                    v-if="canWriteLibraryFiles && hasPermission('library_delete_books')"
                     class="text-destructive focus:text-destructive"
                     @click="emit('action', 'delete')"
                   >
@@ -866,9 +874,11 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
               <Send class="size-4 mr-2" />
               {{ t('book.actions.sendViaEmail') }}
             </DropdownMenuItem>
-            <DropdownMenuSeparator v-if="canUseLocalBookActions && (hasPermission('email_send') || hasPermission('library_delete_books'))" />
+            <DropdownMenuSeparator
+              v-if="canUseLocalBookActions && (hasPermission('email_send') || (canWriteLibraryFiles && hasPermission('library_delete_books')))"
+            />
             <DropdownMenuItem
-              v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
+              v-if="canWriteLibraryFiles && hasPermission('library_delete_books')"
               class="text-destructive focus:text-destructive"
               @click="emit('action', 'delete')"
             >

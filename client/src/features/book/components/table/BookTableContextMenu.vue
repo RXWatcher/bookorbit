@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useLibraryReadOnly } from '@/composables/useLibraryReadOnly'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { BookOpen, ExternalLink, FolderInput, FolderPlus, Pencil, RefreshCw, Send, Trash2 } from '@lucide/vue'
@@ -40,6 +41,11 @@ const anyRefreshing = computed(() => {
   return refreshing.value || isRefreshing(props.book.id)
 })
 const canUseLocalBookActions = computed(() => (props.book ? !isSourceBackedBook(props.book) : false))
+
+const { libraryReadOnly } = useLibraryReadOnly()
+// Narrower than canUseLocalBookActions: only actions that mutate files on disk.
+// Editing metadata, collections and email stay available on a read-only instance.
+const canWriteLibraryFiles = computed(() => canUseLocalBookActions.value && !libraryReadOnly.value)
 
 const adjustedX = computed(() => {
   if (!props.position) return 0
@@ -191,7 +197,7 @@ onBeforeUnmount(() => {
         {{ t('book.table.actions.addToCollection') }}
       </button>
       <button
-        v-if="canUseLocalBookActions && hasPermission('library_edit_metadata')"
+        v-if="canWriteLibraryFiles && hasPermission('library_edit_metadata')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
         @click="emitAction('move-to-library')"
       >
@@ -207,7 +213,7 @@ onBeforeUnmount(() => {
         {{ t('book.table.actions.sendToDevice') }}
       </button>
       <button
-        v-if="canUseLocalBookActions && hasPermission('library_delete_books')"
+        v-if="canWriteLibraryFiles && hasPermission('library_delete_books')"
         class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-accent"
         @click="emitAction('delete')"
       >
