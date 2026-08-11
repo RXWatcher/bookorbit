@@ -15,6 +15,11 @@ export class BookDockProcessingStateService implements OnApplicationBootstrap {
   }
 
   async isPaused(): Promise<boolean> {
+    // The watcher ingests without an HTTP request, so no guard can reach it.
+    // Read-only instances never ingest, whatever the dock's own pause flag says.
+    // Checked live rather than at load so toggling read-only takes effect
+    // without a restart; the settings service caches the lookup.
+    if (await this.appSettings.isLibraryReadOnly()) return true;
     await this.ensureLoaded();
     return this.paused;
   }

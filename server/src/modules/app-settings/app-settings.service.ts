@@ -153,8 +153,24 @@ export class AppSettingsService {
     this.clearRuntimeSettingCache(APP_SETTING_KEYS.CROSS_PLATFORM_PATH_SANITIZATION_ENABLED);
   }
 
+  // When set, the app never writes to library storage: uploads, dock ingest,
+  // moves, renames and file write-back are all refused. Files are expected to
+  // be managed with OS tools and picked up by a scan. This is deliberately not
+  // a permission, because superusers bypass permission checks.
+  async isLibraryReadOnly(): Promise<boolean> {
+    return this.runtimeSettingCache.get('app-settings', APP_SETTING_KEYS.LIBRARY_READ_ONLY, async () => {
+      const row = await this.repo.findByKey(APP_SETTING_KEYS.LIBRARY_READ_ONLY);
+      return parseBooleanSetting(row?.value, false);
+    });
+  }
+
+  async setLibraryReadOnly(enabled: boolean): Promise<void> {
+    await this.repo.upsert(APP_SETTING_KEYS.LIBRARY_READ_ONLY, String(enabled));
+    this.clearRuntimeSettingCache(APP_SETTING_KEYS.LIBRARY_READ_ONLY);
+  }
+
   private clearRuntimeSettingCache(key: string): void {
-    if (key === APP_SETTING_KEYS.CROSS_PLATFORM_PATH_SANITIZATION_ENABLED) {
+    if (key === APP_SETTING_KEYS.CROSS_PLATFORM_PATH_SANITIZATION_ENABLED || key === APP_SETTING_KEYS.LIBRARY_READ_ONLY) {
       this.runtimeSettingCache.clearForScope('app-settings');
     }
   }

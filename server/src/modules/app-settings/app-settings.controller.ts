@@ -82,6 +82,23 @@ export class AppSettingsController {
     return { pattern: dto.pattern };
   }
 
+  @Get('library-read-only')
+  async getLibraryReadOnly() {
+    return { enabled: await this.appSettingsService.isLibraryReadOnly() };
+  }
+
+  @Put('library-read-only')
+  @HttpCode(HttpStatus.OK)
+  @Auditable({
+    action: AuditAction.AppSettingsUpdate,
+    resource: AuditResource.AppSettings,
+    description: 'Updated read-only library setting',
+  })
+  async setLibraryReadOnly(@Body() dto: UpdateBooleanSettingDto) {
+    await this.appSettingsService.setLibraryReadOnly(dto.enabled);
+    return { enabled: dto.enabled };
+  }
+
   @Get('cross-platform-path-sanitization')
   async getCrossPlatformPathSanitization() {
     return { enabled: await this.appSettingsService.isCrossPlatformPathSanitizationEnabled() };

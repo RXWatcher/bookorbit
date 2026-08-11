@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { LibraryWriteGuard } from '../../common/guards/library-write.guard';
 import { AppSettingsModule } from '../app-settings/app-settings.module';
 import { BookMetadataFetchModule } from '../book-metadata-fetch/book-metadata-fetch.module';
 import { FileWriteModule } from '../file-write/file-write.module';
@@ -15,7 +16,7 @@ import { UploadValidatorService } from './upload-validator.service';
 @Module({
   imports: [AppSettingsModule, LibraryModule, MetadataModule, BookMetadataFetchModule, FileWriteModule],
   controllers: [UploadController, BookFileUploadController],
-  providers: [UploadService, UploadValidatorService, UploadStorageService, UploadProcessorService],
+  providers: [UploadService, UploadValidatorService, UploadStorageService, UploadProcessorService, LibraryWriteGuard],
   exports: [UploadValidatorService, UploadStorageService, UploadProcessorService, UploadService],
 })
 export class UploadModule {}

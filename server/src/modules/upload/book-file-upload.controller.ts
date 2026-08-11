@@ -1,13 +1,15 @@
-import { BadRequestException, Controller, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Req } from '@nestjs/common';
+import { BadRequestException, Controller, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { Permission } from '@bookorbit/types';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { LibraryWriteGuard } from '../../common/guards/library-write.guard';
 import type { MultipartRequest } from '../../common/types/multipart-request';
 import type { RequestUser } from '../../common/types/request-user';
 import { AppSettingsService } from '../app-settings/app-settings.service';
 import { UploadService } from './upload.service';
 
 @Controller('books')
+@UseGuards(LibraryWriteGuard)
 export class BookFileUploadController {
   constructor(
     private readonly uploadService: UploadService,

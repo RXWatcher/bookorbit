@@ -4,4 +4,6 @@ export interface AppInfoResponse {
   latestVersion: string | null;
   bookDockPath: string;
   maxUploadSizeMb: number;
+  /** When true the app never writes to library storage: no uploads, dock ingest, moves or renames. */
+  libraryReadOnly: boolean;
 }

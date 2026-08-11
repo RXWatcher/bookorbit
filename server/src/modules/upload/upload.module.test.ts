@@ -10,6 +10,7 @@ import { BookFileUploadController } from './book-file-upload.controller';
 import { UploadController } from './upload.controller';
 import { UploadModule } from './upload.module';
 import { UploadProcessorService } from './upload-processor.service';
+import { LibraryWriteGuard } from '../../common/guards/library-write.guard';
 import { UploadService } from './upload.service';
 import { UploadStorageService } from './upload-storage.service';
 import { UploadValidatorService } from './upload-validator.service';
@@ -23,6 +24,7 @@ describe('UploadModule', () => {
       UploadValidatorService,
       UploadStorageService,
       UploadProcessorService,
+      LibraryWriteGuard,
     ]);
     expect(Reflect.getMetadata('exports', UploadModule)).toEqual([
       UploadValidatorService,

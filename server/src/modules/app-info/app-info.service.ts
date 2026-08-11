@@ -47,6 +47,9 @@ export class AppInfoService implements OnApplicationBootstrap {
     }
 
     const maxUploadSizeMb = await this.appSettingsService.getMaxUploadSizeMb();
+    // Delivered here rather than on the user payload so every authenticated
+    // client can hide write actions without a second request.
+    const libraryReadOnly = await this.appSettingsService.isLibraryReadOnly();
 
     return {
       version,
@@ -54,6 +57,7 @@ export class AppInfoService implements OnApplicationBootstrap {
       latestVersion: this.latestVersion,
       bookDockPath,
       maxUploadSizeMb,
+      libraryReadOnly,
     };
   }
 

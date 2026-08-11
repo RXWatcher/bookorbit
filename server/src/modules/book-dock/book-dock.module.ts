@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import type { StringValue } from 'ms';
 
+import { LibraryWriteGuard } from '../../common/guards/library-write.guard';
 import { AppSettingsModule } from '../app-settings/app-settings.module';
 import { AuthModule } from '../auth/auth.module';
 import { BookModule } from '../book/book.module';
@@ -44,6 +45,7 @@ import { BookDockRepository } from './book-dock.repository';
   ],
   controllers: [BookDockController],
   providers: [
+    LibraryWriteGuard,
     BookDockService,
     BookDockRepository,
     BookDockEventsService,

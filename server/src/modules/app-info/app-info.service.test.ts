@@ -19,6 +19,7 @@ function makeAppSettings(enabled = false): jest.Mocked<AppSettingsService> {
   return {
     isUpdateCheckEnabled: vi.fn().mockResolvedValue(enabled),
     getMaxUploadSizeMb: vi.fn().mockResolvedValue(500),
+    isLibraryReadOnly: vi.fn().mockResolvedValue(false),
   } as unknown as jest.Mocked<AppSettingsService>;
 }
 

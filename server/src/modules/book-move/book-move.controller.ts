@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Post, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
 import type { BookMoveProgressEvent } from '@bookorbit/types';
@@ -7,6 +7,7 @@ import { AuditAction, AuditResource, Permission } from '@bookorbit/types';
 import { Auditable } from '../../common/decorators/auditable.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { LibraryWriteGuard } from '../../common/guards/library-write.guard';
 import type { RequestUser } from '../../common/types/request-user';
 import { BookMoveService } from './book-move.service';
 import { MoveBooksDto, MovePreviewDto } from './dto/move-books.dto';
@@ -17,6 +18,7 @@ import { MoveBooksDto, MovePreviewDto } from './dto/move-books.dto';
  * library-access guard cannot see it, and a selection can span several sources.
  */
 @Controller('books/move')
+@UseGuards(LibraryWriteGuard)
 export class BookMoveController {
   constructor(private readonly bookMoveService: BookMoveService) {}
 

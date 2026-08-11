@@ -14,6 +14,7 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { createReadStream } from 'fs';
 import { access } from 'fs/promises';
@@ -24,6 +25,7 @@ import type { BookDockMetadata } from '@bookorbit/types';
 
 import { AuditAction, AuditResource } from '@bookorbit/types';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { LibraryWriteGuard } from '../../common/guards/library-write.guard';
 import { Auditable } from '../../common/decorators/auditable.decorator';
 import { ForbidPermission } from '../../common/decorators/forbid-permission.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -119,6 +121,7 @@ export class BookDockController {
   }
 
   @Post('upload')
+  @UseGuards(LibraryWriteGuard)
   @HttpCode(HttpStatus.CREATED)
   async upload(@CurrentUser() user: RequestUser, @Req() req: MultipartRequest) {
     const limitMb = await this.appSettings.getMaxUploadSizeMb();
@@ -246,6 +249,7 @@ export class BookDockController {
   }
 
   @Post('finalize')
+  @UseGuards(LibraryWriteGuard)
   @RequirePermission(Permission.BookDockAccess, Permission.LibraryUpload)
   @Auditable({
     action: AuditAction.BookDockFinalize,
