@@ -311,17 +311,21 @@ function buildCatalogCollectionOrder(sort: SortSpec[] | undefined) {
   const firstSort = sort?.[0];
   const direction = firstSort?.dir === 'desc' ? desc : asc;
   const stableTitleOrder = sql`coalesce(${schema.warehouseCatalogItems.sortTitle}, ${schema.warehouseCatalogItems.title}) asc`;
-  const stableRemoteOrder = sql`${schema.warehouseCatalogItems.remoteId} asc`;
+  const stableRemoteOrder = collectionTotalOrderTiebreak('asc');
+  // Every branch must end in a tiebreak. Without one the sort is not a total
+  // order, so two block fetches of the same query can place tied rows
+  // differently and a book shows up on two pages or on none.
+  const totalOrder = (expr: SQLWrapper) => sql`${direction(expr)}, ${collectionTotalOrderTiebreak(firstSort?.dir)}`;
 
   switch (firstSort?.field) {
     case 'author':
-      return direction(sql<string>`coalesce(${schema.warehouseCatalogItems.authors}->>0, '')`);
+      return totalOrder(sql<string>`coalesce(${schema.warehouseCatalogItems.authors}->>0, '')`);
     case 'series':
-      return direction(sql<string>`coalesce(${schema.warehouseCatalogItems.series}, '')`);
+      return totalOrder(sql<string>`coalesce(${schema.warehouseCatalogItems.series}, '')`);
     case 'seriesIndex':
       return sql`${orderNullableColumn(schema.warehouseCatalogItems.seriesIndex, firstSort.dir)}, ${stableTitleOrder}, ${stableRemoteOrder}`;
     case 'addedAt':
-      return direction(collectionCatalogItems.addedAt);
+      return totalOrder(collectionCatalogItems.addedAt);
     case 'publishedYear':
       return sql`${orderNullableColumn(catalogPublishedYearExpression(), firstSort.dir)}, ${stableTitleOrder}, ${stableRemoteOrder}`;
     case 'pageCount':
@@ -333,7 +337,7 @@ function buildCatalogCollectionOrder(sort: SortSpec[] | undefined) {
     case 'metadataScore':
       return sql`${orderNullableColumn(catalogMetadataScoreExpression(), firstSort.dir)}, ${stableTitleOrder}, ${stableRemoteOrder}`;
     case 'publisher':
-      return direction(sql<string>`coalesce(${schema.warehouseCatalogItems.publisher}, '')`);
+      return totalOrder(sql<string>`coalesce(${schema.warehouseCatalogItems.publisher}, '')`);
     case 'rating':
       return sql`${orderNullableColumn(schema.warehouseUserState.rating, firstSort.dir)}, ${stableTitleOrder}, ${stableRemoteOrder}`;
     case 'readProgress':
@@ -345,13 +349,23 @@ function buildCatalogCollectionOrder(sort: SortSpec[] | undefined) {
     case 'finishedAt':
       return sql`${orderNullableColumn(schema.warehouseUserState.finishedAt, firstSort.dir)}, ${stableTitleOrder}, ${stableRemoteOrder}`;
     case 'format':
-      return direction(sql<string>`coalesce(${schema.warehouseCatalogItems.format}, '')`);
+      return totalOrder(sql<string>`coalesce(${schema.warehouseCatalogItems.format}, '')`);
     case 'language':
-      return direction(sql<string>`coalesce(${schema.warehouseCatalogItems.language}, '')`);
+      return totalOrder(sql<string>`coalesce(${schema.warehouseCatalogItems.language}, '')`);
     case 'title':
     default:
-      return direction(sql<string>`coalesce(${schema.warehouseCatalogItems.sortTitle}, ${schema.warehouseCatalogItems.title})`);
+      return totalOrder(sql<string>`coalesce(${schema.warehouseCatalogItems.sortTitle}, ${schema.warehouseCatalogItems.title})`);
   }
+}
+
+// (media_type, remote_id) is unique, so this makes any ordering a strict total
+// order. Ordering it in the primary sort's direction lets the matching
+// (media_type, <key>, remote_id) indexes satisfy the whole ORDER BY rather
+// than falling back to a sort.
+function collectionTotalOrderTiebreak(dir: SortSpec['dir'] = 'asc'): SQL {
+  return dir === 'desc'
+    ? sql`${schema.warehouseCatalogItems.remoteId} desc, ${schema.warehouseCatalogItems.mediaType} desc`
+    : sql`${schema.warehouseCatalogItems.remoteId} asc, ${schema.warehouseCatalogItems.mediaType} asc`;
 }
 
 function orderNullableColumn(column: SQLWrapper, dir: SortSpec['dir'] = 'asc') {

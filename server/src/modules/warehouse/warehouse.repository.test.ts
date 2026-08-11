@@ -3887,6 +3887,44 @@ describe('WarehouseRepository', () => {
       expect(renderedWhere?.params).toEqual(expect.arrayContaining(['ebook', 'audiobook', '%arrakis%']));
     });
 
+    // (media_type, remote_id) is unique, so ending every sort with it makes the
+    // ordering a strict total order. Without that a tied row can land on two
+    // pages or on none, because each 100-row block is a separate query and
+    // Postgres is free to break ties differently between them.
+    it.each([
+      'title',
+      'author',
+      'series',
+      'seriesIndex',
+      'addedAt',
+      'publishedYear',
+      'pageCount',
+      'updatedAt',
+      'fileSize',
+      'metadataScore',
+      'publisher',
+      'rating',
+      'readProgress',
+      'readStatus',
+      'lastReadAt',
+      'finishedAt',
+      'language',
+      'format',
+    ] as const)('orders catalog items by a total order when sorting on %s', async (field) => {
+      for (const dir of ['asc', 'desc'] as const) {
+        const listChain = makeSelectChain('offset', []);
+        const countChain = makeSelectChain('where', [{ total: 0 }]);
+        db.select.mockReturnValueOnce(listChain).mockReturnValueOnce(countChain);
+
+        await repo.queryUserCatalogItems(42, { sort: [{ field, dir }], page: 0, limit: 25 });
+
+        const rendered = renderOrderArgs(listChain.orderBy.mock.calls[0])?.sql ?? '';
+        expect(rendered.trimEnd()).toMatch(
+          /"warehouse_catalog_items"\."remote_id" (?:asc|desc), "warehouse_catalog_items"\."media_type" (?:asc|desc)$/,
+        );
+      }
+    });
+
     it('returns empty catalog query results for an empty source-backed media library scope', async () => {
       await expect(
         repo.queryUserCatalogItems(42, {
