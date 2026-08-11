@@ -49,6 +49,8 @@ const headingText = computed(() => (props.media && props.media !== 'all' ? `${pr
 
 const bands = computed(() => chunkIntoBands(books.value, shelfRows.value))
 
+const settledEmpty = computed(() => !loading.value && !error.value && books.value.length === 0)
+
 const scrollEl = ref<HTMLElement | null>(null)
 
 function scrollBy(delta: number) {
@@ -116,7 +118,16 @@ function coverAnimationDelay(index: number): string {
 </script>
 
 <template>
-  <section v-bind="attrs" class="group/scroller overflow-hidden rounded-2xl border border-primary/40 bg-card/30 shadow-sm backdrop-blur-[1px]">
+  <!-- A shelf with nothing in it is noise, and on a source-backed library the
+       reading shelves stay empty until there is history, which put an empty
+       rail above hundreds of thousands of books. The shelf appears once it has
+       something to show, and while it is still loading or has failed, so a
+       retry stays reachable. -->
+  <section
+    v-if="!settledEmpty"
+    v-bind="attrs"
+    class="group/scroller overflow-hidden rounded-2xl border border-primary/40 bg-card/30 shadow-sm backdrop-blur-[1px]"
+  >
     <!-- Header -->
     <div class="mb-2 flex items-center justify-between px-5 pt-4">
       <div class="flex items-center gap-2.5">
@@ -163,22 +174,6 @@ function coverAnimationDelay(index: number): string {
         <RefreshCw :size="12" />
         {{ t('dashboard.common.retry') }}
       </button>
-    </div>
-
-    <!-- Empty -->
-    <div v-else-if="books.length === 0" class="flex flex-col items-center justify-center py-10 gap-3 text-center animate-fade-up">
-      <div class="h-12 w-12 rounded-full bg-muted flex items-center justify-center animate-scale-in">
-        <component :is="typeIcon" :size="20" class="text-muted-foreground" />
-      </div>
-      <p class="text-sm text-muted-foreground">
-        <template v-if="type === 'continue-reading'">{{ t('dashboard.scroller.empty.continueReading') }}</template>
-        <template v-else-if="type === 'continue-listening'">{{ t('dashboard.scroller.empty.continueListening') }}</template>
-        <template v-else-if="type === 'want-to-read'">{{ t('dashboard.scroller.empty.wantToRead') }}</template>
-        <template v-else-if="type === 'up-next-in-series'">{{ t('dashboard.scroller.empty.upNextInSeries') }}</template>
-        <template v-else-if="type === 'recently-added'">{{ t('dashboard.scroller.empty.recentlyAdded') }}</template>
-        <template v-else-if="type === 'smart-scope'">{{ t('dashboard.scroller.empty.smartScope') }}</template>
-        <template v-else>{{ t('dashboard.scroller.empty.default') }}</template>
-      </p>
     </div>
 
     <!-- Books rows -->

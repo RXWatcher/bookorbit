@@ -169,24 +169,24 @@ describe('DashboardScroller', () => {
     setCompactViewport(false)
   })
 
-  it.each([
-    ['continue-listening', 'No audiobooks in progress yet. Start listening to one to see it here.'],
-    ['want-to-read', 'No books marked want to read yet.'],
-  ] as const)('renders empty-state copy for %s', (type, copy) => {
-    const wrapper = mountScroller({ type })
+  it.each(['continue-listening', 'want-to-read', 'continue-reading', 'up-next-in-series', 'recently-added', 'random'] as const)(
+    'renders nothing at all once %s has loaded and has no books',
+    (type) => {
+      // An empty shelf is noise. On a source-backed library the reading
+      // shelves stay empty until there is history, which left an empty rail
+      // sitting above hundreds of thousands of books.
+      const wrapper = mountScroller({ type })
 
-    expect(wrapper.text()).toContain(copy)
-    expect(mockUseDashboardScroller).toHaveBeenCalledWith(type, 20, undefined, 'all')
-  })
+      expect(wrapper.find('section').exists()).toBe(false)
+      expect(wrapper.text()).toBe('')
+    },
+  )
 
-  it.each([
-    ['continue-reading', 'No books in progress yet. Start reading one to see it here.'],
-    ['up-next-in-series', 'No next-in-series picks yet. Finish a volume to surface the next one.'],
-    ['recently-added', 'No books in your library yet.'],
-    ['smart-scope', 'No books match this smartScope.'],
-    ['random', 'No books found.'],
-  ] as const)('keeps existing empty-state copy for %s', (type, copy) => {
-    expect(mountScroller({ type }).text()).toContain(copy)
+  it('still shows a shelf that failed, so the retry stays reachable', () => {
+    const wrapper = mountScroller({ type: 'continue-listening', error: true })
+
+    expect(wrapper.find('section').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Retry')
   })
 
   it('renders loading skeletons', () => {
