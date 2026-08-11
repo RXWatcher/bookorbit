@@ -73,7 +73,18 @@ const SHELF_KEY_BY_TYPE: Record<ScrollerType, string> = {
 }
 
 function smartScopeShelf(overrides: Partial<ScrollerConfig> = {}): ScrollerConfig {
-  return { id: '1', type: 'smart-scope', label: 'Unread Favorites', enabled: true, order: 1, limit: 20, rows: 1, smartScopeId: 42, ...overrides }
+  return {
+    id: '1',
+    type: 'smart-scope',
+    label: 'Unread Favorites',
+    enabled: true,
+    order: 1,
+    limit: 20,
+    rows: 1,
+    media: 'all',
+    smartScopeId: 42,
+    ...overrides,
+  }
 }
 
 beforeEach(async () => {
@@ -179,7 +190,16 @@ describe('useDashboardLabels', () => {
       const { shelfTitle, shelfTypeName } = mountComposable()
       // Configs saved before localization stored a fixed English label that would otherwise
       // survive a language change.
-      const stored: ScrollerConfig = { id: '1', type: 'continue-reading', label: 'Continue Reading', enabled: true, order: 1, limit: 20, rows: 1 }
+      const stored: ScrollerConfig = {
+        id: '1',
+        type: 'continue-reading',
+        label: 'Continue Reading',
+        enabled: true,
+        order: 1,
+        limit: 20,
+        rows: 1,
+        media: 'all',
+      }
 
       expect(shelfTitle(stored)).toBe(CATALOGS.en.shelfNames.continueReading)
 
@@ -194,7 +214,7 @@ describe('useDashboardLabels', () => {
 
       for (const type of SCROLLER_TYPES) {
         if (type === 'smart-scope') continue
-        const stored: ScrollerConfig = { id: '1', type, label: 'Stale Stored Label', enabled: true, order: 1, limit: 20, rows: 1 }
+        const stored: ScrollerConfig = { id: '1', type, label: 'Stale Stored Label', enabled: true, order: 1, limit: 20, rows: 1, media: 'all' }
         expect(shelfTitle(stored), `shelf title for ${type}`).toBe(shelfTypeName(type))
       }
     })

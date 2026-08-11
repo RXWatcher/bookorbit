@@ -391,9 +391,9 @@ describe('useDashboardConfig', () => {
     const { scrollers, saveScrollers } = useDashboardConfig()
 
     saveScrollers([
-      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 3 },
-      { id: '2', type: 'random', label: 'Discover Something New', enabled: true, order: 2, limit: 20, rows: 9 },
-      { id: '3', type: 'continue-reading', label: 'Continue Reading', enabled: true, order: 3, limit: 20, rows: 0 },
+      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 3, media: 'all' },
+      { id: '2', type: 'random', label: 'Discover Something New', enabled: true, order: 2, limit: 20, rows: 9, media: 'all' },
+      { id: '3', type: 'continue-reading', label: 'Continue Reading', enabled: true, order: 3, limit: 20, rows: 0, media: 'all' },
     ])
 
     expect(scrollers.value.map((scroller) => scroller.rows)).toEqual([3, 3, 1])
