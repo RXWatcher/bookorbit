@@ -2157,7 +2157,7 @@ export class WarehouseRepository {
           WITH ordered AS (
             SELECT
               ${bucketExpr} AS bucket,
-              (ROW_NUMBER() OVER (ORDER BY ${orderBy}) - 1) AS item_index
+              (ROW_NUMBER() OVER (ORDER BY ${sql.join(orderBy, sql`, `)}) - 1) AS item_index
             FROM ${schema.warehouseCatalogItems}
             LEFT JOIN ${schema.warehouseUserItems} ON ${buildUserCatalogJoin(userId)}
             LEFT JOIN ${schema.warehouseUserState} ON ${buildCatalogUserStateJoin(userId)}
@@ -2176,7 +2176,7 @@ export class WarehouseRepository {
           WITH ordered AS (
             SELECT
               ${bucketExpr} AS bucket,
-              (ROW_NUMBER() OVER (ORDER BY ${orderBy}) - 1) AS item_index
+              (ROW_NUMBER() OVER (ORDER BY ${sql.join(orderBy, sql`, `)}) - 1) AS item_index
             FROM ${schema.warehouseUserItems}
             INNER JOIN ${schema.warehouseCatalogItems}
               ON ${schema.warehouseUserItems.mediaType} = ${schema.warehouseCatalogItems.mediaType}
