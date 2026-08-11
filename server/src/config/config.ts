@@ -12,6 +12,9 @@ export const appConfig = registerAs('app', () => ({
   warehouse: {
     encryptionKey: process.env.WAREHOUSE_ENCRYPTION_KEY ?? '',
   },
+  // Extra exact-match mobile redirect URIs allowed for the ABS OIDC flow, beyond the built-in
+  // `audiobookshelf://oauth`. Operators add third-party ABS clients (e.g. stillapp://oauth) here.
+  absAllowedAppRedirects: parseCommaList(process.env.ABS_OIDC_MOBILE_REDIRECT_URIS),
   koboCloudscraperPython: process.env.KOBO_CLOUDSCRAPER_PYTHON?.trim() || undefined,
   koreaderPluginSourcePath: process.env.KOREADER_PLUGIN_PATH?.trim() || undefined,
 }));
@@ -67,6 +70,14 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function parseCommaList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function parseBooleanFlag(value: string | undefined, fallback: boolean): boolean {

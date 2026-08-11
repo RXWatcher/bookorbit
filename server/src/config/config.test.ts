@@ -11,6 +11,7 @@ function resetEnv(): void {
   delete process.env.APP_VERSION;
   delete process.env.OIDC_ALLOW_LOCAL_ISSUERS;
   delete process.env.SWAGGER_ENABLED;
+  delete process.env.ABS_OIDC_MOBILE_REDIRECT_URIS;
   delete process.env.KOBO_CLOUDSCRAPER_PYTHON;
   delete process.env.KOREADER_PLUGIN_PATH;
   delete process.env.DATABASE_URL;
@@ -54,6 +55,7 @@ describe('config', () => {
       warehouse: {
         encryptionKey: '',
       },
+      absAllowedAppRedirects: [],
       koboCloudscraperPython: undefined,
       koreaderPluginSourcePath: undefined,
     });
@@ -65,6 +67,7 @@ describe('config', () => {
     process.env.APP_VERSION = 'v2.3.4';
     process.env.OIDC_ALLOW_LOCAL_ISSUERS = 'true';
     process.env.SWAGGER_ENABLED = 'true';
+    process.env.ABS_OIDC_MOBILE_REDIRECT_URIS = 'stillapp://oauth, prologue://oauth';
     process.env.KOBO_CLOUDSCRAPER_PYTHON = '/opt/bookorbit-python/bin/python';
     process.env.KOREADER_PLUGIN_PATH = '/opt/koreader/bookorbit.koplugin';
     process.env.GITHUB_RELEASES_REPO = 'acme/app';
@@ -81,6 +84,7 @@ describe('config', () => {
       warehouse: {
         encryptionKey: '',
       },
+      absAllowedAppRedirects: ['stillapp://oauth', 'prologue://oauth'],
       koboCloudscraperPython: '/opt/bookorbit-python/bin/python',
       koreaderPluginSourcePath: '/opt/koreader/bookorbit.koplugin',
     });
@@ -90,6 +94,11 @@ describe('config', () => {
     process.env.WAREHOUSE_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
     expect(appConfig().warehouse.encryptionKey).toBe('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+  });
+
+  it('parses ABS_OIDC_MOBILE_REDIRECT_URIS into a trimmed list, dropping blanks', () => {
+    process.env.ABS_OIDC_MOBILE_REDIRECT_URIS = ' stillapp://oauth ,, prologue://oauth ,';
+    expect(appConfig().absAllowedAppRedirects).toEqual(['stillapp://oauth', 'prologue://oauth']);
   });
 
   it('falls back to false when OIDC_ALLOW_LOCAL_ISSUERS is invalid', () => {

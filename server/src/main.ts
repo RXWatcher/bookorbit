@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Logger } from 'nestjs-pino';
 import type { ConfigType } from '@nestjs/config';
@@ -26,6 +26,7 @@ import {
   registerEmptyBodyContentTypeParser,
   shouldInjectEmptyJsonBody,
 } from './common/utils/bootstrap.utils';
+import { ABS_EXCLUDED_ROUTES, isAbsRoute, rewriteAbsUrl } from './modules/abs/abs-route-rewrite.util';
 
 const MAX_COVER_BYTES = 20 * 1024 * 1024;
 
@@ -37,7 +38,14 @@ type StaticHeaderTarget = {
 async function bootstrap() {
   const allowCloudflareInsights = parseBooleanEnv(process.env.CSP_ALLOW_CLOUDFLARE_INSIGHTS, false);
 
-  const adapter = new FastifyAdapter({ logger: false, trustProxy: parseTrustProxy(process.env.TRUST_PROXY), maxParamLength: 1000 });
+  const adapter = new FastifyAdapter({
+    logger: false,
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+    maxParamLength: 1000,
+    // Remap the ABS `/auth/refresh` route to a private path before routing so it does not collide
+    // with BookOrbit's own `auth/refresh` controller (see abs-route-rewrite.util.ts).
+    rewriteUrl: (req) => rewriteAbsUrl(req.url ?? '/'),
+  });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, { bufferLogs: true });
   app.useLogger(app.get(Logger));
 
@@ -66,25 +74,7 @@ async function bootstrap() {
   app.useWebSocketAdapter(new IoAdapter(app));
 
   app.setGlobalPrefix('api/v1', {
-    exclude: [
-      'api/kobo/:deviceToken/(.*)',
-      'ping',
-      'status',
-      'login',
-      'api/libraries',
-      'api/libraries/:libraryId/items',
-      'api/items/:itemId',
-      { path: 'api/items/:itemId/cover', method: RequestMethod.GET },
-      { path: 'api/items/:itemId/download', method: RequestMethod.GET },
-      { path: 'api/items/:itemId/play', method: RequestMethod.POST },
-      { path: 'api/items/:itemId/tracks/:trackId/stream', method: RequestMethod.GET },
-      { path: 'api/items/:itemId/progress', method: RequestMethod.POST },
-      { path: 'api/items/:itemId/progress', method: RequestMethod.PATCH },
-      { path: 'api/session/local', method: RequestMethod.POST },
-      { path: 'api/session/local-all', method: RequestMethod.POST },
-      'api/v3/(.*)',
-      'api/UserStorage/(.*)',
-    ],
+    exclude: ['api/kobo/:deviceToken/(.*)', 'api/v3/(.*)', 'api/UserStorage/(.*)', ...ABS_EXCLUDED_ROUTES],
   });
 
   app.useGlobalPipes(
@@ -95,7 +85,9 @@ async function bootstrap() {
     }),
   );
 
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  // ABS routes that never reach a controller (e.g. unimplemented endpoints 404ing) bypass the
+  // controller-scoped AbsExceptionFilter, so suppress BookOrbit's envelope for them here.
+  app.useGlobalFilters(new GlobalExceptionFilter(isAbsRoute));
 
   const appConfiguration = app.get<ConfigType<typeof appConfig>>(appConfig.KEY);
   if (appConfiguration.swaggerEnabled) {

@@ -69,7 +69,6 @@ import { ReleaseNotesModule } from './modules/release-notes/release-notes.module
 import { AchievementModule } from './modules/achievement/achievement.module';
 import { HardcoverModule } from './modules/hardcover/hardcover.module';
 import { WarehouseModule } from './modules/warehouse/warehouse.module';
-import { AudiobookshelfCompatModule } from './modules/audiobookshelf-compat/audiobookshelf-compat.module';
 import { ReadwiseModule } from './modules/readwise/readwise.module';
 import { StorygraphModule } from './modules/storygraph/storygraph.module';
 import { CustomMetadataModule } from './modules/custom-metadata/custom-metadata.module';
@@ -79,6 +78,7 @@ import { SharedReadingInsightsModule } from './modules/shared-reading-insights/s
 import { BookDuplicatesModule } from './modules/book-duplicates/book-duplicates.module';
 import { BookMoveModule } from './modules/book-move/book-move.module';
 import { BookSearchModule } from './modules/book-search/book-search.module';
+import { AbsModule } from './modules/abs/abs.module';
 
 @Module({
   imports: [
@@ -156,7 +156,6 @@ import { BookSearchModule } from './modules/book-search/book-search.module';
     AchievementModule,
     HardcoverModule,
     WarehouseModule,
-    AudiobookshelfCompatModule,
     ReadwiseModule,
     StorygraphModule,
     AccountActivityModule,
@@ -165,6 +164,7 @@ import { BookSearchModule } from './modules/book-search/book-search.module';
     BookMoveModule,
     BookSearchModule,
     BrowseCountsModule,
+    AbsModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
