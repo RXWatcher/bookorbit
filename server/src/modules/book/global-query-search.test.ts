@@ -1,8 +1,25 @@
-import { and, inArray } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import type { SQL } from 'drizzle-orm';
 import type { RequestUser } from '../../common/types/request-user';
 import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import * as schema from '../../db/schema';
 import { books } from '../../db/schema';
+import { BookQueryBuilder } from './book-query-builder.service';
+import { BookSortBuilder } from './book-sort-builder.service';
 import { BookService } from './book.service';
+
+/** A real drizzle instance over a stub client compiles the predicates the production code
+ *  would send, so the native read-time guards can be asserted on the emitted SQL rather than
+ *  on a mock's arguments. */
+function makeRealQueryBuilder() {
+  const client = { query: () => Promise.resolve({ rows: [], fields: [] }) };
+  const db = drizzle({ client: client as never, schema });
+  return { db, queryBuilder: new BookQueryBuilder(db as never, new BookSortBuilder()) };
+}
+
+function compileWhere(db: ReturnType<typeof makeRealQueryBuilder>['db'], where: SQL): { sql: string; params: unknown[] } {
+  return db.select({ id: books.id }).from(books).where(where).toSQL();
+}
 
 function makeUser(overrides?: Partial<RequestUser>): RequestUser {
   return {
@@ -23,15 +40,15 @@ function makeUser(overrides?: Partial<RequestUser>): RequestUser {
   };
 }
 
-function makeService() {
+function makeService(overrides: { queryBuilder?: unknown } = {}) {
   const bookRepo = {};
   const libraryService = {
     findAll: vi.fn().mockResolvedValue([{ id: 3 }]),
   };
-  const queryBuilder = {
+  const queryBuilder = (overrides.queryBuilder ?? {
     buildWhere: vi.fn().mockReturnValue('GLOBAL_WHERE'),
     buildOrderBy: vi.fn().mockReturnValue(['GLOBAL_ORDER']),
-  };
+  }) as { buildWhere: ReturnType<typeof vi.fn>; buildOrderBy: ReturnType<typeof vi.fn> };
   const metadataService = {};
   const scoreService = {};
   const pipeline = {};
@@ -193,7 +210,8 @@ describe('globalQuery search routing', () => {
   });
 
   it('excludes a native search result whose library is not in the user accessible library ids', async () => {
-    const { service, bookSearchService, libraryService } = makeService();
+    const { db, queryBuilder } = makeRealQueryBuilder();
+    const { service, bookSearchService, libraryService } = makeService({ queryBuilder });
     const user = makeUser({ id: 7 });
     libraryService.findAll.mockResolvedValue([{ id: 3 }]);
     // The index returns a native id for a book in library 99, which the user cannot access.
@@ -222,11 +240,66 @@ describe('globalQuery search routing', () => {
     // The where clause passed to executeBooksQuery must restrict to accessibleLibraryIds, not
     // just the requested book ids, so a book in an inaccessible library is excluded at read
     // time even if the search index still lists it.
-    expect(executeBooksQuerySpy).toHaveBeenCalledWith(
-      7,
-      and(inArray(books.id, [10, 20]), inArray(books.libraryId, [3])),
-      expect.objectContaining({ pagination: { page: 0, size: 2 } }),
-    );
+    const compiled = compileWhere(db, executeBooksQuerySpy.mock.calls[0][1] as SQL);
+    expect(compiled.sql).toContain('"books"."id" in');
+    expect(compiled.sql).toContain('"books"."library_id" in');
+    expect(compiled.params).toEqual(expect.arrayContaining([10, 20, 3]));
+  });
+
+  it('drops a native search result carrying a tag the user content filters exclude', async () => {
+    const { db, queryBuilder } = makeRealQueryBuilder();
+    const { service, bookSearchService, libraryService } = makeService({ queryBuilder });
+    const user = makeUser({
+      id: 7,
+      contentFilters: { includeTagIds: [], excludeTagIds: [42], includeGenreIds: [], excludeGenreIds: [] },
+    });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }]);
+    // Native documents are indexed with empty tags and genres, and Meili's `tags NOT IN [...]`
+    // matches an empty field, so the index happily returns the excluded book. Only the
+    // read-time filter keeps it out of the response.
+    bookSearchService.search.mockResolvedValue({
+      ids: ['native:10', 'native:20'],
+      total: 2,
+      page: 0,
+      size: 10,
+      provider: 'meilisearch',
+    });
+    const allowedBook = makeBookCard({ id: 20, title: 'Allowed Book' });
+    const executeBooksQuerySpy = vi
+      .spyOn(service, 'executeBooksQuery')
+      .mockResolvedValue({ items: [allowedBook], total: 1, page: 0, size: 2 } as never);
+
+    const result = await service.globalQuery(user, {
+      filter: null,
+      sort: [],
+      pagination: { page: 0, size: 10 },
+      q: 'dune',
+    } as never);
+
+    expect(result.items).toEqual([allowedBook]);
+    expect(result.items.some((item) => item.id === 10)).toBe(false);
+    const compiled = compileWhere(db, executeBooksQuerySpy.mock.calls[0][1] as SQL);
+    expect(compiled.sql).toContain('not exists');
+    expect(compiled.sql).toContain('"book_tags"');
+    expect(compiled.params).toEqual(expect.arrayContaining([42]));
+  });
+
+  it('does not apply content filters to a superuser native load', async () => {
+    const { db, queryBuilder } = makeRealQueryBuilder();
+    const { service, bookSearchService, libraryService } = makeService({ queryBuilder });
+    const user = makeUser({
+      id: 7,
+      isSuperuser: true,
+      contentFilters: { includeTagIds: [], excludeTagIds: [42], includeGenreIds: [], excludeGenreIds: [] },
+    });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }]);
+    bookSearchService.search.mockResolvedValue({ ids: ['native:10'], total: 1, page: 0, size: 10, provider: 'meilisearch' });
+    const executeBooksQuerySpy = vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [], total: 0, page: 0, size: 1 } as never);
+
+    await service.globalQuery(user, { filter: null, sort: [], pagination: { page: 0, size: 10 }, q: 'dune' } as never);
+
+    const compiled = compileWhere(db, executeBooksQuerySpy.mock.calls[0][1] as SQL);
+    expect(compiled.sql).not.toContain('not exists');
   });
 
   it('keeps the existing merge when a filter is present alongside a search term', async () => {

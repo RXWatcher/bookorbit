@@ -1459,7 +1459,7 @@ export class BookService {
     }
 
     const [nativeItems, catalogItemGroups] = await Promise.all([
-      this.loadNativeItemsByIds(user.id, nativeBookIds, accessibleLibraryIds),
+      this.loadNativeItemsByIds(user, nativeBookIds, accessibleLibraryIds),
       Promise.all(
         Array.from(catalogRemoteIdsByMediaType.entries()).map(([mediaType, remoteIds]) =>
           this.warehouseCatalog ? this.warehouseCatalog.getCatalogItemsByRemoteIds(user, mediaType, remoteIds) : Promise.resolve([]),
@@ -1481,13 +1481,19 @@ export class BookService {
     return ids.map((id) => itemsById.get(id)).filter((item): item is LibraryBookItem => item !== undefined);
   }
 
-  /** The search index is the first line of defence, but it can lag a permission change, so
-   *  this restricts to accessibleLibraryIds again at read time, the same way the merge path's
-   *  own `where` clause does. */
-  private async loadNativeItemsByIds(userId: number, bookIds: number[], accessibleLibraryIds: number[]): Promise<BookCard[]> {
+  /** The search index is the first line of defence, but native documents carry no tags or
+   *  genres and can lag a permission change, so the library scope and the user's content
+   *  filters are both re-applied here through the same buildWhere the merge path uses. */
+  private async loadNativeItemsByIds(user: RequestUser, bookIds: number[], accessibleLibraryIds: number[]): Promise<BookCard[]> {
     if (bookIds.length === 0 || accessibleLibraryIds.length === 0) return [];
 
-    const page = await this.executeBooksQuery(userId, and(inArray(books.id, bookIds), inArray(books.libraryId, accessibleLibraryIds)), {
+    const where = this.queryBuilder.buildWhere(null, {
+      accessibleLibraryIds,
+      userId: user.id,
+      contentFilters: this.isSuperuser(user) ? undefined : user.contentFilters,
+    });
+
+    const page = await this.executeBooksQuery(user.id, and(inArray(books.id, bookIds), where), {
       sort: [],
       pagination: { page: 0, size: bookIds.length },
     });
