@@ -170,7 +170,14 @@ function makeBook(overrides: Partial<BookCard> = {}): BookCard {
 }
 
 function mountCard(
-  props: Partial<{ book: BookCard; selectionMode: boolean; selected: boolean; showLabel: boolean; onSelect: (e: MouseEvent) => void }> = {},
+  props: Partial<{
+    book: BookCard
+    selectionMode: boolean
+    selected: boolean
+    showLabel: boolean
+    allowMoveToLibrary: boolean
+    onSelect: (e: MouseEvent) => void
+  }> = {},
 ) {
   return mount(BookCoverCard, {
     props: { book: makeBook(), selectionMode: false, selected: false, ...props },
@@ -215,6 +222,10 @@ function setTouchMode(value: boolean) {
 }
 
 // -- tests -------------------------------------------------------------------
+
+function menuLabels(wrapper: ReturnType<typeof mountCard>): string[] {
+  return wrapper.findAll('[data-testid="dropdown-item"]').map((node) => node.text().trim())
+}
 
 describe('BookCoverCard', () => {
   beforeEach(() => {
@@ -726,6 +737,25 @@ describe('BookCoverCard', () => {
       expect(badge.exists()).toBe(true)
       await badge.trigger('click')
       expect(mockRouterPush).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'reader' }))
+    })
+  })
+  describe('source backed items', () => {
+    // Move to library relocates files between filesystem libraries. A source
+    // backed item's files live upstream and its id is synthetic, so the action
+    // can only fail. BookListRow already gates it; the grid card did not.
+    it('hides move to library for a source backed book', () => {
+      const wrapper = mountCard({
+        book: makeBook({ id: -7, catalogSource: { mediaType: 'ebook', remoteId: 'ebook-7' } }),
+        allowMoveToLibrary: true,
+      })
+
+      expect(menuLabels(wrapper)).not.toContain('Move to library')
+    })
+
+    it('still offers move to library for a filesystem book', () => {
+      const wrapper = mountCard({ book: makeBook(), allowMoveToLibrary: true })
+
+      expect(menuLabels(wrapper)).toContain('Move to library')
     })
   })
 })

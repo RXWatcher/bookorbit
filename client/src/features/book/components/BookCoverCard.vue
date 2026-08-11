@@ -702,7 +702,10 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                     <FolderPlus class="size-4 mr-2" />
                     {{ t('book.actions.addToCollection') }}
                   </DropdownMenuItem>
-                  <DropdownMenuItem v-if="allowMoveToLibrary && hasPermission('library_edit_metadata')" @click="emit('action', 'move-to-library')">
+                  <DropdownMenuItem
+                    v-if="canUseLocalBookActions && allowMoveToLibrary && hasPermission('library_edit_metadata')"
+                    @click="emit('action', 'move-to-library')"
+                  >
                     <FolderInput class="size-4 mr-2" />
                     {{ t('book.move.action') }}
                   </DropdownMenuItem>
