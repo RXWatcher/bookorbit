@@ -188,17 +188,59 @@ describe('MeilisearchClient', () => {
 });
 
 describe('MeilisearchClient search strategy', () => {
-  it('requires every query word so the reported total stays meaningful', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ hits: [], estimatedTotalHits: 0 }),
+  function mockSearch(responses: Array<{ hits: Array<{ id: string }>; estimatedTotalHits: number }>) {
+    let call = 0;
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const body = responses[Math.min(call, responses.length - 1)];
+      call += 1;
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
     });
     vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
 
-    await new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).search('books', { q: 'the will of many', offset: 0, limit: 10 });
+  function strategyOf(fetchMock: ReturnType<typeof vi.fn>, callIndex: number): string {
+    return (JSON.parse((fetchMock.mock.calls[callIndex][1] as { body: string }).body) as { matchingStrategy: string }).matchingStrategy;
+  }
 
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as { matchingStrategy?: string };
-    expect(body.matchingStrategy).toBe('all');
+  it('requires every word so a good match reports an honest total', async () => {
+    const fetchMock = mockSearch([{ hits: [{ id: 'a' }], estimatedTotalHits: 2 }]);
+
+    const result = await new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).search('books', {
+      q: 'the will of many',
+      offset: 0,
+      limit: 10,
+    });
+
+    expect(result.total).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(strategyOf(fetchMock, 0)).toBe('all');
+  });
+
+  it('degrades to frequency when requiring every word finds nothing', async () => {
+    // "The Will of Many Kingdoms" carries a word the record does not have. Strict matching
+    // would return nothing, which is worse than a loose count.
+    const fetchMock = mockSearch([
+      { hits: [], estimatedTotalHits: 0 },
+      { hits: [{ id: 'a' }], estimatedTotalHits: 2 },
+    ]);
+
+    const result = await new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).search('books', {
+      q: 'the will of many kingdoms',
+      offset: 0,
+      limit: 10,
+    });
+
+    expect(result.total).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(strategyOf(fetchMock, 1)).toBe('frequency');
+  });
+
+  it('does not retry a single word query, since dropping words cannot help', async () => {
+    const fetchMock = mockSearch([{ hits: [], estimatedTotalHits: 0 }]);
+
+    await new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).search('books', { q: 'islingtn', offset: 0, limit: 10 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

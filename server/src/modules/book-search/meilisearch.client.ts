@@ -133,7 +133,29 @@ export class MeilisearchClient {
     }
   }
 
+  /**
+   * Searches strictly first, then degrades.
+   *
+   * Requiring every word keeps the reported total honest: a four word title search returned
+   * 172,991 hits under Meilisearch's default strategy where the SQL path reported 15. But
+   * requiring every word also means a single stray word the record does not contain yields
+   * nothing at all, which is worse than a loose count. So a strict search that finds nothing
+   * is retried with `frequency`, which drops the most common words first and therefore keeps
+   * the meaningful ones. The retry only happens when the strict pass found nothing, and never
+   * for a single word query, where dropping words cannot help.
+   */
   async search(index: string, params: { q: string; offset: number; limit: number; filter?: string[] }): Promise<{ ids: string[]; total: number }> {
+    const strict = await this.searchWithStrategy(index, params, 'all');
+    if (strict.total > 0 || !params.q.trim().includes(' ')) return strict;
+
+    return this.searchWithStrategy(index, params, 'frequency');
+  }
+
+  private async searchWithStrategy(
+    index: string,
+    params: { q: string; offset: number; limit: number; filter?: string[] },
+    matchingStrategy: 'all' | 'frequency',
+  ): Promise<{ ids: string[]; total: number }> {
     const body = await this.request<{
       hits?: Array<{ id: string }>;
       estimatedTotalHits?: number;
@@ -145,11 +167,7 @@ export class MeilisearchClient {
         limit: params.limit,
         filter: params.filter,
         attributesToRetrieve: ['id'],
-        // Meilisearch's default strategy drops query words from the end until it finds
-        // matches, so a four word title search reported 172,991 hits where the SQL path
-        // reported 15. Requiring every word keeps the count meaningful. Typo tolerance is
-        // unaffected: it applies per word, so a misspelled word still matches.
-        matchingStrategy: 'all',
+        matchingStrategy,
       },
     });
 
