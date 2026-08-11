@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { catalogLibraryItemRoute, catalogLibraryReaderRoute } from '@/features/warehouse/lib/catalog-item-route'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Clock, Play } from '@lucide/vue'
@@ -20,13 +21,32 @@ const isComic = computed(() => {
   return format != null && FORMAT_TO_GROUP[format] === 'cbx'
 })
 
+// This widget can surface a catalogue item, whose bookId is synthetic. The
+// native book and reader routes 404 on it, so route by what the item is.
+const catalogRef = computed(() => {
+  const item = data.value
+  if (!item || item.type !== 'catalog-item' || !item.mediaType || !item.remoteId) return null
+  return { mediaType: item.mediaType, remoteId: item.remoteId }
+})
+
 function goToBook() {
   if (!data.value) return
-  void router.push({ name: 'book-detail', params: { bookId: data.value.bookId } })
+  const source = catalogRef.value
+  void router.push(
+    source ? catalogLibraryItemRoute(source.mediaType, source.remoteId) : { name: 'book-detail', params: { bookId: data.value.bookId } },
+  )
 }
 
 function startReading() {
   if (!data.value) return
+  const source = catalogRef.value
+  if (source) {
+    void router.push({
+      ...catalogLibraryReaderRoute(source.mediaType, source.remoteId),
+      query: { format: data.value.fileFormat ?? 'epub' },
+    })
+    return
+  }
   if (data.value.fileId) {
     void router.push({
       name: 'reader',

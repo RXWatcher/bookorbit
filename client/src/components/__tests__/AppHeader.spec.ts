@@ -216,6 +216,25 @@ describe('AppHeader global search', () => {
     expect(mocks.routerPush).toHaveBeenCalledWith({ name: 'book-detail', params: { bookId: 101 } })
   })
 
+  it('opens a catalogue result on its library route, not the native book route', async () => {
+    // A catalogue book's id is synthetic, so pushing it at 'book-detail'
+    // rendered "This book doesn't exist or has been deleted" for every search
+    // hit that came from the catalogue.
+    mocks.results = ref([{ ...makeResult(-1000088856, 'The Will of the Many'), catalogSource: { mediaType: 'ebook' as const, remoteId: '67b2040d' } }])
+    const wrapper = mountHeader()
+    const input = wrapper.get('input[placeholder="Search all books..."]')
+
+    await input.trigger('focus')
+    await input.setValue('The Will of the Many')
+    await input.trigger('keydown', { key: 'ArrowDown' })
+    await input.trigger('keydown', { key: 'Enter' })
+
+    expect(mocks.routerPush).toHaveBeenCalledWith({
+      name: 'library-item-detail',
+      params: { id: 'ebooks', remoteId: '67b2040d' },
+    })
+  })
+
   it('loads more results from the dropdown footer', async () => {
     const wrapper = mountHeader()
     const input = wrapper.get('input[placeholder="Search all books..."]')

@@ -46,6 +46,7 @@ import BackgroundPicker from '@/components/BackgroundPicker.vue'
 import ThemePicker from '@/components/ThemePicker.vue'
 import SurfacePicker from '@/components/SurfacePicker.vue'
 import { useGlobalSearch, type GlobalSearchResult } from '@/features/book/composables/useGlobalSearch'
+import { bookDetailRoute } from '@/features/book/lib/source-backed-book'
 import BookCoverImage from '@/features/book/components/BookCoverImage.vue'
 import { useAuth } from '@/features/auth/composables/useAuth'
 import { useChangePasswordDialog } from '@/composables/useChangePasswordDialog'
@@ -261,7 +262,10 @@ function closeGithubStarPopover() {
 function navigateToResult(result: GlobalSearchResult) {
   clearSearch()
   mobileSearchOpen.value = false
-  router.push({ name: 'book-detail', params: { bookId: result.id } })
+  // Search returns catalogue books alongside filesystem ones, and a catalogue
+  // book's id is synthetic. Sending that to the native book route 404s with
+  // "This book doesn't exist or has been deleted", so route by source.
+  router.push(bookDetailRoute(result))
 }
 
 function handleSearchKeydown(e: KeyboardEvent) {
