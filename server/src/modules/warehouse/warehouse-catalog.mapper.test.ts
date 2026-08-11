@@ -209,6 +209,13 @@ describe('mapWarehouseEbookCatalogItemRow', () => {
 });
 
 describe('mapWarehouseComicCatalogItemRow', () => {
+  // The comic list payload has no cover field, so coverFlag() reported false on every
+  // comic and the grid rendered placeholders over perfectly good page images.
+  it('reports a cover even though the payload carries no cover field', () => {
+    const row = mapWarehouseComicCatalogItemRow({ id: 'c1', title: 'T' } as never, new Date('2026-01-01T00:00:00Z'));
+    expect(row.hasCover).toBe(true);
+  });
+
   // A comic payload carries seriesId but no series name. Without the lookup every comic
   // stores a null series, and the library becomes a flat list of story titles.
   it('resolves the series name from seriesId', () => {
@@ -274,7 +281,7 @@ describe('mapWarehouseComicCatalogItemRow', () => {
       series: 'Saga',
       publisher: 'Image',
       format: 'CBZ',
-      hasCover: false,
+      hasCover: true,
       syncedAt,
     });
     expect(row.identifiers).toEqual({

@@ -131,7 +131,12 @@ export function mapWarehouseComicCatalogItemRow(
     format: textValue(raw.format) ?? 'CBZ',
     fileSizeBytes: catalogFileSizeBytes(raw),
     publishedYear: catalogPublishedYear(raw),
-    hasCover: coverFlag(raw),
+    // A comic's cover is its first page, and the pages endpoint serves one for every item.
+    // The list payload carries no cover field at all, so coverFlag() would report false on
+    // every comic and the UI would render a placeholder over a perfectly good image. A
+    // missing page still degrades to the placeholder, because the artwork component falls
+    // back when the request fails.
+    hasCover: true,
     upstreamCreatedAt: dateValue(raw.createdAt) ?? dateValue(raw.created_at),
     upstreamUpdatedAt: dateValue(raw.updatedAt) ?? dateValue(raw.updated_at),
     rawPayload: raw,
