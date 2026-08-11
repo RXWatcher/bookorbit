@@ -145,6 +145,11 @@ export class MeilisearchClient {
         limit: params.limit,
         filter: params.filter,
         attributesToRetrieve: ['id'],
+        // Meilisearch's default strategy drops query words from the end until it finds
+        // matches, so a four word title search reported 172,991 hits where the SQL path
+        // reported 15. Requiring every word keeps the count meaningful. Typo tolerance is
+        // unaffected: it applies per word, so a misspelled word still matches.
+        matchingStrategy: 'all',
       },
     });
 

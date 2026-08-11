@@ -186,3 +186,19 @@ describe('MeilisearchClient', () => {
     await expect(new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).health()).resolves.toBe(false);
   });
 });
+
+describe('MeilisearchClient search strategy', () => {
+  it('requires every query word so the reported total stays meaningful', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ hits: [], estimatedTotalHits: 0 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).search('books', { q: 'the will of many', offset: 0, limit: 10 });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as { matchingStrategy?: string };
+    expect(body.matchingStrategy).toBe('all');
+  });
+});
