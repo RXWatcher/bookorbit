@@ -21,17 +21,25 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     applySettings: vi.fn().mockResolvedValue(undefined),
     deleteIndex: vi.fn().mockResolvedValue(undefined),
   };
+  // The stored active index has to move when save() is called, because the rebuild reads it
+  // back to confirm the flip landed before it deletes the index it replaced.
+  const state = { activeIndex: 'bookorbit_books' };
   const settings = {
-    get: vi.fn().mockResolvedValue({
-      enabled: true,
-      url: 'http://m:7700',
-      activeIndex: 'books',
-      hasApiKey: true,
-    }),
+    get: vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        enabled: true,
+        url: 'http://m:7700',
+        activeIndex: state.activeIndex,
+        hasApiKey: true,
+      }),
+    ),
     getApiKey: vi.fn().mockResolvedValue('key'),
-    save: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockImplementation((input: { activeIndex?: string }) => {
+      if (input.activeIndex) state.activeIndex = input.activeIndex;
+      return Promise.resolve(undefined);
+    }),
   };
-  return { repository, client, settings };
+  return { repository, client, settings, state };
 }
 
 const CATALOG_ROW = {
@@ -145,6 +153,67 @@ describe('SearchIndexerService', () => {
     (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
 
     await expect(service.rebuild()).rejects.toThrow('write failed');
+  });
+
+  it('deletes the index it replaced once the pointer has been flipped', async () => {
+    const { repository, client, settings } = makeDeps();
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    const { index } = await service.rebuild();
+
+    expect(client.deleteIndex).toHaveBeenCalledTimes(1);
+    expect(client.deleteIndex).toHaveBeenCalledWith('bookorbit_books');
+    expect(client.deleteIndex.mock.invocationCallOrder[0]).toBeGreaterThan(settings.save.mock.invocationCallOrder[0]);
+    expect(client.deleteIndex).not.toHaveBeenCalledWith(index);
+  });
+
+  it('deletes a previous rebuild index, which is what the active pointer normally names', async () => {
+    const { repository, client, settings, state } = makeDeps();
+    state.activeIndex = 'bookorbit_books_rebuild_1700000000000';
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await service.rebuild();
+
+    expect(client.deleteIndex).toHaveBeenCalledWith('bookorbit_books_rebuild_1700000000000');
+  });
+
+  it('refuses to delete an index this module does not own', async () => {
+    const { repository, client, settings, state } = makeDeps();
+    state.activeIndex = 'silo_media_items_rebuild_1785187701';
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await service.rebuild();
+
+    expect(client.deleteIndex).not.toHaveBeenCalled();
+  });
+
+  it('refuses to delete the index it just activated', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const { repository, client, settings, state } = makeDeps();
+    state.activeIndex = `bookorbit_books_rebuild_${Date.now()}`;
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    const { index } = await service.rebuild();
+
+    expect(index).toBe(state.activeIndex);
+    expect(client.deleteIndex).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('completes the rebuild even when deleting the replaced index fails', async () => {
+    const { repository, client, settings } = makeDeps();
+    client.deleteIndex.mockRejectedValue(new Error('delete refused'));
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await expect(service.rebuild()).resolves.toMatchObject({ indexed: 0 });
+    expect(settings.save).toHaveBeenCalled();
   });
 
   it('never deletes the index if it happens to match the currently active index name', async () => {

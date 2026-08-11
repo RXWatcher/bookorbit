@@ -10,7 +10,7 @@ import { WarehouseSecretService, type EncryptedWarehouseSecret } from '../wareho
 type Db = NodePgDatabase<typeof schema>;
 
 const SETTINGS_KEY = 'book_search_config';
-const DEFAULT_INDEX = 'bookorbit_books';
+export const DEFAULT_BOOK_SEARCH_INDEX = 'bookorbit_books';
 
 interface StoredConfig {
   enabled: boolean;
@@ -40,14 +40,14 @@ export class BookSearchSettingsService {
     const row = await this.db.query.appSettings.findFirst({
       where: eq(schema.appSettings.key, SETTINGS_KEY),
     });
-    if (!row?.value) return { enabled: false, url: '', activeIndex: DEFAULT_INDEX, apiKey: null };
+    if (!row?.value) return { enabled: false, url: '', activeIndex: DEFAULT_BOOK_SEARCH_INDEX, apiKey: null };
 
     try {
       const parsed = JSON.parse(row.value) as Partial<StoredConfig>;
       return {
         enabled: parsed.enabled === true,
         url: typeof parsed.url === 'string' ? parsed.url : '',
-        activeIndex: typeof parsed.activeIndex === 'string' && parsed.activeIndex ? parsed.activeIndex : DEFAULT_INDEX,
+        activeIndex: typeof parsed.activeIndex === 'string' && parsed.activeIndex ? parsed.activeIndex : DEFAULT_BOOK_SEARCH_INDEX,
         apiKey: parsed.apiKey ?? null,
       };
     } catch (error) {
@@ -57,7 +57,7 @@ export class BookSearchSettingsService {
       this.logger.warn(
         `[book_search.settings_parse] [fail] key=${SETTINGS_KEY} durationMs=${durationMs} errorClass=${errorClass} error="${errorMessage}" - failed to parse persisted book search settings, using defaults`,
       );
-      return { enabled: false, url: '', activeIndex: DEFAULT_INDEX, apiKey: null };
+      return { enabled: false, url: '', activeIndex: DEFAULT_BOOK_SEARCH_INDEX, apiKey: null };
     }
   }
 

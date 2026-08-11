@@ -3,7 +3,7 @@ import type { WarehouseMediaType } from '@bookorbit/types';
 
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { mapCatalogRowToDocument, mapNativeBookToDocument } from './book-search-document.mapper';
-import { BookSearchSettingsService } from './book-search.settings';
+import { BookSearchSettingsService, DEFAULT_BOOK_SEARCH_INDEX } from './book-search.settings';
 import type { BookSearchDocument } from './book-search.types';
 import { MeilisearchClient } from './meilisearch.client';
 import { SearchIndexRepository } from './search-index.repository';
@@ -155,6 +155,37 @@ export class SearchIndexerService {
     }
   }
 
+  /** Only a name this module owns may be removed, and never the one the pointer now aims at.
+   *  Meilisearch is shared with another product, so a cleanup bug that removed a live index
+   *  would be far worse than the leak it exists to prevent. */
+  private isDeletableIndexName(index: string): boolean {
+    return index.startsWith(REBUILD_INDEX_PREFIX) || index === DEFAULT_BOOK_SEARCH_INDEX;
+  }
+
+  /** Runs after the pointer has been flipped, so the rebuild has already succeeded and a
+   *  failure here is logged rather than surfaced. */
+  private async deleteReplacedIndex(client: MeilisearchClient, previousIndex: string, activeIndex: string): Promise<void> {
+    if (!previousIndex || previousIndex === activeIndex || !this.isDeletableIndexName(previousIndex)) {
+      return;
+    }
+
+    try {
+      const config = await this.settings.get();
+      if (config.activeIndex !== activeIndex) {
+        return;
+      }
+
+      await client.deleteIndex(previousIndex);
+      this.logger.log(`[search_index.rebuild_replace] [end] index="${sanitizeLogValue(previousIndex)}" - deleted the index the rebuild replaced`);
+    } catch (error) {
+      const errorClass = error instanceof Error ? error.name : 'UnknownError';
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[search_index.rebuild_replace] [fail] index="${sanitizeLogValue(previousIndex)}" errorClass=${errorClass} error="${sanitizeLogValue(message)}" - failed to delete the replaced index, it is left on the server`,
+      );
+    }
+  }
+
   async rebuild(): Promise<{ indexed: number; index: string }> {
     const startedAt = Date.now();
     const index = `${REBUILD_INDEX_PREFIX}${Date.now()}`;
@@ -164,6 +195,7 @@ export class SearchIndexerService {
     this.logger.log(`[search_index.rebuild] [start] index="${sanitizeLogValue(index)}" - rebuild started`);
 
     try {
+      const previousIndex = (await this.settings.get()).activeIndex;
       client = await this.clientFor();
       await client.createIndex(index);
       created = true;
@@ -182,6 +214,7 @@ export class SearchIndexerService {
       }
 
       await this.settings.save({ activeIndex: index });
+      await this.deleteReplacedIndex(client, previousIndex, index);
 
       this.logger.log(
         `[search_index.rebuild] [end] index="${sanitizeLogValue(index)}" durationMs=${Date.now() - startedAt} indexed=${indexed} - rebuild completed`,
