@@ -46,7 +46,7 @@ export function useGlobalSearch(query: Ref<string>) {
       if (gen !== generation) return
 
       results.value = append ? [...results.value, ...data.items] : data.items
-      total.value = data.total
+      total.value = data.total ?? total.value
       nextPage = data.page + 1
     } catch {
       if (gen !== generation || requestController.signal.aborted) return

@@ -98,6 +98,40 @@ describe('useBookWindow', () => {
     expect(window.initialized.value).toBe(true)
   })
 
+  it('asks for the row count once, then omits it while scrolling', async () => {
+    // The count is the dominant cost of a page on a large library and cannot
+    // change mid-query, so recomputing it per block wasted most of the request.
+    mockBlocks(500)
+    const { window } = makeWindow()
+    await flush()
+    await window.ensureRange(100, 299)
+    await flush()
+
+    const flags = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as { includeTotal?: boolean }).includeTotal)
+    expect(flags[0]).toBe(true)
+    expect(flags.slice(1).every((flag) => flag === false)).toBe(true)
+    expect(window.total.value).toBe(500)
+  })
+
+  it('keeps the known total when a block response omits it', async () => {
+    mockBlocks(500)
+    const { window } = makeWindow()
+    await flush()
+
+    fetchMock.mockImplementation((_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { pagination: { page: number } }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ...pageFor(body.pagination.page, 500), total: null }),
+      })
+    })
+    await window.ensureRange(100, 199)
+    await flush()
+
+    expect(window.total.value).toBe(500)
+    expect(window.slots.value).toHaveLength(500)
+  })
+
   it('does nothing when the endpoint is null', async () => {
     const { window } = makeWindow(null)
     await flush()

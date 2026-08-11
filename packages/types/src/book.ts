@@ -323,7 +323,8 @@ export type BookKoboState = {
 
 export type BooksPage = {
   items: BookCard[];
-  total: number;
+  /** Null when the request asked for the count to be skipped; the caller keeps the total it already had. */
+  total: number | null;
   page: number;
   size: number;
 };

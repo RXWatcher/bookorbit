@@ -90,9 +90,14 @@ export function useBookWindow(options: { endpoint: Ref<string | null>; query: Re
     loading.value = true
 
     try {
+      // The count is the dominant cost of a page on a large library and cannot
+      // change while the window scrolls a single query, so ask for it only
+      // until we have one. Keying off the total rather than a first-block flag
+      // means a failed first block still recovers it on retry.
       const body: BookQuery = {
         ...options.query.value,
         pagination: { page: block, size: BOOK_WINDOW_BLOCK_SIZE },
+        includeTotal: total.value === 0,
       }
       const res = await api(endpoint, {
         method: 'POST',
@@ -106,13 +111,14 @@ export function useBookWindow(options: { endpoint: Ref<string | null>; query: Re
       const data: BooksPage = await res.json()
       if (gen !== generation) return
 
-      const next = resizeSlots(slots.value, data.total)
+      const knownTotal = data.total ?? total.value
+      const next = resizeSlots(slots.value, knownTotal)
       const start = block * BOOK_WINDOW_BLOCK_SIZE
       for (let i = 0; i < data.items.length && start + i < next.length; i++) {
         next[start + i] = data.items[i]!
       }
       slots.value = next
-      total.value = data.total
+      total.value = knownTotal
       error.value = null
       failedAt.delete(block)
     } catch (e) {

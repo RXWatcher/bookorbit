@@ -92,7 +92,8 @@ export class AudiobookshelfCompatService {
         : await this.bookService.queryForLibrary(user, decoded.libraryId, query);
 
     try {
-      return mapAbsLibraryItemsPage(decoded.libraryId, page);
+      // The Audiobookshelf clients need a count, and this path always asks for one.
+      return mapAbsLibraryItemsPage(decoded.libraryId, { ...page, total: page.total ?? 0 });
     } catch (error) {
       if (error instanceof AbsItemMappingError) {
         throw new BadRequestException(error.message);

@@ -800,7 +800,7 @@ export class WarehouseCatalogService {
 
     return {
       items: page.rows.map(mapSeriesCatalogItem),
-      total: page.total,
+      total: page.total ?? 0,
       page: page.page,
       limit: page.limit,
     };
@@ -810,7 +810,7 @@ export class WarehouseCatalogService {
     user: RequestUser,
     mediaType: WarehouseMediaType,
     query: BookQuery,
-  ): Promise<{ items: BookCard[]; total: number; page: number; limit: number }> {
+  ): Promise<{ items: BookCard[]; total: number | null; page: number; limit: number }> {
     if (!(await this.isCatalogEnabled())) {
       return { items: [], total: 0, page: query.pagination.page, limit: query.pagination.size };
     }
@@ -823,6 +823,7 @@ export class WarehouseCatalogService {
       sort: query.sort,
       page: query.pagination.page,
       limit: query.pagination.size,
+      includeTotal: query.includeTotal,
       contentFilters: user.isSuperuser ? undefined : user.contentFilters,
     });
 
@@ -921,7 +922,7 @@ export class WarehouseCatalogService {
       }
 
       updated += result.rows.length;
-      if (result.rows.length === 0 || updated >= result.total) {
+      if (result.rows.length === 0 || updated >= (result.total ?? 0)) {
         break;
       }
       page += 1;

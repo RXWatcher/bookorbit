@@ -10,6 +10,7 @@ const sortFieldSchema = z.custom<SortField>((value) => typeof value === 'string'
 
 const bookQuerySchema = z.object({
   collapseSeries: z.boolean().optional(),
+  includeTotal: z.boolean().optional(),
   filter: groupRuleSchema(5).optional(),
   q: z.string().max(200).optional(),
   sort: z

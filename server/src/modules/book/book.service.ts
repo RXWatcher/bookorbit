@@ -1403,7 +1403,8 @@ export class BookService {
     const sortedItems = sortLibraryBookItems(items, effectiveSort, effectiveQuery.q);
     return {
       items: sortedItems.slice(page * size, page * size + size),
-      total: localPage.total + sourcePages.reduce((sum, sourcePage) => sum + (sourcePage?.total ?? 0), 0),
+      // This path always requests the count, so the totals are present.
+      total: (localPage.total ?? 0) + sourcePages.reduce((sum, sourcePage) => sum + (sourcePage?.total ?? 0), 0),
       page,
       size,
     };
@@ -1535,7 +1536,7 @@ export class BookService {
         ...query,
         pagination: { page, size: limit },
       });
-      total = sourcePage.total;
+      total = sourcePage.total ?? total;
       items.push(...sourcePage.items);
 
       if (sourcePage.items.length === 0 || items.length >= total) break;

@@ -264,7 +264,8 @@ export class SmartScopeService {
           `[smart_scope.query_books] [end] scopeId=${id} userId=${user.id} resultCount=${result.items.length} durationMs=${durationMs} - slow query`,
         );
       }
-      return result;
+      // Smart scopes always request the count.
+      return { ...result, total: result.total ?? 0 };
     } catch (err) {
       const durationMs = Date.now() - start;
       this.logger.error(
@@ -348,7 +349,7 @@ export class SmartScopeService {
 
     return {
       items: result.rows.map(mapCatalogSmartScopeItem),
-      total: result.total,
+      total: result.total ?? 0,
       page: result.page,
       size: result.limit,
     };

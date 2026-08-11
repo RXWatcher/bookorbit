@@ -38,7 +38,7 @@ export class SqlSearchProvider implements BookSearchProvider {
 
     return {
       ids: page.rows.map((row) => catalogDocumentId(row.mediaType, row.remoteId)),
-      total: page.total,
+      total: page.total ?? 0,
       page: page.page,
       size: page.limit,
     };

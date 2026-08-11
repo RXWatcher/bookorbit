@@ -139,7 +139,8 @@ export type CatalogListRow = Omit<UserOwnedCatalogItemRow, 'rawPayload'>;
 
 type CatalogPage = {
   rows: UserOwnedCatalogItemRow[];
-  total: number;
+  /** Null when the caller asked to skip the count, which a scrolling window does after its first block. */
+  total: number | null;
   page: number;
   limit: number;
 };
@@ -321,6 +322,7 @@ type UserCatalogItemsQuery = {
   page?: number;
   limit?: number;
   contentFilters?: ContentFilterRules;
+  includeTotal?: boolean;
 };
 type JumpBucketRawRow = {
   bucket: string | null;
@@ -1970,6 +1972,7 @@ export class WarehouseRepository {
     const limit = clampNumber(query.limit, DEFAULT_LIMIT, 1, MAX_LIMIT);
     const smartScopeWhere = query.filter ? buildCatalogSmartScopeWhere(query.filter, userId) : undefined;
     const includeAllCatalogItems = query.includeAllCatalogItems === true;
+    const includeTotal = query.includeTotal !== false;
     const mediaTypes = query.mediaTypes?.length ? query.mediaTypes : undefined;
 
     if (smartScopeWhere === null || query.mediaTypes?.length === 0 || query.remoteIds?.length === 0) {
@@ -2109,12 +2112,15 @@ export class WarehouseRepository {
           )
           .where(where);
 
-    // Independent of each other, so the page and its count go to the database together.
-    const [rows, totalRows] = await Promise.all([rowsQuery, totalQuery]);
+    // Independent of each other, so the page and its count go to the database
+    // together. A windowed list scrolls block by block and only needs the count
+    // once: on a 242k row library the count costs about 28ms against 0.7ms for
+    // the rows, so recomputing it per block is nearly all of the query time.
+    const [rows, totalRows] = await Promise.all([rowsQuery, includeTotal ? totalQuery : Promise.resolve(null)]);
 
     return {
       rows,
-      total: Number(totalRows[0]?.total ?? 0),
+      total: totalRows === null ? null : Number(totalRows[0]?.total ?? 0),
       page,
       limit,
     };

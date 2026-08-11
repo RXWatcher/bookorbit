@@ -128,7 +128,7 @@ export function useLibraryBooks<TItem extends LibraryBookItem = BookCard>(
       } else {
         items.value = [...items.value, ...(page.items as TItem[])]
       }
-      total.value = page.total
+      total.value = page.total ?? total.value
       pagination.page++
     } catch (e) {
       if (controller.signal.aborted) return

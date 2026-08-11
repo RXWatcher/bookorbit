@@ -367,4 +367,11 @@ export type BookQuery = {
   pagination: { page: number; size: number };
   collapseSeries?: boolean;
   q?: string;
+  /**
+   * Whether this request needs the row count recomputed. A windowed list asks
+   * once per query and then scrolls, and the count is the dominant cost of a
+   * shallow page: 28ms against 0.7ms for the rows themselves on a 242k
+   * library. Omitted means true, so existing callers are unaffected.
+   */
+  includeTotal?: boolean;
 };

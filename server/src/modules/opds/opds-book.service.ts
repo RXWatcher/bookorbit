@@ -1194,7 +1194,7 @@ export class OpdsBookService {
     });
     return {
       entries: catalogPage.rows.map((row) => this.catalogEbookEntryFromUserCatalogRow(row)),
-      total: catalogPage.total,
+      total: catalogPage.total ?? 0,
     };
   }
 

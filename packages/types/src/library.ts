@@ -111,7 +111,8 @@ export type LibraryBookItem = BookCard | DashboardCatalogItem;
 
 export interface LibraryBooksPage {
   items: LibraryBookItem[];
-  total: number;
+  /** Null when the request asked to skip the count; the caller keeps the total it already had. */
+  total: number | null;
   page: number;
   size: number;
 }
