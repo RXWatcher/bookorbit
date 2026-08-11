@@ -408,6 +408,14 @@
            disabled:opacity-50 transition-colors;
   }
 
+  /* Masks a secret that is not a BookOrbit login credential (API keys, sync
+     tokens, SMTP passwords). Pair with type="text" and SECRET_INPUT_ATTRS from
+     @/lib/secret-input so Chrome's password manager ignores the field; see that
+     module for why type="password" cannot be used here. */
+  .input-secret {
+    -webkit-text-security: disc;
+  }
+
   /* ── Settings action buttons ─────────────────────────────────
      Use these on <button> elements in settings panels (headers,
      card rows, inline forms). Matches the Kobo "Add device" size.

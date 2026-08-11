@@ -34,6 +34,7 @@ import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
 import { copyToClipboard } from '@/lib/clipboard'
 import { useKoreaderSync } from '@/features/koreader/composables/useKoreaderSync'
 import { useGlobalSearch } from '@/features/book/composables/useGlobalSearch'
+import { SECRET_INPUT_ATTRS } from '@/lib/secret-input'
 
 const { t } = useI18n()
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
@@ -674,10 +675,11 @@ async function handleDownloadPlugin() {
             <div class="relative">
               <input
                 v-model="newPassword"
-                :type="showPassword ? 'text' : 'password'"
+                v-bind="SECRET_INPUT_ATTRS"
+                type="text"
                 :placeholder="t('settings.reader.koreader.passwordPlaceholder')"
                 class="input-field w-full pr-10"
-                autocomplete="new-password"
+                :class="{ 'input-secret': !showPassword }"
               />
               <button class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" @click="handleTogglePassword">
                 <EyeOff v-if="showPassword" :size="14" />

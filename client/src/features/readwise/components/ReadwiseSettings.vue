@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import type { ReadwiseSyncDisabledReason, ReadwiseTokenValidationResult } from '@bookorbit/types'
 import SettingsPageHeader from '@/features/settings/SettingsPageHeader.vue'
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
+import { SECRET_INPUT_ATTRS } from '@/lib/secret-input'
 import { useReadwiseSettings } from '../composables/useReadwiseSettings'
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
@@ -103,10 +104,11 @@ function toggleTokenVisible() {
           <input
             :id="tokenInputId"
             v-model="tokenInput"
-            :type="tokenVisible ? 'text' : 'password'"
+            v-bind="SECRET_INPUT_ATTRS"
+            type="text"
             placeholder="Paste your Readwise access token"
             class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-            autocomplete="off"
+            :class="{ 'input-secret': !tokenVisible }"
           />
           <button
             type="button"

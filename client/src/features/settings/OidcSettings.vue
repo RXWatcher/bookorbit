@@ -8,6 +8,7 @@ import { Permission, PERMISSION_LABELS } from '@bookorbit/types'
 import { ArrowLeft, Plus, ShieldCheck, Trash2 } from '@lucide/vue'
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
 import SettingsPageHeader from './SettingsPageHeader.vue'
+import { SECRET_INPUT_ATTRS } from '@/lib/secret-input'
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
   embedded: false,
@@ -633,10 +634,10 @@ async function deleteGroupMapping(id: number) {
             </p>
             <input
               v-model="form.clientSecret"
-              type="password"
+              v-bind="SECRET_INPUT_ATTRS"
+              type="text"
               :placeholder="viewMode === 'edit' ? t('settings.oidc.form.clientSecretPlaceholder') : ''"
-              autocomplete="new-password"
-              class="input-field w-full md:w-72"
+              class="input-field input-secret w-full md:w-72"
             />
           </div>
           <div class="flex flex-col gap-2 px-4 py-3.5 bg-card md:flex-row md:items-center md:justify-between md:gap-8 md:px-5 md:py-4">

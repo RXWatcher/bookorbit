@@ -10,6 +10,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { usePermissions } from '@/features/auth/composables/usePermissions'
 import type { OpdsUser, OpdsSortOrder } from '@bookorbit/types'
 import { useMediaQuery } from '@vueuse/core'
+import { SECRET_INPUT_ATTRS } from '@/lib/secret-input'
 
 const { t } = useI18n()
 const { hasPermission } = usePermissions()
@@ -290,7 +291,13 @@ watch(
         </div>
         <div>
           <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ t('settings.reader.opds.password') }}</label>
-          <input v-model="createPassword" type="password" :placeholder="t('settings.reader.opds.passwordPlaceholder')" class="input-field w-full" />
+          <input
+            v-model="createPassword"
+            v-bind="SECRET_INPUT_ATTRS"
+            type="text"
+            :placeholder="t('settings.reader.opds.passwordPlaceholder')"
+            class="input-field input-secret w-full"
+          />
         </div>
         <div>
           <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ t('settings.reader.opds.defaultSort') }}</label>
