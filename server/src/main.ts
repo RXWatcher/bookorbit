@@ -29,6 +29,11 @@ import {
 
 const MAX_COVER_BYTES = 20 * 1024 * 1024;
 
+type StaticHeaderTarget = {
+  setHeader?: (name: string, value: string) => void;
+  header?: (name: string, value: string) => void;
+};
+
 async function bootstrap() {
   const allowCloudflareInsights = parseBooleanEnv(process.env.CSP_ALLOW_CLOUDFLARE_INSIGHTS, false);
 
@@ -133,8 +138,17 @@ async function bootstrap() {
     await app.register(fastifyStatic as never, {
       root: join(__dirname, '..', 'public'),
       prefix: '/',
-      setHeaders: (res: { setHeader(name: string, value: string): void }, filePath: string) => {
-        res.setHeader('Cache-Control', cacheControlForStaticPath(filePath));
+      // @fastify/static v10 invokes this with the Fastify reply, which sets
+      // headers through header(), not the raw response's setHeader(). Calling
+      // setHeader() here crashed the process on the first static request, so
+      // both shapes are handled in case a future version passes the raw one.
+      setHeaders: (res: StaticHeaderTarget, filePath: string) => {
+        const cacheControl = cacheControlForStaticPath(filePath);
+        if (typeof res.setHeader === 'function') {
+          res.setHeader('Cache-Control', cacheControl);
+          return;
+        }
+        res.header?.('Cache-Control', cacheControl);
       },
     });
   }
