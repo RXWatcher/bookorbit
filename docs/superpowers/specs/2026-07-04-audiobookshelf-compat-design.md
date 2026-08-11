@@ -282,8 +282,8 @@ type AbsLibraryId = {
 };
 
 type AbsItemRef =
-  | { libraryId: number; kind: 'book'; bookId: number }
-  | { libraryId: number; kind: 'catalog'; catalogItemId: number };
+  | { libraryId: number; kind: "book"; bookId: number }
+  | { libraryId: number; kind: "catalog"; catalogItemId: number };
 
 type AbsAssetRequest = {
   item: AbsItemRef;
@@ -336,7 +336,7 @@ Rules:
 Use three sources of truth:
 
 1. Audiobookshelf API docs for broad endpoint names.
-2. Silo PR #289 as a compatibility checklist.
+2. another product PR #289 as a compatibility checklist.
 3. Actual ABS iOS/Android app traffic as the final authority.
 
 Verification steps:

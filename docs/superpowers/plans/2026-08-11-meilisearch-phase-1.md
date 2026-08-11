@@ -12,7 +12,7 @@
 
 - Tables under `warehouse_*` and any new table referencing `warehouse_media_type` live in the hand managed lineage `server/src/db/warehouse-migrations/`, NOT `server/src/db/migrations/`. Hand write the SQL following the existing hand written migrations there, and add a `_journal.json` entry. Do not run `pnpm db:generate` for them. Do not add a snapshot file.
 - There is no local PostgreSQL in this environment, so `pnpm db:migrate` cannot run and must NOT be attempted. Migrations are committed unapplied.
-- The Meilisearch server is CT115 at `http://192.168.30.115:7700`, version 1.48.3. It already holds silo's index. Do not run destructive Meili operations against it during development.
+- The Meilisearch server is the search host at `http://<meili-host>:7700`, version 1.48.3. It already holds the other product's index. Do not run destructive Meili operations against it during development.
 - Never use em dashes in any output: code, comments, strings, commit messages, docs.
 - Never add a `Co-authored-by` trailer to any commit. Hard repo rule.
 - Test files use `.test.ts`. Vitest globals are available, so do not import `describe`, `it`, `expect` or `vi`.
@@ -1355,14 +1355,12 @@ function makeService(
     search: sqlSearch,
   };
   const settings = {
-    get: vi
-      .fn()
-      .mockResolvedValue({
-        enabled: true,
-        url: "http://m:7700",
-        activeIndex: "i",
-        hasApiKey: true,
-      }),
+    get: vi.fn().mockResolvedValue({
+      enabled: true,
+      url: "http://m:7700",
+      activeIndex: "i",
+      hasApiKey: true,
+    }),
   };
   return {
     service: new BookSearchService(
@@ -1559,14 +1557,12 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     applySettings: vi.fn().mockResolvedValue(undefined),
   };
   const settings = {
-    get: vi
-      .fn()
-      .mockResolvedValue({
-        enabled: true,
-        url: "http://m:7700",
-        activeIndex: "books",
-        hasApiKey: true,
-      }),
+    get: vi.fn().mockResolvedValue({
+      enabled: true,
+      url: "http://m:7700",
+      activeIndex: "books",
+      hasApiKey: true,
+    }),
     getApiKey: vi.fn().mockResolvedValue("key"),
     save: vi.fn().mockResolvedValue(undefined),
   };
@@ -1589,16 +1585,14 @@ describe("SearchIndexerService", () => {
 
   it("leaves events in the outbox when the write fails, so they retry", async () => {
     const { repository, client, settings } = makeDeps({
-      claimBatch: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            id: 1,
-            entityType: "catalog_item",
-            entityId: "catalog:ebook:1",
-            operation: "delete",
-          },
-        ]),
+      claimBatch: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          entityType: "catalog_item",
+          entityId: "catalog:ebook:1",
+          operation: "delete",
+        },
+      ]),
     });
     client.deleteDocuments.mockRejectedValue(new Error("meili down"));
     const service = new SearchIndexerService(
@@ -1785,14 +1779,12 @@ import { BookSearchController } from "./book-search.controller";
 describe("BookSearchController", () => {
   it("returns settings without the api key", async () => {
     const settings = {
-      get: vi
-        .fn()
-        .mockResolvedValue({
-          enabled: true,
-          url: "http://m:7700",
-          activeIndex: "i",
-          hasApiKey: true,
-        }),
+      get: vi.fn().mockResolvedValue({
+        enabled: true,
+        url: "http://m:7700",
+        activeIndex: "i",
+        hasApiKey: true,
+      }),
       save: vi.fn(),
     };
     const controller = new BookSearchController(
@@ -1922,21 +1914,21 @@ git commit -m "feat(search): serve global search from the provider when availabl
 
 **Files:**
 
-- No source changes. This task is operational and runs against CT139 and CT115.
+- No source changes. This task is operational and runs against the application host and the search host.
 
-- [ ] **Step 1: Create an index scoped key on CT115**
+- [ ] **Step 1: Create an index scoped key on the search host**
 
-Create a key limited to this integration's indexes rather than reusing silo's master key, which can modify silo's 1.58M document index:
+Create a key limited to this integration's indexes rather than reusing the other product's master key, which can modify the other product's a large existing index:
 
 ```bash
-curl -s -X POST http://192.168.30.115:7700/keys \
-  -H "Authorization: Bearer <silo master key>" -H 'Content-Type: application/json' \
+curl -s -X POST http://<meili-host>:7700/keys \
+  -H "Authorization: Bearer <another product master key>" -H 'Content-Type: application/json' \
   -d '{"description":"bookorbit","actions":["search","documents.*","indexes.*","settings.*","tasks.get"],"indexes":["bookorbit_books*"],"expiresAt":null}'
 ```
 
 Record the returned key. Do not print it into a shared transcript.
 
-- [ ] **Step 2: Deploy the build to CT139**
+- [ ] **Step 2: Deploy the build to the application host**
 
 Follow the deploy recipe: `git archive` to a tarball, `scp` to ns18, `pct push` into 139, extract to a new directory, `docker build`, tag as `bookorbit:merged`, `docker compose up -d` from `/opt/bookorbit`. Tag a rollback image first.
 
@@ -1962,5 +1954,5 @@ Set `enabled: false` and repeat the first query. It must still return results, s
 ## Out of scope for this plan
 
 - Author and series indexes. Phase 2.
-- Hybrid semantic search using the `silo_recommendations` embedder. Phase 3.
+- Hybrid semantic search using the `<embedder-name>` embedder. Phase 3.
 - A UI for these settings. The endpoints are admin only and callable directly, matching how local-scan shipped before its UI.

@@ -40,13 +40,13 @@ titles are frequently built from stopwords, so FTS is the wrong primary matcher 
 
 Checked on 2026-08-11, not assumed:
 
-- **CT115 `silo-meilisearch`**, 8 cores, 32GB RAM, Meilisearch **1.48.3**.
-- Reachable from CT139: `GET /health` returns 200.
-- Existing load: one index, `silo_media_items_rebuild_1785187701`, 1,584,819 documents, 16GB.
+- **the search host `the shared search server`**, 8 cores, 32GB RAM, Meilisearch **1.48.3**.
+- Reachable from the application host: `GET /health` returns 200.
+- Existing load: one index, `<other-product-index>`, a large existings, 16GB.
 - Headroom: 583MB of 32GB memory in use, 17G of 98G disk.
 - BookOrbit's catalogue is 410,095 rows, roughly a quarter of what that server already holds.
 
-Capacity is not a constraint. The API key is encrypted at rest under silo's `SECRET_KEY`
+Capacity is not a constraint. The API key is encrypted at rest under the other product's `SECRET_KEY`
 with AAD `server_settings:<key>`, so it is readable but must not be reused (see Security).
 
 ## Goals
@@ -59,7 +59,7 @@ with AAD `server_settings:<key>`, so it is readable but must not be reused (see 
 ## Non-goals for phase 1
 
 - Author and series indexes. Those browse pages keep using SQL. Phase 2.
-- Semantic or hybrid search. Silo already has an embedder named `silo_recommendations` and
+- Semantic or hybrid search. another product already has an embedder named `<embedder-name>` and
   BookOrbit's database has pgvector, so this is available later. Phase 3.
 - Replacing the SQL search code. It stays as the fallback.
 
@@ -117,7 +117,7 @@ rewritten. That keeps the fallback honest: it is the code that is running today.
 
 ### Sync, using an outbox
 
-Silo's pattern, which is proven on 1.58M documents:
+another product's pattern, which is proven on a large existings:
 
 - `search_index_events` table: `(id, entity_type, entity_id, operation, enqueued_at)`.
 - Rows are enqueued **in the same transaction** as the data change: catalogue sync upserts,
@@ -126,7 +126,7 @@ Silo's pattern, which is proven on 1.58M documents:
 - A background drainer batches events to Meili and deletes what it has applied.
 - `rebuild()` writes a fresh `bookorbit_books_rebuild_<timestamp>` index, then flips the active
   index name in settings. Meili has no alias, so the settings pointer is the swap. This mirrors
-  what silo does, which is why its live index carries a `_rebuild_` name.
+  what another product does, which is why its live index carries a `_rebuild_` name.
 
 Failure handling: a drain failure leaves events in the table and retries on the next tick, so
 the outbox is the retry queue. A rebuild that fails leaves the old index active and untouched.
@@ -139,8 +139,8 @@ url, active index name, enabled flag, and the API key.
 ## Security
 
 BookOrbit gets its **own index-scoped key**, created through Meili's `/keys` API and limited to
-`bookorbit_books*`. It must not reuse silo's master key: a bug or a leak in BookOrbit would
-otherwise be able to modify or delete silo's 1.58M-document index.
+`bookorbit_books*`. It must not reuse the other product's master key: a bug or a leak in BookOrbit would
+otherwise be able to modify or delete the other product's 1.58M-document index.
 
 The key is a credential and must be stored encrypted, using the same
 `apiKeyEncrypted`/`apiKeyNonce`/`apiKeyTag` scheme `warehouse_settings` already uses. It must
@@ -166,8 +166,8 @@ a separate defect and should not be copied.
 | Risk                                         | Mitigation                                                                                                                               |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Index drifts from the database               | Transactional outbox rather than best effort writes, plus a rebuild command to resynchronise                                             |
-| CT115 becomes a hard dependency              | SQL fallback, which is the code path running today                                                                                       |
-| BookOrbit damages silo's index               | Index scoped key, separate index, never the master key                                                                                   |
+| the search host becomes a hard dependency    | SQL fallback, which is the code path running today                                                                                       |
+| BookOrbit damages the other product's index  | Index scoped key, separate index, never the master key                                                                                   |
 | Fork divergence makes upstream merges harder | Confined to a new module plus a provider seam in `BookService`; the v2.5.0 merge cost 83 conflicts, so keeping the surface small matters |
 | Two search behaviours to reason about        | Fallback is logged, and the admin UI shows which provider served the last search                                                         |
 

@@ -16,14 +16,14 @@ an incomplete view of what actually exists.
 
 ### Measured gap
 
-Measured on CT139 against the live catalogue on 2026-08-10.
+Measured on the application host against the live catalogue on 2026-08-10.
 
-| Media | Source path (under `/mnt/sharedrives/zd-storage-ceph-books`) | On disk, absent from warehouse | In warehouse, absent from disk |
-| --- | --- | --- | --- |
-| ebook | `ebooks/Books_English` | 7,108 | 25 |
-| audiobook | `audiobooks/Audiobooks_English` | 58,102 | 452 |
-| comic | `comics/English` | about 7 | 0 |
-| magazine | `magazines/Magazines_English` | about 74,400 (all of it) | not applicable |
+| Media     | Source path (under `/mnt/sharedrives/zd-storage-ceph-books`) | On disk, absent from warehouse | In warehouse, absent from disk |
+| --------- | ------------------------------------------------------------ | ------------------------------ | ------------------------------ |
+| ebook     | `ebooks/Books_English`                                       | 7,108                          | 25                             |
+| audiobook | `audiobooks/Audiobooks_English`                              | 58,102                         | 452                            |
+| comic     | `comics/English`                                             | about 7                        | 0                              |
+| magazine  | `magazines/Magazines_English`                                | about 74,400 (all of it)       | not applicable                 |
 
 Roughly 139,600 items are invisible in BookOrbit today. The 477 reverse cases are catalogue rows
 whose files have moved or been deleted.
@@ -91,12 +91,12 @@ builds the media specific key, and inserts only unmatched items.
 Matching strategy per media type, behind a `LocalMatchStrategy` interface so each rule is
 independently testable:
 
-| Media | Key on the catalogue side | Key on the disk side |
-| --- | --- | --- |
-| ebook | `raw_payload.calibre_path` | book directory relative to `Books_English` |
+| Media     | Key on the catalogue side                           | Key on the disk side                            |
+| --------- | --------------------------------------------------- | ----------------------------------------------- |
+| ebook     | `raw_payload.calibre_path`                          | book directory relative to `Books_English`      |
 | audiobook | `raw_payload.files[].storage_key`, prefix rewritten | book directory relative to `Audiobooks_English` |
-| comic | `title` plus `issueNumber` | `.cbz` filename, parsed |
-| magazine | none, the warehouse has no magazine concept | every file is local |
+| comic     | `title` plus `issueNumber`                          | `.cbz` filename, parsed                         |
+| magazine  | none, the warehouse has no magazine concept         | every file is local                             |
 
 Comics are the weak case. Their payload is only
 `{id, title, language, seriesId, publisher, issueNumber}` with no path and no hash, so the match
@@ -173,13 +173,13 @@ resolver returns a clear error for that case rather than a generic 500.
 
 ## Risks
 
-| Risk | Mitigation |
-| --- | --- |
-| A future warehouse sync gains a prune and deletes local rows | Regression test on the no delete property, plus scope any future prune to `source = 'warehouse'` |
-| Comic heuristic creates duplicates | Population is about 4,831; unmatched comics are flagged, not silently merged |
-| Scale: about 139,600 new rows and a 1.5M file walk | Batched inserts, streamed directory walking, resumable runs with progress logging per the logging conventions |
-| Mount unavailability breaks local items | Explicit error from the resolver, warehouse items unaffected |
-| Path traversal through `local_path` | Normalise and confine to configured roots before any read |
+| Risk                                                         | Mitigation                                                                                                    |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| A future warehouse sync gains a prune and deletes local rows | Regression test on the no delete property, plus scope any future prune to `source = 'warehouse'`              |
+| Comic heuristic creates duplicates                           | Population is about 4,831; unmatched comics are flagged, not silently merged                                  |
+| Scale: about 139,600 new rows and a 1.5M file walk           | Batched inserts, streamed directory walking, resumable runs with progress logging per the logging conventions |
+| Mount unavailability breaks local items                      | Explicit error from the resolver, warehouse items unaffected                                                  |
+| Path traversal through `local_path`                          | Normalise and confine to configured roots before any read                                                     |
 
 ## Open questions
 

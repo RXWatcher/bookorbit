@@ -1684,11 +1684,11 @@ git commit -m "feat(local-scan): expose admin scan endpoints"
 
 **Files:**
 
-- No source changes. This task is operational and CANNOT be executed in the development environment, because it needs the migrations applied and the server running. Do not dispatch an implementer for it. It runs against CT139 after Plan 1 is deployed, and is recorded here so the verification numbers are not lost.
+- No source changes. This task is operational and CANNOT be executed in the development environment, because it needs the migrations applied and the server running. Do not dispatch an implementer for it. It runs against the application host after Plan 1 is deployed, and is recorded here so the verification numbers are not lost.
 
 - [ ] **Step 1: Insert the roots**
 
-The three in scope roots for this plan, on CT139. The magazines root is deliberately excluded here because `magazine` is not yet a valid media type; it arrives in Plan 2.
+The three in scope roots for this plan, on the application host. The magazines root is deliberately excluded here because `magazine` is not yet a valid media type; it arrives in Plan 2.
 
 ```sql
 insert into local_scan_roots (media_type, absolute_path) values
