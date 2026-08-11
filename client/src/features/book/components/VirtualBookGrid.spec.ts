@@ -3,22 +3,7 @@ import { nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { BookCard } from '@bookorbit/types'
 import VirtualBookGrid from './VirtualBookGrid.vue'
-
-const scrollToItemMock = vi.fn<(index: number, options?: { align?: string }) => void>()
-
-vi.mock('vue-virtual-scroller', () => ({
-  RecycleScroller: {
-    name: 'RecycleScroller',
-    props: ['items', 'keyField'],
-    emits: ['update'],
-    methods: {
-      scrollToItem(index: number, options?: { align?: string }) {
-        scrollToItemMock(index, options)
-      },
-    },
-    template: '<div data-testid="recycle-scroller">' + '<slot v-for="(item, i) in items" :key="keyField(item, i)" :item="item" />' + '</div>',
-  },
-}))
+import type { BookSlot } from '../composables/useBookWindow'
 
 vi.mock('./BookCoverCard.vue', () => ({
   default: {
@@ -88,27 +73,17 @@ function makeBook(id: number, overrides: Partial<BookCard> = {}): BookCard {
   }
 }
 
+// Mirrors what useBookWindow hands over: a slot per row, where everything not
+// yet fetched is the one shared placeholder object.
+function makeCatalogue(total: number, loaded = 200): BookSlot[] {
+  const placeholder = Object.freeze({ id: 0, placeholder: true as const })
+  const slots: BookSlot[] = Array.from({ length: total }, () => placeholder)
+  for (let index = 0; index < Math.min(loaded, total); index++) slots[index] = makeBook(index + 1)
+  return slots
+}
+
 describe('VirtualBookGrid', () => {
-  it('gives every slot a distinct scroller key when placeholders are shared', () => {
-    const placeholder = Object.freeze({ id: 0, placeholder: true as const })
-    // Source backed libraries hand out negative ids, so the placeholder key
-    // space has to stay clear of the whole numeric range.
-    const books = [makeBook(-7), placeholder, placeholder, makeBook(-8), placeholder]
-
-    const wrapper = mount(VirtualBookGrid, {
-      props: { books, coverSize: 120, gridGap: 12 },
-    })
-
-    const scroller = wrapper.getComponent({ name: 'RecycleScroller' })
-    const keyField = scroller.props('keyField') as (slot: unknown, index: number) => string | number
-    const keys = books.map((slot, index) => keyField(slot, index))
-
-    expect(new Set(keys).size).toBe(books.length)
-    expect(keys[0]).toBe(-7)
-    expect(keys[1]).toBe('placeholder:1')
-  })
-
-  it('uses the virtual scroller by default', () => {
+  it('uses the virtual window by default', () => {
     const wrapper = mount(VirtualBookGrid, {
       props: {
         books: [makeBook(1), makeBook(2)],
@@ -117,7 +92,7 @@ describe('VirtualBookGrid', () => {
       },
     })
 
-    expect(wrapper.find('[data-testid="recycle-scroller"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="book-grid-virtual"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="book-grid-static"]').exists()).toBe(false)
   })
 
@@ -132,7 +107,7 @@ describe('VirtualBookGrid', () => {
       },
     })
 
-    expect(wrapper.find('[data-testid="recycle-scroller"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="book-grid-virtual"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="book-card"]')).toHaveLength(27)
     expect(wrapper.get('[data-testid="book-grid-static"]').classes()).toContain('items-end')
   })
@@ -269,24 +244,107 @@ describe('VirtualBookGrid', () => {
       expect(wrapper.findAll('[data-testid="book-card"]')).toHaveLength(2)
     })
 
-    it('re-emits the scroller update event as a range event', async () => {
+    it('renders only the visible window of a very large catalogue', async () => {
       const wrapper = mount(VirtualBookGrid, {
-        props: { books: [makeBook(1)], coverSize: 120, gridGap: 12 },
+        props: { books: makeCatalogue(100_000), coverSize: 120, gridGap: 12 },
       })
+      await nextTick()
 
-      wrapper.getComponent({ name: 'RecycleScroller' }).vm.$emit('update', 10, 60, 20, 50)
-      await wrapper.vm.$nextTick()
+      const rendered = wrapper.findAll('[data-testid="book-card"]').length
+      expect(rendered).toBeGreaterThan(0)
+      expect(rendered).toBeLessThan(200)
 
-      expect(wrapper.emitted('range')).toEqual([[10, 60]])
+      // The scroll surface still spans the whole catalogue even though almost
+      // none of it exists in the DOM.
+      const style = wrapper.get('[data-testid="book-grid-virtual"]').attributes('style') ?? ''
+      const height = Number(/(?:^|;)\s*height:\s*(\d+)px/.exec(style)?.[1])
+      expect(height).toBeGreaterThan(1_000_000)
     })
 
-    it('exposes scrollToIndex which delegates to the scroller', () => {
+    it('keeps the scroll surface inside the browser element height cap', async () => {
+      // Two columns of a 410k row catalogue wants roughly 60M px, well past
+      // what Blink or Gecko will lay out.
       const wrapper = mount(VirtualBookGrid, {
-        props: { books: [makeBook(1)], coverSize: 120, gridGap: 12 },
+        props: { books: makeCatalogue(410_000), coverSize: 3_000, gridGap: 12 },
+      })
+      await nextTick()
+
+      const style = wrapper.get('[data-testid="book-grid-virtual"]').attributes('style') ?? ''
+      const height = Number(/(?:^|;)\s*height:\s*(\d+)px/.exec(style)?.[1])
+      expect(height).toBeGreaterThan(0)
+      expect(height).toBeLessThanOrEqual(16_000_000)
+      expect(wrapper.get('[data-testid="book-grid-virtual"]').classes()).toContain('book-grid-scroller--compressed')
+    })
+
+    it('reaches the last row of a catalogue too tall to lay out', async () => {
+      const scrollParent = document.createElement('div')
+      scrollParent.style.overflowY = 'auto'
+      document.body.append(scrollParent)
+      const wrapper = mount(VirtualBookGrid, {
+        attachTo: scrollParent,
+        props: { books: makeCatalogue(410_000), coverSize: 3_000, gridGap: 12 },
+      })
+      await nextTick()
+
+      ;(wrapper.vm as unknown as { scrollToIndex: (i: number) => void }).scrollToIndex(409_999)
+
+      // The compressed surface must still be a position the element can hold.
+      expect(scrollParent.scrollTop).toBeGreaterThan(0)
+      expect(scrollParent.scrollTop).toBeLessThanOrEqual(16_000_000)
+
+      wrapper.unmount()
+      scrollParent.remove()
+    })
+
+    it('emits a range that covers the visible window, not the catalogue', async () => {
+      const wrapper = mount(VirtualBookGrid, {
+        props: { books: makeCatalogue(5_000), coverSize: 120, gridGap: 12 },
+      })
+      await nextTick()
+
+      const ranges = wrapper.emitted('range') as [number, number][] | undefined
+      expect(ranges).toBeDefined()
+      const [start, end] = ranges![ranges!.length - 1]!
+      expect(start).toBe(0)
+      expect(end).toBeGreaterThan(0)
+      expect(end).toBeLessThan(4_999)
+    })
+
+    it('keeps shared placeholder slots distinct when one of them loads', async () => {
+      const placeholder = Object.freeze({ id: 0, placeholder: true as const })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const wrapper = mount(VirtualBookGrid, {
+        props: { books: [makeBook(-7), placeholder, placeholder, placeholder], coverSize: 120, gridGap: 12 },
       })
 
-      ;(wrapper.vm as unknown as { scrollToIndex: (i: number) => void }).scrollToIndex(42)
-      expect(scrollToItemMock).toHaveBeenCalledWith(42, { align: 'start' })
+      expect(wrapper.findAll('[data-testid="book-cover-skeleton"]')).toHaveLength(3)
+
+      await wrapper.setProps({ books: [makeBook(-7), placeholder, makeBook(-8), placeholder] })
+
+      expect(wrapper.findAll('[data-testid="book-cover-skeleton"]')).toHaveLength(2)
+      expect(wrapper.findAll('[data-testid="book-card"]')).toHaveLength(2)
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('Duplicate keys')
+      warn.mockRestore()
+    })
+
+    it('scrolls the scroll parent to put the requested row at the top', async () => {
+      const scrollParent = document.createElement('div')
+      scrollParent.style.overflowY = 'auto'
+      document.body.append(scrollParent)
+      const books = Array.from({ length: 400 }, (_, index) => makeBook(index + 1))
+      const wrapper = mount(VirtualBookGrid, {
+        attachTo: scrollParent,
+        props: { books, coverSize: 120, gridGap: 12 },
+      })
+      await nextTick()
+
+      expect(scrollParent.scrollTop).toBe(0)
+      ;(wrapper.vm as unknown as { scrollToIndex: (i: number) => void }).scrollToIndex(200)
+
+      expect(scrollParent.scrollTop).toBeGreaterThan(0)
+
+      wrapper.unmount()
+      scrollParent.remove()
     })
 
     it('reports index zero at the top and preserves a jump target within the same row', async () => {

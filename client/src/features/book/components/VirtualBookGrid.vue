@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useElementSize, useWindowSize, watchDebounced } from '@vueuse/core'
-import { RecycleScroller } from 'vue-virtual-scroller'
 import type { BookCard, CoverAspectRatio, JumpBucketKind } from '@bookorbit/types'
 import BookCoverCard from './BookCoverCard.vue'
 import BookCoverSkeleton from './BookCoverSkeleton.vue'
@@ -46,7 +45,6 @@ const emit = defineEmits<{
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
-const scrollerRef = ref<{ scrollToItem: (index: number, options?: { align?: 'start' | 'center' | 'end' | 'auto' }) => void } | null>(null)
 const { width: containerWidth } = useElementSize(containerRef)
 const { width: windowWidth } = useWindowSize()
 
@@ -135,6 +133,61 @@ const scrollerStyle = computed(() => ({
   '--book-grid-label-height': `${labelAreaHeight.value}px`,
 }))
 
+// Scroll offset of the viewport into this grid, and the viewport's height.
+// Everything the virtual window renders derives from these two numbers plus
+// the uniform row geometry above, so no per-item measurement is ever needed.
+const scrolledIntoGrid = ref(0)
+const viewportHeight = ref(0)
+
+// Browsers cap how tall a single element may be: Blink at 2^25 px, Gecko at
+// about 17.9M. A 410k book library at two columns wants roughly 60M px, so
+// past the cap the tail of the library simply cannot be scrolled to. Beyond
+// this height the scroll surface is compressed and the mapping below trades
+// scroll precision for reach. Under it the scale is exactly 1 and every
+// formula here reduces to plain row arithmetic.
+const MAX_SCROLL_SURFACE_PX = 16_000_000
+
+const rowCount = computed(() => Math.ceil(props.books.length / gridItems.value))
+const contentHeight = computed(() => rowCount.value * itemSize.value)
+const totalHeight = computed(() => Math.min(contentHeight.value, MAX_SCROLL_SURFACE_PX))
+const scrollScale = computed(() => (contentHeight.value > totalHeight.value ? contentHeight.value / totalHeight.value : 1))
+const bufferRows = computed(() => Math.max(1, Math.ceil(buffer.value / itemSize.value)))
+
+// Where the viewport sits in content coordinates, which is what rows are laid
+// out in. Identical to the scroll offset unless the surface is compressed.
+const contentOffset = computed(() => scrolledIntoGrid.value * scrollScale.value)
+
+const firstVisibleRow = computed(() => {
+  if (itemSize.value <= 0) return 0
+  return Math.max(0, Math.floor(contentOffset.value / itemSize.value))
+})
+const lastVisibleRow = computed(() => {
+  if (itemSize.value <= 0) return 0
+  const bottom = contentOffset.value + Math.max(viewportHeight.value, 1) - 1
+  return Math.max(firstVisibleRow.value, Math.floor(bottom / itemSize.value))
+})
+
+const startRow = computed(() => Math.max(0, firstVisibleRow.value - bufferRows.value))
+const endRow = computed(() => Math.min(Math.max(rowCount.value - 1, 0), lastVisibleRow.value + bufferRows.value))
+
+const windowStartIndex = computed(() => startRow.value * gridItems.value)
+const windowEndIndex = computed(() => Math.min(props.books.length - 1, (endRow.value + 1) * gridItems.value - 1))
+
+// The only slice of the catalogue that ever reaches the DOM or a v-for. On a
+// 410k row library this is a few dozen entries rather than 410k.
+const windowSlots = computed(() => {
+  if (props.books.length === 0) return []
+  return props.books.slice(windowStartIndex.value, windowEndIndex.value + 1)
+})
+// Places the row holding contentOffset exactly at the viewport top. At scale 1
+// this is just startRow * itemSize.
+const windowOffset = computed(() => scrolledIntoGrid.value - contentOffset.value + startRow.value * itemSize.value)
+
+const windowStyle = computed(() => ({
+  transform: `translateY(${windowOffset.value}px)`,
+  gridTemplateColumns: `repeat(${gridItems.value}, ${itemSecondarySize.value}px)`,
+}))
+
 const staticGridStyle = computed(() => ({
   gap: `${gapPx.value}px`,
   gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${coverPx.value}px), 1fr))`,
@@ -169,17 +222,14 @@ function staticCoverAspectRatio(book: BookCard): CoverAspectRatio {
   return book.coverAspectRatio ?? coverAspectRatio.value
 }
 
-function handleScrollerUpdate(startIndex: number, endIndex: number) {
-  emit('range', startIndex, endIndex)
-}
-
-// First visible index from scroll geometry: O(1), no per-cell DOM reads, and
-// independent of RecycleScroller's buffer-inflated visibleStartIndex.
+// First visible index from scroll geometry: O(1) and no per-cell DOM reads.
 const firstVisibleIndex = ref(0)
 let scrollParent: HTMLElement | null = null
+let scrollTarget: HTMLElement | Window | null = null
 let scrollRafId = 0
 let jumpAnchorIndex: number | null = null
 let jumpAnchorRowStart: number | null = null
+let lastEmittedIndex: number | null = null
 
 function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
@@ -189,44 +239,71 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null
 }
 
-function computeFirstVisibleIndex() {
+// Falls back to the window when no ancestor scrolls. Without a viewport the
+// virtual window would have no height to fill and would render nothing.
+function viewportBounds(): { top: number; height: number } {
+  if (scrollParent) {
+    const rect = scrollParent.getBoundingClientRect()
+    return { top: rect.top, height: rect.height }
+  }
+  return { top: 0, height: window.innerHeight }
+}
+
+function measureViewport() {
   const gridEl = containerRef.value
-  if (!scrollParent || !gridEl || props.books.length === 0 || itemSize.value <= 0) return
-  const parentRect = scrollParent.getBoundingClientRect()
-  const gridRect = gridEl.getBoundingClientRect()
-  const scrolledIntoGrid = parentRect.top - gridRect.top
-  const row = Math.max(0, Math.floor(scrolledIntoGrid / itemSize.value))
+  if (!gridEl) return
+  const { top, height } = viewportBounds()
+  scrolledIntoGrid.value = Math.max(0, top - gridEl.getBoundingClientRect().top)
+  viewportHeight.value = Math.max(0, height)
+}
+
+function emitActiveIndex() {
+  if (props.books.length === 0 || itemSize.value <= 0) return
   const cols = gridItems.value
+  const row = firstVisibleRow.value
   const rowStart = Math.min(props.books.length - 1, row * cols)
   firstVisibleIndex.value = rowStart
+
+  let active: number
   if (jumpAnchorIndex !== null) {
-    const lastVisibleRow = Math.max(row, Math.floor(Math.max(0, parentRect.bottom - gridRect.top - 1) / itemSize.value))
     const anchorRow = Math.floor(jumpAnchorIndex / cols)
     if (jumpAnchorRowStart === null) {
-      if (anchorRow >= row && anchorRow <= lastVisibleRow) {
-        jumpAnchorRowStart = rowStart
-        emit('first-visible-index', jumpAnchorIndex)
-      }
-      return
+      if (anchorRow < row || anchorRow > lastVisibleRow.value) return
+      jumpAnchorRowStart = rowStart
+      active = jumpAnchorIndex
+    } else if (rowStart === jumpAnchorRowStart) {
+      active = jumpAnchorIndex
+    } else {
+      jumpAnchorIndex = null
+      jumpAnchorRowStart = null
+      active = activeIndexForRow(row, rowStart, cols)
     }
-    if (rowStart === jumpAnchorRowStart) {
-      emit('first-visible-index', jumpAnchorIndex)
-      return
-    }
-    jumpAnchorIndex = null
-    jumpAnchorRowStart = null
+  } else {
+    active = activeIndexForRow(row, rowStart, cols)
   }
-  // At the top boundary the first rail target must stay active. Below it, the
-  // midpoint represents the section occupying most of the first visible row.
-  const activeIndex = row === 0 ? 0 : Math.min(props.books.length - 1, rowStart + Math.floor((cols - 1) / 2))
-  emit('first-visible-index', activeIndex)
+
+  if (active === lastEmittedIndex) return
+  lastEmittedIndex = active
+  emit('first-visible-index', active)
+}
+
+// At the top boundary the first rail target must stay active. Below it, the
+// midpoint represents the section occupying most of the first visible row.
+function activeIndexForRow(row: number, rowStart: number, cols: number): number {
+  if (row === 0) return 0
+  return Math.min(props.books.length - 1, rowStart + Math.floor((cols - 1) / 2))
+}
+
+function updateFromScroll() {
+  measureViewport()
+  emitActiveIndex()
 }
 
 function handleScrollParentScroll() {
   if (scrollRafId) return
   scrollRafId = requestAnimationFrame(() => {
     scrollRafId = 0
-    computeFirstVisibleIndex()
+    updateFromScroll()
   })
 }
 
@@ -234,15 +311,46 @@ onMounted(() => {
   if (!props.virtualized) return
   void nextTick(() => {
     scrollParent = findScrollParent(containerRef.value)
-    scrollParent?.addEventListener('scroll', handleScrollParentScroll, { passive: true })
+    scrollTarget = scrollParent ?? window
+    scrollTarget.addEventListener('scroll', handleScrollParentScroll, { passive: true })
+    window.addEventListener('resize', handleScrollParentScroll, { passive: true })
+    updateFromScroll()
   })
 })
 
 onBeforeUnmount(() => {
-  scrollParent?.removeEventListener('scroll', handleScrollParentScroll)
+  scrollTarget?.removeEventListener('scroll', handleScrollParentScroll)
+  window.removeEventListener('resize', handleScrollParentScroll)
+  scrollTarget = null
   scrollParent = null
   if (scrollRafId) cancelAnimationFrame(scrollRafId)
 })
+
+// A relayout changes row height and column count, so the measured offset maps
+// to a different row than it did a moment ago.
+watch([itemSize, gridItems, () => props.books.length], () => {
+  if (!props.virtualized) return
+  void nextTick(updateFromScroll)
+})
+
+const emitRange = () => {
+  if (!props.virtualized || props.books.length === 0) return
+  emit('range', windowStartIndex.value, windowEndIndex.value)
+}
+watch([windowStartIndex, windowEndIndex], emitRange, { immediate: true })
+
+function scrollRowToTop(index: number) {
+  const gridEl = containerRef.value
+  if (!gridEl || itemSize.value <= 0) return
+  const gridTop = gridEl.getBoundingClientRect().top
+  const offsetIntoGrid = (Math.floor(index / gridItems.value) * itemSize.value) / scrollScale.value
+  if (scrollParent) {
+    scrollParent.scrollTop += gridTop - scrollParent.getBoundingClientRect().top + offsetIntoGrid
+  } else {
+    window.scrollTo({ top: window.scrollY + gridTop + offsetIntoGrid })
+  }
+  updateFromScroll()
+}
 
 // Re-anchor on column-count changes so a relayout keeps the same books in
 // view. firstVisibleIndex still holds the pre-relayout value here because it
@@ -252,14 +360,14 @@ watch(gridItems, (next, prev) => {
   const anchor = firstVisibleIndex.value
   if (anchor <= 0) return
   void nextTick(() => {
-    scrollerRef.value?.scrollToItem(anchor)
+    scrollRowToTop(anchor)
   })
 })
 
 function scrollToIndex(index: number) {
   jumpAnchorIndex = index
   jumpAnchorRowStart = null
-  scrollerRef.value?.scrollToItem(index, { align: 'start' })
+  scrollRowToTop(index)
 }
 
 defineExpose({ scrollToIndex })
@@ -317,23 +425,20 @@ defineExpose({ scrollToIndex })
       </div>
     </div>
 
-    <RecycleScroller
+    <div
       v-else
-      ref="scrollerRef"
-      :items="books"
-      :key-field="slotKey"
-      page-mode
-      emit-update
-      :item-size="itemSize"
-      :grid-items="gridItems"
-      :item-secondary-size="itemSecondarySize"
-      :buffer="buffer"
-      :style="scrollerStyle"
       class="book-grid-scroller"
-      @update="handleScrollerUpdate"
+      :class="{ 'book-grid-scroller--compressed': scrollScale > 1 }"
+      :style="[scrollerStyle, { height: `${totalHeight}px` }]"
+      data-testid="book-grid-virtual"
     >
-      <template #default="{ item }">
-        <div class="book-grid-cell" :class="{ 'book-grid-cell--new': props.newBookIds.has(item.id) }">
+      <div class="book-grid-window" :style="windowStyle">
+        <div
+          v-for="(item, offset) in windowSlots"
+          :key="slotKey(item, windowStartIndex + offset)"
+          class="book-grid-cell"
+          :class="{ 'book-grid-cell--new': props.newBookIds.has(item.id) }"
+        >
           <BookCoverSkeleton v-if="isBookPlaceholder(item)" />
           <CollapsedSeriesCard
             v-else-if="asBook(item).collapsedSeries"
@@ -353,17 +458,14 @@ defineExpose({ scrollToIndex })
             @update:book="emit('update:book', $event)"
           />
         </div>
-      </template>
-    </RecycleScroller>
+      </div>
+    </div>
   </div>
 </template>
 
-<style>
-@import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
-</style>
-
 <style scoped>
 .book-grid-scroller {
+  position: relative;
   width: 100%;
   max-width: 100%;
   /* clip, not hidden: hidden still creates a scrollable box, so focusing a
@@ -376,6 +478,21 @@ defineExpose({ scrollToIndex })
   .book-grid-scroller {
     touch-action: pan-y;
   }
+}
+
+/* A compressed surface renders buffer rows above its own top edge, which would
+   otherwise paint over the toolbar. Only compressed grids pay the clip, so
+   card hover effects still overflow freely everywhere else. */
+.book-grid-scroller--compressed {
+  overflow: clip;
+}
+
+.book-grid-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  will-change: transform;
 }
 
 .book-grid-cell {
