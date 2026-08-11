@@ -1,6 +1,8 @@
+import { Logger } from '@nestjs/common';
+
 import { BookSearchService } from './book-search.service';
 
-const QUERY = { q: 'dune', page: 0, size: 10, userId: 1 };
+const QUERY = { q: 'dune', page: 0, size: 10, userId: 1, accessibleLibraryIds: [] };
 
 function makeService(
   meili: Partial<{ isAvailable: unknown; search: unknown }>,
@@ -87,5 +89,38 @@ describe('BookSearchService', () => {
     await service.search(QUERY);
 
     expect(service.lastProvider()).toBe('sql');
+  });
+
+  it('falls back to SQL when the settings read throws', async () => {
+    const { service } = makeService({});
+    (service as unknown as { settings: { get: ReturnType<typeof vi.fn> } }).settings.get.mockRejectedValue(new Error('connection lost'));
+
+    await expect(service.search(QUERY)).resolves.toMatchObject({
+      ids: ['sql:1'],
+      provider: 'sql',
+    });
+  });
+
+  it('logs the user id and duration, without the query text, when falling back on unavailability', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { service } = makeService({ isAvailable: vi.fn().mockResolvedValue(false) });
+
+    await service.search(QUERY);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/^\[book_search\.fallback\] \[end\] userId=1 durationMs=\d+ reason=unavailable - /));
+    expect(warnSpy.mock.calls[0][0]).not.toContain('dune');
+    warnSpy.mockRestore();
+  });
+
+  it('logs the user id, duration, and error class when Meilisearch search throws', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { service } = makeService({ search: vi.fn().mockRejectedValue(new Error('connection refused')) });
+
+    await service.search(QUERY);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[book_search\.fallback\] \[fail\] userId=1 durationMs=\d+ errorClass=Error error="connection refused" - /),
+    );
+    warnSpy.mockRestore();
   });
 });

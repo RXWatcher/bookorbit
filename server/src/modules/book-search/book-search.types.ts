@@ -1,3 +1,5 @@
+import type { ContentFilterRulesWithNames } from '@bookorbit/types';
+
 export type BookSearchSource = 'catalog' | 'native';
 
 export interface BookSearchDocument {
@@ -29,8 +31,11 @@ export interface BookSearchQuery {
   page: number;
   size: number;
   userId: number;
+  /** Libraries the user is allowed to see. Required so a caller cannot forget the access check. */
+  accessibleLibraryIds: number[];
   mediaTypes?: string[];
   libraryIds?: number[];
+  contentFilters?: ContentFilterRulesWithNames;
 }
 
 export interface BookSearchPage {

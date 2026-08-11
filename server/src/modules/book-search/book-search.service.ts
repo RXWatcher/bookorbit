@@ -24,20 +24,27 @@ export class BookSearchService {
   }
 
   async search(query: BookSearchQuery): Promise<BookSearchPage & { provider: ProviderName }> {
-    const config = await this.settings.get();
+    const startedAt = Date.now();
 
-    if (config.enabled) {
-      try {
+    try {
+      const config = await this.settings.get();
+
+      if (config.enabled) {
         if (await this.meili.isAvailable()) {
           const page = await this.meili.search(query);
           this.last = 'meilisearch';
           return { ...page, provider: 'meilisearch' };
         }
-        this.logger.warn('[book_search.fallback] [end] reason=unavailable - search fell back to sql');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`[book_search.fallback] [fail] reason=error error="${sanitizeLogValue(message)}" - search fell back to sql`);
+        this.logger.warn(
+          `[book_search.fallback] [end] userId=${query.userId} durationMs=${Date.now() - startedAt} reason=unavailable - search fell back to sql`,
+        );
       }
+    } catch (error) {
+      const errorClass = error instanceof Error ? error.name : 'UnknownError';
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[book_search.fallback] [fail] userId=${query.userId} durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${sanitizeLogValue(message)}" - search fell back to sql`,
+      );
     }
 
     const page = await this.sql.search(query);

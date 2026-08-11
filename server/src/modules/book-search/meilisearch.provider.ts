@@ -1,10 +1,47 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import type { ContentFilterRulesWithNames } from '@bookorbit/types';
 
 import { BookSearchSettingsService } from './book-search.settings';
 import { MeilisearchClient } from './meilisearch.client';
 import type { BookSearchPage, BookSearchProvider, BookSearchQuery } from './book-search.types';
 
-function buildFilter(query: BookSearchQuery): string[] {
+function quoteValue(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function quoteValues(values: string[]): string {
+  return values.map(quoteValue).join(', ');
+}
+
+/** Mirrors buildCatalogContentFilterClauses in warehouse.repository.ts: include is a disjunction
+ *  across tags and genres, exclude is a conjunction of two independent negative clauses. */
+function buildContentFilterClauses(contentFilters: ContentFilterRulesWithNames | undefined): string[] {
+  if (!contentFilters) return [];
+
+  const clauses: string[] = [];
+  const includeTagNames = contentFilters.includeTags.map((tag) => tag.name);
+  const includeGenreNames = contentFilters.includeGenres.map((genre) => genre.name);
+  const includeParts: string[] = [];
+  if (includeTagNames.length) includeParts.push(`tags IN [${quoteValues(includeTagNames)}]`);
+  if (includeGenreNames.length) includeParts.push(`genres IN [${quoteValues(includeGenreNames)}]`);
+  if (includeParts.length) clauses.push(`(${includeParts.join(' OR ')})`);
+
+  const excludeTagNames = contentFilters.excludeTags.map((tag) => tag.name);
+  const excludeGenreNames = contentFilters.excludeGenres.map((genre) => genre.name);
+  if (excludeTagNames.length) clauses.push(`tags NOT IN [${quoteValues(excludeTagNames)}]`);
+  if (excludeGenreNames.length) clauses.push(`genres NOT IN [${quoteValues(excludeGenreNames)}]`);
+
+  return clauses;
+}
+
+/** Catalogue documents carry no library, so a bare libraryId filter would drop every one of
+ *  them. Native documents must still be limited to the libraries the user can access. */
+function buildLibraryAccessClause(accessibleLibraryIds: number[]): string {
+  if (accessibleLibraryIds.length === 0) return 'source = "catalog"';
+  return `(source = "catalog" OR libraryId IN [${accessibleLibraryIds.join(', ')}])`;
+}
+
+export function buildFilter(query: BookSearchQuery): string[] {
   const filter: string[] = [];
 
   if (query.mediaTypes?.length) {
@@ -13,6 +50,9 @@ function buildFilter(query: BookSearchQuery): string[] {
   if (query.libraryIds?.length) {
     filter.push(`libraryId IN [${query.libraryIds.join(', ')}]`);
   }
+
+  filter.push(...buildContentFilterClauses(query.contentFilters));
+  filter.push(buildLibraryAccessClause(query.accessibleLibraryIds));
 
   return filter;
 }

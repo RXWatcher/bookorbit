@@ -66,7 +66,7 @@ export class MeilisearchClient {
       method: 'PATCH',
       body: {
         searchableAttributes: ['title', 'sortTitle', 'authors', 'series', 'narrators', 'publisher', 'tags', 'genres', 'identifiers'],
-        filterableAttributes: ['mediaType', 'source', 'language', 'format', 'publishedYear', 'libraryId', 'hasCover'],
+        filterableAttributes: ['mediaType', 'source', 'language', 'format', 'publishedYear', 'libraryId', 'hasCover', 'tags', 'genres'],
         sortableAttributes: ['sortTitle', 'publishedYear', 'addedAt', 'durationSeconds'],
       },
     });
