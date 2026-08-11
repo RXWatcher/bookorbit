@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { SQL } from 'drizzle-orm';
 import type { RequestUser } from '../../common/types/request-user';
-import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 import * as schema from '../../db/schema';
 import { books } from '../../db/schema';
 import { BookQueryBuilder } from './book-query-builder.service';
@@ -143,8 +143,9 @@ function makeBookCard(overrides: Record<string, unknown>) {
 
 describe('globalQuery search routing', () => {
   it('returns provider order rather than re-sorting when Meilisearch served the search', async () => {
-    const { service, bookSearchService, warehouseCatalog, queryBuilder } = makeService();
+    const { service, bookSearchService, warehouseCatalog, queryBuilder, libraryService } = makeService();
     const user = makeUser({ id: 7 });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }, { id: CLOUD_AUDIO_LIBRARY_ID }]);
 
     // Provider returns the relevant book first; the old merge would have sorted it by title
     // and buried it, which is the defect this task removes.
@@ -179,12 +180,16 @@ describe('globalQuery search routing', () => {
     expect(warehouseCatalog.getCatalogItemsByRemoteIds).toHaveBeenCalledWith(user, 'audiobook', ['relevant']);
     expect(warehouseCatalog.getCatalogItemsByRemoteIds).toHaveBeenCalledWith(user, 'ebook', ['aaa-alphabetically-first']);
     expect(queryBuilder.buildWhere).not.toHaveBeenCalled();
-    expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ q: 'dune', userId: 7, accessibleLibraryIds: [3] }));
+    expect(bookSearchService.search).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'dune', userId: 7, accessibleLibraryIds: [3], mediaTypes: ['ebook', 'audiobook'] }),
+      { allowSqlFallback: false },
+    );
   });
 
   it('restores provider order within a single media type even when the row loader returns rows in a different order', async () => {
-    const { service, bookSearchService, warehouseCatalog } = makeService();
+    const { service, bookSearchService, warehouseCatalog, libraryService } = makeService();
     const user = makeUser({ id: 7 });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
 
     // Two ids land in the SAME media type group (ebook), so a single getCatalogItemsByRemoteIds
     // call must resolve both. The provider wants "second" before "first", but the loader (like
@@ -338,18 +343,12 @@ describe('globalQuery search routing', () => {
     expect(result).toEqual({ items: [localBook], total: 1, page: 0, size: 10 });
   });
 
-  it('keeps the existing merge when the provider fell back to sql', async () => {
+  it('keeps the existing merge when the provider did not serve the search', async () => {
     const { service, bookSearchService, libraryService } = makeService();
     const user = makeUser({ id: 7 });
     libraryService.findAll.mockResolvedValue([{ id: 3 }]);
-    // Provider reports provider: 'sql'; assert the merge path is used so SQL ordering rules apply.
-    bookSearchService.search.mockResolvedValue({
-      ids: ['native:99'],
-      total: 1,
-      page: 0,
-      size: 10,
-      provider: 'sql',
-    });
+    // Null means Meilisearch did not answer, so the merge path runs and SQL ordering applies.
+    bookSearchService.search.mockResolvedValue(null);
     const localBook = makeBookCard({ id: 5, title: 'Local Dune' });
     vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [localBook], total: 1, page: 0, size: 10 } as never);
 
@@ -360,7 +359,38 @@ describe('globalQuery search routing', () => {
       q: 'dune',
     } as never);
 
-    expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ q: 'dune', userId: 7, accessibleLibraryIds: [3] }));
+    expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ q: 'dune', userId: 7, accessibleLibraryIds: [3] }), {
+      allowSqlFallback: false,
+    });
     expect(result).toEqual({ items: [localBook], total: 1, page: 0, size: 10 });
+  });
+
+  it('does not ask the provider for a catalogue media type the user has no library for', async () => {
+    const { service, bookSearchService, warehouseCatalog, libraryService } = makeService();
+    const user = makeUser({ id: 7 });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }, { id: CLOUD_EBOOK_LIBRARY_ID }]);
+    // The index still holds audiobook documents, and the merge path would never surface them
+    // for this user, so neither the query nor the row load may include them.
+    bookSearchService.search.mockResolvedValue({
+      ids: ['catalog:ebook:allowed', 'catalog:audiobook:not-allowed'],
+      total: 2,
+      page: 0,
+      size: 10,
+      provider: 'meilisearch',
+    });
+    const allowedCard = makeBookCard({ title: 'Allowed', catalogSource: { mediaType: 'ebook', remoteId: 'allowed' } });
+    warehouseCatalog.getCatalogItemsByRemoteIds.mockResolvedValue([allowedCard]);
+
+    const result = await service.globalQuery(user, {
+      filter: null,
+      sort: [],
+      pagination: { page: 0, size: 10 },
+      q: 'dune',
+    } as never);
+
+    expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ mediaTypes: ['ebook'] }), { allowSqlFallback: false });
+    expect(warehouseCatalog.getCatalogItemsByRemoteIds).toHaveBeenCalledTimes(1);
+    expect(warehouseCatalog.getCatalogItemsByRemoteIds).toHaveBeenCalledWith(user, 'ebook', ['allowed']);
+    expect(result.items).toEqual([allowedCard]);
   });
 });

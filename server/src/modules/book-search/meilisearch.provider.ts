@@ -41,11 +41,21 @@ function buildLibraryAccessClause(accessibleLibraryIds: number[]): string {
   return `(source = "catalog" OR libraryId IN [${accessibleLibraryIds.join(', ')}])`;
 }
 
+/** The merge path only reaches a catalogue media type when the user has that cloud library, so
+ *  the same gate has to reach the index or it returns rows the merge path would not and
+ *  inflates the total. Native documents are gated by library access instead. */
+function buildCatalogMediaTypeClause(mediaTypes: string[] | undefined): string | null {
+  if (!mediaTypes) return null;
+  if (mediaTypes.length === 0) return 'source = "native"';
+  return `(source = "native" OR mediaType IN [${quoteValues(mediaTypes)}])`;
+}
+
 export function buildFilter(query: BookSearchQuery): string[] {
   const filter: string[] = [];
 
-  if (query.mediaTypes?.length) {
-    filter.push(`mediaType IN [${query.mediaTypes.map((mediaType) => `"${mediaType}"`).join(', ')}]`);
+  const mediaTypeClause = buildCatalogMediaTypeClause(query.mediaTypes);
+  if (mediaTypeClause) {
+    filter.push(mediaTypeClause);
   }
   if (query.libraryIds?.length) {
     filter.push(`libraryId IN [${query.libraryIds.join(', ')}]`);

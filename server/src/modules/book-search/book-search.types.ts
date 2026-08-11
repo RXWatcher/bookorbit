@@ -33,6 +33,8 @@ export interface BookSearchQuery {
   userId: number;
   /** Libraries the user is allowed to see. Required so a caller cannot forget the access check. */
   accessibleLibraryIds: number[];
+  /** Catalogue media types the caller may see. Undefined leaves the catalogue unrestricted;
+   *  an empty array restricts the result to native books. */
   mediaTypes?: string[];
   libraryIds?: number[];
   contentFilters?: ContentFilterRulesWithNames;

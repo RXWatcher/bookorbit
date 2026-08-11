@@ -8,6 +8,14 @@ import type { BookSearchPage, BookSearchQuery } from './book-search.types';
 
 type ProviderName = 'meilisearch' | 'sql';
 
+export interface BookSearchOptions {
+  /** Set false by a caller that has its own fallback. The SQL provider only queries the
+   *  catalogue, so BookService's merge path, which also covers native books, is strictly
+   *  richer and would discard the SQL page anyway. Running it would be one wasted query over
+   *  the whole catalogue on every search. */
+  allowSqlFallback?: boolean;
+}
+
 @Injectable()
 export class BookSearchService {
   private readonly logger = new Logger(BookSearchService.name);
@@ -23,7 +31,9 @@ export class BookSearchService {
     return this.last;
   }
 
-  async search(query: BookSearchQuery): Promise<BookSearchPage & { provider: ProviderName }> {
+  /** Returns null when Meilisearch did not serve the request and the caller opted out of the
+   *  SQL fallback, which is the caller's signal to run its own. */
+  async search(query: BookSearchQuery, options: BookSearchOptions = {}): Promise<(BookSearchPage & { provider: ProviderName }) | null> {
     const startedAt = Date.now();
 
     try {
@@ -47,8 +57,13 @@ export class BookSearchService {
       );
     }
 
-    const page = await this.sql.search(query);
     this.last = 'sql';
+
+    if (options.allowSqlFallback === false) {
+      return null;
+    }
+
+    const page = await this.sql.search(query);
     return { ...page, provider: 'sql' };
   }
 }

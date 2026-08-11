@@ -72,6 +72,24 @@ describe('buildFilter', () => {
     expect(accessClause).toContain('source = "catalog" OR');
   });
 
+  it('gates catalogue documents by media type without dropping native documents', () => {
+    const filter = buildFilter({ ...BASE_QUERY, accessibleLibraryIds: [5], mediaTypes: ['ebook', 'audiobook'] });
+
+    expect(filter).toContain('(source = "native" OR mediaType IN ["ebook", "audiobook"])');
+  });
+
+  it('limits results to native documents when the user has no catalogue libraries', () => {
+    const filter = buildFilter({ ...BASE_QUERY, accessibleLibraryIds: [5], mediaTypes: [] });
+
+    expect(filter).toContain('source = "native"');
+  });
+
+  it('leaves the catalogue unrestricted when no media types are supplied', () => {
+    const filter = buildFilter({ ...BASE_QUERY, accessibleLibraryIds: [5] });
+
+    expect(filter.some((clause) => clause.includes('mediaType'))).toBe(false);
+  });
+
   it('limits results to catalogue documents when the user has no accessible libraries', () => {
     const filter = buildFilter({ ...BASE_QUERY, accessibleLibraryIds: [] });
 

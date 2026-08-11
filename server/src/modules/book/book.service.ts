@@ -1362,7 +1362,12 @@ export class BookService {
     const trimmedSearchTerm = query.q?.trim();
     const hasActiveFilter = (query.filter?.rules?.length ?? 0) > 0;
     if (trimmedSearchTerm && !hasActiveFilter) {
-      const providerPage = await this.globalQueryViaSearchProvider(user, query, trimmedSearchTerm, accessibleLibraryIds);
+      const catalogMediaTypes: WarehouseMediaType[] = [];
+      if (hasEbookLibrary) catalogMediaTypes.push('ebook');
+      if (hasAudioLibrary) catalogMediaTypes.push('audiobook');
+      if (hasComicLibrary) catalogMediaTypes.push('comic');
+
+      const providerPage = await this.globalQueryViaSearchProvider(user, query, trimmedSearchTerm, accessibleLibraryIds, catalogMediaTypes);
       if (providerPage) return providerPage;
     }
 
@@ -1417,23 +1422,28 @@ export class BookService {
     query: BookQuery,
     q: string,
     accessibleLibraryIds: number[],
+    catalogMediaTypes: WarehouseMediaType[],
   ): Promise<LibraryBooksPage | null> {
     if (!this.bookSearchService) return null;
 
     const contentFilters = this.isSuperuser(user) ? undefined : await this.contentFilterRepository?.findByUserIdWithNames(user.id);
-    const result = await this.bookSearchService.search({
-      q,
-      page: query.pagination.page,
-      size: query.pagination.size,
-      userId: user.id,
-      accessibleLibraryIds,
-      contentFilters,
-    });
+    const result = await this.bookSearchService.search(
+      {
+        q,
+        page: query.pagination.page,
+        size: query.pagination.size,
+        userId: user.id,
+        accessibleLibraryIds,
+        mediaTypes: catalogMediaTypes,
+        contentFilters,
+      },
+      { allowSqlFallback: false },
+    );
 
-    if (result.provider !== 'meilisearch') return null;
+    if (!result) return null;
 
     return {
-      items: await this.loadSearchResultItemsInOrder(user, result.ids, accessibleLibraryIds),
+      items: await this.loadSearchResultItemsInOrder(user, result.ids, accessibleLibraryIds, catalogMediaTypes),
       total: result.total,
       page: query.pagination.page,
       size: query.pagination.size,
@@ -1442,7 +1452,12 @@ export class BookService {
 
   /** Loads rows for a page of search result ids and restores the provider's order. A plain
    *  `IN` lookup returns rows in arbitrary order, so the caller cannot rely on it for ranking. */
-  private async loadSearchResultItemsInOrder(user: RequestUser, ids: string[], accessibleLibraryIds: number[]): Promise<LibraryBookItem[]> {
+  private async loadSearchResultItemsInOrder(
+    user: RequestUser,
+    ids: string[],
+    accessibleLibraryIds: number[],
+    catalogMediaTypes: WarehouseMediaType[],
+  ): Promise<LibraryBookItem[]> {
     const nativeBookIds: number[] = [];
     const catalogRemoteIdsByMediaType = new Map<WarehouseMediaType, string[]>();
 
@@ -1451,7 +1466,7 @@ export class BookService {
       if (!parsed) continue;
       if (parsed.source === 'native') {
         nativeBookIds.push(parsed.bookId);
-      } else {
+      } else if (catalogMediaTypes.includes(parsed.mediaType)) {
         const remoteIds = catalogRemoteIdsByMediaType.get(parsed.mediaType) ?? [];
         remoteIds.push(parsed.remoteId);
         catalogRemoteIdsByMediaType.set(parsed.mediaType, remoteIds);

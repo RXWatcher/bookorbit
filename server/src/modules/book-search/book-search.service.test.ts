@@ -112,6 +112,23 @@ describe('BookSearchService', () => {
     warnSpy.mockRestore();
   });
 
+  it('returns null without running the SQL provider when the caller opted out of the fallback', async () => {
+    const { service, sqlProvider } = makeService({ isAvailable: vi.fn().mockResolvedValue(false) });
+
+    await expect(service.search(QUERY, { allowSqlFallback: false })).resolves.toBeNull();
+    expect(sqlProvider.search).not.toHaveBeenCalled();
+    expect(service.lastProvider()).toBe('sql');
+  });
+
+  it('still returns the Meilisearch page when the caller opted out of the fallback', async () => {
+    const { service } = makeService({});
+
+    await expect(service.search(QUERY, { allowSqlFallback: false })).resolves.toMatchObject({
+      ids: ['meili:1'],
+      provider: 'meilisearch',
+    });
+  });
+
   it('logs the user id, duration, and error class when Meilisearch search throws', async () => {
     const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const { service } = makeService({ search: vi.fn().mockRejectedValue(new Error('connection refused')) });
