@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { breakpointsTailwind, useBreakpoints } from '@vueuse/core'
 import { Aperture, BookMarked, BookmarkPlus, ChevronLeft, ChevronRight, Headphones, ListOrdered, RefreshCw, Shuffle, Sparkles } from '@lucide/vue'
 
-import type { BookCard, ScrollerType } from '@bookorbit/types'
+import type { BookCard, ScrollerMedia, ScrollerType } from '@bookorbit/types'
 import BookCoverCard from '@/features/book/components/BookCoverCard.vue'
 import BookQuickView from '@/features/book/components/BookQuickView.vue'
 import AddToCollectionSheet from '@/features/collection/components/AddToCollectionSheet.vue'
@@ -23,6 +23,7 @@ const props = defineProps<{
   limit?: number
   rows?: number
   smartScopeId?: number
+  media?: ScrollerMedia
 }>()
 
 const attrs = useAttrs()
@@ -39,7 +40,12 @@ const { books, loading, error, refresh } = useDashboardScroller(
   props.type,
   shelfBookLimit(props.limit ?? DEFAULT_BOOKS_PER_ROW, shelfRows.value),
   props.smartScopeId,
+  props.media ?? 'all',
 )
+
+// Two rails of the same type sit side by side once media is split, so the
+// heading has to say which is which.
+const headingText = computed(() => (props.media && props.media !== 'all' ? `${props.title} · ${t(`dashboard.media.${props.media}`)}` : props.title))
 
 const bands = computed(() => chunkIntoBands(books.value, shelfRows.value))
 
@@ -117,7 +123,7 @@ function coverAnimationDelay(index: number): string {
         <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50">
           <component :is="typeIcon" :size="14" class="text-foreground" />
         </div>
-        <h2 class="text-[15px] font-bold tracking-tight">{{ title }}</h2>
+        <h2 class="text-[15px] font-bold tracking-tight">{{ headingText }}</h2>
         <span
           v-if="!loading && !error && books.length > 0"
           class="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-bold tabular-nums text-foreground"

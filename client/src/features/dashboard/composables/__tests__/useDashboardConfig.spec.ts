@@ -43,6 +43,7 @@ describe('useDashboardConfig', () => {
         order: 1,
         limit: 12,
         rows: 1,
+        media: 'all',
         smartScopeId: 42,
       },
     ])
@@ -55,21 +56,26 @@ describe('useDashboardConfig', () => {
 
     expect(scrollers.value).toEqual(DEFAULT_SCROLLERS)
     expect(scrollers.value).not.toBe(DEFAULT_SCROLLERS)
-    expect(DEFAULT_SCROLLERS.map((scroller) => [scroller.type, scroller.label, scroller.enabled, scroller.order])).toEqual([
-      ['recently-added', 'Recently Added', true, 1],
-      ['random', 'Discover Something New', true, 2],
-      ['continue-reading', 'Continue Reading', true, 3],
-      ['continue-listening', 'Continue Listening', true, 4],
-      ['want-to-read', 'Want to Read', false, 5],
-      ['up-next-in-series', 'Up Next in Series', false, 6],
-      ['catalog-additions', 'Library Additions', true, 7],
-      ['catalog-discovery', 'Explore Libraries', true, 8],
+    // Reading and listening lead, then each shelf is split so ebooks and
+    // audiobooks get their own rail rather than sharing one jumbled list.
+    expect(DEFAULT_SCROLLERS.map((scroller) => [scroller.type, scroller.media, scroller.enabled, scroller.order])).toEqual([
+      ['continue-reading', 'ebook', true, 1],
+      ['continue-listening', 'audiobook', true, 2],
+      ['recently-added', 'ebook', true, 3],
+      ['recently-added', 'audiobook', true, 4],
+      ['random', 'ebook', true, 5],
+      ['random', 'audiobook', true, 6],
+      ['catalog-additions', 'all', true, 7],
+      ['catalog-discovery', 'all', true, 8],
+      ['recently-added', 'comic', false, 9],
+      ['want-to-read', 'all', false, 10],
+      ['up-next-in-series', 'all', false, 11],
     ])
 
     addScroller('smart-scope')
 
-    expect(scrollers.value).toHaveLength(8)
-    expect(DEFAULT_SCROLLERS).toHaveLength(8)
+    expect(scrollers.value).toHaveLength(12)
+    expect(DEFAULT_SCROLLERS).toHaveLength(11)
   })
 
   it('supports catalog additions as a configurable dashboard shelf', async () => {
@@ -84,6 +90,7 @@ describe('useDashboardConfig', () => {
       order: 7,
       limit: 20,
       rows: 1,
+      media: 'all',
     })
     expect((SCROLLER_LABELS as Record<string, string>)['catalog-additions']).toBe('Library Additions')
     expect(DEFAULT_SCROLLERS).toContainEqual({
@@ -94,6 +101,7 @@ describe('useDashboardConfig', () => {
       order: 8,
       limit: 20,
       rows: 1,
+      media: 'all',
     })
     expect((SCROLLER_LABELS as Record<string, string>)['catalog-discovery']).toBe('Explore Libraries')
 
@@ -117,6 +125,7 @@ describe('useDashboardConfig', () => {
         order: 1,
         limit: 12,
         rows: 1,
+        media: 'all',
       },
     ])
   })
@@ -135,9 +144,9 @@ describe('useDashboardConfig', () => {
     const { scrollers } = useDashboardConfig()
 
     expect(scrollers.value).toEqual([
-      { id: '5', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 1, limit: 20, rows: 1 },
-      { id: '6', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 2, limit: 20, rows: 1 },
-      { id: '7', type: 'catalog-additions', label: 'Wishlist Drops', enabled: true, order: 3, limit: 20, rows: 1 },
+      { id: '5', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 1, limit: 20, rows: 1, media: 'all' },
+      { id: '6', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 2, limit: 20, rows: 1, media: 'all' },
+      { id: '7', type: 'catalog-additions', label: 'Wishlist Drops', enabled: true, order: 3, limit: 20, rows: 1, media: 'all' },
     ])
   })
 
@@ -157,11 +166,48 @@ describe('useDashboardConfig', () => {
     pruneDeletedSmartScopeScrollers([42])
 
     expect(scrollers.value).toEqual([
-      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1 },
-      { id: '3', type: 'smart-scope', label: 'Favorites', enabled: true, order: 2, limit: 20, rows: 1, smartScopeId: 42 },
+      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1, media: 'all' },
+      { id: '3', type: 'smart-scope', label: 'Favorites', enabled: true, order: 2, limit: 20, rows: 1, media: 'all', smartScopeId: 42 },
     ])
 
     expect(storedConfig()).toEqual({ scrollers: scrollers.value, shelfLayout: 'wide' })
+  })
+
+  it('upgrades an untouched pre-split layout to the split media layout, keeping renamed headings', async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: '2', type: 'recently-added', label: 'Fresh Arrivals', enabled: true, order: 1, limit: 20 },
+        { id: '3', type: 'random', label: 'Discover Something New', enabled: true, order: 2, limit: 20 },
+        { id: '1', type: 'continue-reading', label: 'Continue Reading', enabled: true, order: 3, limit: 20 },
+        { id: '5', type: 'continue-listening', label: 'Continue Listening', enabled: true, order: 4, limit: 20 },
+        { id: '6', type: 'want-to-read', label: 'Want to Read', enabled: false, order: 5, limit: 20 },
+        { id: '4', type: 'up-next-in-series', label: 'Up Next in Series', enabled: false, order: 6, limit: 20 },
+        { id: '7', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 7, limit: 20 },
+        { id: '8', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 8, limit: 20 },
+      ]),
+    )
+
+    const { useDashboardConfig } = await import('../useDashboardConfig')
+    const { scrollers } = useDashboardConfig()
+
+    expect(scrollers.value.slice(0, 4).map((scroller) => [scroller.type, scroller.media])).toEqual([
+      ['continue-reading', 'ebook'],
+      ['continue-listening', 'audiobook'],
+      ['recently-added', 'ebook'],
+      ['recently-added', 'audiobook'],
+    ])
+    // The heading they had renamed survives the upgrade.
+    expect(scrollers.value.filter((scroller) => scroller.type === 'recently-added').every((s) => s.label === 'Fresh Arrivals')).toBe(true)
+  })
+
+  it('leaves a customised pre-split layout alone and only backfills media', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: '99', type: 'random', label: 'My Shelf', enabled: true, order: 1, limit: 20 }]))
+
+    const { useDashboardConfig } = await import('../useDashboardConfig')
+    const { scrollers } = useDashboardConfig()
+
+    expect(scrollers.value).toEqual([{ id: '99', type: 'random', label: 'My Shelf', enabled: true, order: 1, limit: 20, rows: 1, media: 'all' }])
   })
 
   it('falls back to defaults when stored JSON is malformed', async () => {
@@ -200,8 +246,8 @@ describe('useDashboardConfig', () => {
     saveScrollers(malformedScrollers)
 
     expect(scrollers.value).toEqual([
-      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1 },
-      { id: '17', type: 'smart-scope', label: 'Smart Scope', enabled: true, order: 2, limit: 20, rows: 1, smartScopeId: 23 },
+      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1, media: 'all' },
+      { id: '17', type: 'smart-scope', label: 'Smart Scope', enabled: true, order: 2, limit: 20, rows: 1, media: 'all', smartScopeId: 23 },
     ])
     expect(storedConfig()).toEqual({ scrollers: scrollers.value, shelfLayout: 'wide' })
 
@@ -224,6 +270,7 @@ describe('useDashboardConfig', () => {
         order: 1,
         limit: 20,
         rows: 1,
+        media: 'all',
       },
     ])
 
@@ -236,6 +283,7 @@ describe('useDashboardConfig', () => {
         order: 1,
         limit: 20,
         rows: 1,
+        media: 'all',
       },
     ])
   })
@@ -297,6 +345,7 @@ describe('useDashboardConfig', () => {
         order: 1,
         limit: 9,
         rows: 1,
+        media: 'all',
       },
       {
         id: '22',
@@ -306,6 +355,7 @@ describe('useDashboardConfig', () => {
         order: 2,
         limit: 12,
         rows: 1,
+        media: 'all',
       },
     ])
   })
@@ -314,7 +364,7 @@ describe('useDashboardConfig', () => {
     const { DEFAULT_SCROLLERS, useDashboardConfig } = await import('../useDashboardConfig')
     const { scrollers, addScroller } = useDashboardConfig()
 
-    expect(DEFAULT_SCROLLERS.map((scroller) => scroller.rows)).toEqual([1, 1, 1, 1, 1, 1, 1, 1])
+    expect(DEFAULT_SCROLLERS.map((scroller) => scroller.rows)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
 
     addScroller('random')
 
@@ -378,8 +428,8 @@ describe('useDashboardConfig', () => {
     pruneDeletedSmartScopeScrollers([42])
 
     expect(scrollers.value).toEqual([
-      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1 },
-      { id: '2', type: 'smart-scope', label: 'Unread', enabled: true, order: 2, limit: 20, rows: 1, smartScopeId: 42 },
+      { id: '1', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1, media: 'all' },
+      { id: '2', type: 'smart-scope', label: 'Unread', enabled: true, order: 2, limit: 20, rows: 1, media: 'all', smartScopeId: 42 },
     ])
     expect(setItemSpy).not.toHaveBeenCalled()
 

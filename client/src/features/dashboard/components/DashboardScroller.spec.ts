@@ -176,7 +176,7 @@ describe('DashboardScroller', () => {
     const wrapper = mountScroller({ type })
 
     expect(wrapper.text()).toContain(copy)
-    expect(mockUseDashboardScroller).toHaveBeenCalledWith(type, 20, undefined)
+    expect(mockUseDashboardScroller).toHaveBeenCalledWith(type, 20, undefined, 'all')
   })
 
   it.each([
@@ -276,13 +276,13 @@ describe('DashboardScroller', () => {
   it('requests more books as rows are added', () => {
     mountScroller({ type: 'recently-added', rows: 2, limit: 20 })
 
-    expect(mockUseDashboardScroller).toHaveBeenCalledWith('recently-added', 40, undefined)
+    expect(mockUseDashboardScroller).toHaveBeenCalledWith('recently-added', 40, undefined, 'all')
   })
 
   it('never requests more books than the server accepts', () => {
     mountScroller({ type: 'recently-added', rows: 3, limit: 20 })
 
-    expect(mockUseDashboardScroller).toHaveBeenCalledWith('recently-added', 50, undefined)
+    expect(mockUseDashboardScroller).toHaveBeenCalledWith('recently-added', 50, undefined, 'all')
   })
 
   it('requests only what a capped mobile shelf can render', () => {
@@ -290,7 +290,7 @@ describe('DashboardScroller', () => {
 
     mountScroller({ type: 'recently-added', rows: 3, limit: 20 })
 
-    expect(mockUseDashboardScroller).toHaveBeenCalledWith('recently-added', 40, undefined)
+    expect(mockUseDashboardScroller).toHaveBeenCalledWith('recently-added', 40, undefined, 'all')
   })
 
   it('scales loading skeletons with the row count', () => {

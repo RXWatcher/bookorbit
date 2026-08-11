@@ -7,6 +7,7 @@ import {
   type DashboardScrollerBatchResponse,
   type DashboardScrollerBatchResult,
   type DashboardScrollerItem,
+  type ScrollerMedia,
   type ScrollerType,
 } from '@bookorbit/types'
 import { api } from '@/lib/api'
@@ -55,7 +56,12 @@ async function flushBatch(): Promise<void> {
   }
 }
 
-function requestScroller(type: ScrollerType, limit: number, smartScopeId?: number): Promise<DashboardScrollerBatchResult> {
+function requestScroller(
+  type: ScrollerType,
+  limit: number,
+  smartScopeId?: number,
+  media: ScrollerMedia = 'all',
+): Promise<DashboardScrollerBatchResult> {
   return new Promise((resolve, reject) => {
     requestSequence += 1
     pendingRequests.push({
@@ -63,6 +69,7 @@ function requestScroller(type: ScrollerType, limit: number, smartScopeId?: numbe
         id: String(requestSequence),
         type,
         limit,
+        ...(media === 'all' ? {} : { media }),
         ...(type === 'smart-scope' && smartScopeId ? { smartScopeId } : {}),
       },
       resolve,
@@ -79,9 +86,16 @@ const DEDICATED_SCROLLER_ROUTES: Partial<Record<ScrollerType, string>> = {
   'catalog-discovery': '/api/v1/dashboard/catalog-discovery',
 }
 
-async function loadDedicated(url: string, type: ScrollerType, limit: number, smartScopeId?: number): Promise<DashboardScrollerItem[]> {
+async function loadDedicated(
+  url: string,
+  type: ScrollerType,
+  limit: number,
+  smartScopeId?: number,
+  media: ScrollerMedia = 'all',
+): Promise<DashboardScrollerItem[]> {
   const params = new URLSearchParams({ limit: String(limit) })
   if (type === 'smart-scope' && smartScopeId) params.set('smartScopeId', String(smartScopeId))
+  if (media !== 'all') params.set('media', media)
   const res = await api(`${url}?${params}`)
   if (!res.ok) throw new Error('Dashboard scroller request failed')
   // These two routes answer with an { items } envelope rather than a bare
@@ -91,7 +105,7 @@ async function loadDedicated(url: string, type: ScrollerType, limit: number, sma
   return Array.isArray(payload) ? payload : (payload?.items ?? [])
 }
 
-export function useDashboardScroller(type: ScrollerType, limit = 20, smartScopeId?: number) {
+export function useDashboardScroller(type: ScrollerType, limit = 20, smartScopeId?: number, media: ScrollerMedia = 'all') {
   const books = ref<DashboardScrollerItem[]>([])
   const loading = ref(true)
   const error = ref(false)
@@ -108,11 +122,11 @@ export function useDashboardScroller(type: ScrollerType, limit = 20, smartScopeI
       // empty" state while the warehouse held hundreds of thousands of items.
       const dedicated = DEDICATED_SCROLLER_ROUTES[type]
       if (dedicated) {
-        books.value = await loadDedicated(dedicated, type, limit, smartScopeId)
+        books.value = await loadDedicated(dedicated, type, limit, smartScopeId, media)
         return
       }
 
-      const result = await requestScroller(type, limit, smartScopeId)
+      const result = await requestScroller(type, limit, smartScopeId, media)
       books.value = result.books
       error.value = result.failed
     } catch {

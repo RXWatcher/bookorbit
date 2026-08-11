@@ -27,6 +27,7 @@ export interface DashboardScrollerBatchItem {
   type: ScrollerType;
   limit: number;
   smartScopeId?: number;
+  media?: ScrollerMedia;
 }
 
 export interface DashboardScrollerBatchRequest {
@@ -51,8 +52,15 @@ export interface ScrollerConfig {
   // Books per row. The shelf fetches `limit * rows`, capped at DASHBOARD_SCROLLER_MAX_LIMIT.
   limit: number;
   rows: number;
+  // Which media this shelf draws from. Ebooks and audiobooks on one rail read
+  // as a single jumbled list, so a shelf can narrow to one of them.
+  media: ScrollerMedia;
   smartScopeId?: number;
 }
+
+export const SCROLLER_MEDIA = ["all", "ebook", "audiobook", "comic"] as const;
+
+export type ScrollerMedia = (typeof SCROLLER_MEDIA)[number];
 
 export interface DashboardCatalogItem {
   type: "catalog-item";

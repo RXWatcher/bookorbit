@@ -148,12 +148,13 @@ onUnmounted(() => {
           <div v-if="enabledScrollers.length > 0" :class="shelfLayoutClass">
             <DashboardScroller
               v-for="(scroller, index) in enabledScrollers"
-              :key="`${scroller.id}-${scroller.type}-${scroller.smartScopeId ?? 0}-${scroller.rows}`"
+              :key="`${scroller.id}-${scroller.type}-${scroller.smartScopeId ?? 0}-${scroller.rows}-${scroller.media}`"
               :type="scroller.type"
               :title="shelfTitle(scroller)"
               :limit="scroller.limit"
               :rows="scroller.rows"
               :smartScope-id="scroller.smartScopeId"
+              :media="scroller.media"
               class="min-w-0 animate-fade-up"
               :style="{ animationDelay: `${index * 100}ms` }"
             />

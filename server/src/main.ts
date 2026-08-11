@@ -16,6 +16,7 @@ import type { FastifyReply } from 'fastify';
 import { appConfig } from './config/config';
 import { setupSwaggerDocs } from './swagger';
 import { canonicalizeSpaLibraryRouteUrl } from './common/utils/spa-library-route-redirect.utils';
+import { cacheControlForStaticPath } from './common/utils/static-cache.utils';
 import {
   parseBooleanEnv,
   parseTrustProxy,
@@ -124,6 +125,7 @@ async function bootstrap() {
         if (redirectUrl) {
           return reply.redirect(redirectUrl, 302);
         }
+        void reply.header('Cache-Control', 'no-cache');
         return (reply as unknown as FastifyReply & { sendFile(fileName: string): FastifyReply }).sendFile('index.html');
       });
     };
@@ -131,6 +133,9 @@ async function bootstrap() {
     await app.register(fastifyStatic as never, {
       root: join(__dirname, '..', 'public'),
       prefix: '/',
+      setHeaders: (res: { setHeader(name: string, value: string): void }, filePath: string) => {
+        res.setHeader('Cache-Control', cacheControlForStaticPath(filePath));
+      },
     });
   }
 

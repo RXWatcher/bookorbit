@@ -4864,6 +4864,12 @@
       "errorTitle": "Unable to load your libraries",
       "errorDescription": "BookOrbit could not retrieve your libraries. Your library data has not been removed."
     },
+    "media": {
+      "all": "All media",
+      "ebook": "Books",
+      "audiobook": "Audiobooks",
+      "comic": "Comics"
+    },
     "scroller": {
       "failedToLoad": "Failed to load.",
       "empty": {
@@ -4919,6 +4925,10 @@
         "label": "Rows of books",
         "option": "{count, plural, one {One row of books} other {# rows of books}}",
         "hint": "Set how many rows of books each shelf shows. Narrow screens show at most two."
+      },
+      "shelfMedia": {
+        "label": "Media",
+        "hint": "Narrow a shelf to one kind of media. Add the same shelf twice to get a books rail and an audiobooks rail side by side."
       },
       "reorderHintWidget": "Drag to reorder. Toggle to show or hide a widget.",
       "reorderHintShelf": "Drag to reorder. Toggle to show or hide a shelf.",

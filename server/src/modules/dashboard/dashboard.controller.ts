@@ -1,5 +1,6 @@
 import { Body, Controller, DefaultValuePipe, Get, HttpCode, HttpStatus, Param, ParseEnumPipe, ParseIntPipe, Post, Query } from '@nestjs/common';
 
+import { SCROLLER_MEDIA, type ScrollerMedia } from '@bookorbit/types';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../common/types/request-user';
 import { DashboardService } from './dashboard.service';
@@ -29,9 +30,10 @@ export class DashboardController {
     @Param('type', new ParseEnumPipe(ScrollerType)) type: ScrollerType,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('smartScopeId', new DefaultValuePipe(0), ParseIntPipe) smartScopeId: number,
+    @Query('media', new DefaultValuePipe('all'), new ParseEnumPipe(SCROLLER_MEDIA)) media: ScrollerMedia,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.dashboardService.getScroller(type, user, limit, smartScopeId);
+    return this.dashboardService.getScroller(type, user, limit, smartScopeId, media);
   }
 
   @Post('scrollers/batch')

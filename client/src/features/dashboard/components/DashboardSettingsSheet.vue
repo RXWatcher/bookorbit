@@ -7,6 +7,7 @@ import type { ScrollerConfig, ScrollerType, WidgetConfig } from '@bookorbit/type
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useSmartScopes } from '@/features/smart-scope/composables/useSmartScopes'
 import { DEFAULT_SCROLLERS, SCROLLER_LABELS, SHELF_LAYOUT, useDashboardConfig, type DashboardShelfLayout } from '../composables/useDashboardConfig'
+import { SCROLLER_MEDIA } from '@bookorbit/types'
 import { SHELF_ROW_OPTIONS } from '../lib/shelf-rows'
 import { useDashboardLabels } from '../composables/useDashboardLabels'
 import { useDashboardWidgets } from '../composables/useDashboardWidgets'
@@ -77,6 +78,7 @@ function addScroller() {
     order: draft.value.length + 1,
     limit: 20,
     rows: 1,
+    media: 'all',
   })
 }
 
@@ -286,6 +288,18 @@ function resetToDefault() {
                 >
                   <option v-for="scrollerType in ALL_TYPES" :key="scrollerType" :value="scrollerType">
                     {{ shelfTypeName(scrollerType) }}
+                  </option>
+                </select>
+
+                <!-- Media -->
+                <select
+                  v-model="scroller.media"
+                  data-testid="shelf-media"
+                  :aria-label="t('dashboard.settings.shelfMedia.label')"
+                  class="h-8 shrink-0 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option v-for="mediaOption in SCROLLER_MEDIA" :key="mediaOption" :value="mediaOption">
+                    {{ t(`dashboard.media.${mediaOption}`) }}
                   </option>
                 </select>
 

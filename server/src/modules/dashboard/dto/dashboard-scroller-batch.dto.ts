@@ -14,7 +14,14 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { DASHBOARD_SCROLLER_BATCH_MAX, DASHBOARD_SCROLLER_MAX_LIMIT, SCROLLER_TYPES, type ScrollerType } from '@bookorbit/types';
+import {
+  DASHBOARD_SCROLLER_BATCH_MAX,
+  DASHBOARD_SCROLLER_MAX_LIMIT,
+  SCROLLER_MEDIA,
+  SCROLLER_TYPES,
+  type ScrollerMedia,
+  type ScrollerType,
+} from '@bookorbit/types';
 
 export { DASHBOARD_SCROLLER_MAX_LIMIT };
 
@@ -36,6 +43,10 @@ export class DashboardScrollerBatchItemDto {
   @IsInt()
   @Min(1)
   smartScopeId?: number;
+
+  @IsOptional()
+  @IsIn(SCROLLER_MEDIA)
+  media?: ScrollerMedia;
 }
 
 export class DashboardScrollerBatchDto {

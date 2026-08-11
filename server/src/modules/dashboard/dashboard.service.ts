@@ -8,6 +8,8 @@ import {
   type DashboardCatalogAdditionsData,
   type DashboardScrollerBatchResponse,
   type DashboardScrollerItem,
+  type ScrollerMedia,
+  getBookMediaProfile,
   type LibraryBookItem,
   type WarehouseMediaType,
 } from '@bookorbit/types';
@@ -76,7 +78,13 @@ export class DashboardService {
     return { items: rows.map(mapWarehouseCatalogItemToBookCard) };
   }
 
-  async getScroller(type: ScrollerType, user: RequestUser, limit: number, smartScopeId?: number): Promise<DashboardScrollerItem[]> {
+  async getScroller(
+    type: ScrollerType,
+    user: RequestUser,
+    limit: number,
+    smartScopeId?: number,
+    media: ScrollerMedia = 'all',
+  ): Promise<DashboardScrollerItem[]> {
     const clampedLimit = Math.min(Math.max(1, limit), DASHBOARD_SCROLLER_MAX_LIMIT);
 
     if (type === ScrollerType.SMART_SCOPE) {
@@ -96,31 +104,37 @@ export class DashboardService {
 
     const contentFilters = user.isSuperuser ? undefined : user.contentFilters;
     if (type === ScrollerType.RECENTLY_ADDED) {
-      return this.getRecentlyAddedScroller(user, clampedLimit, contentFilters);
+      return this.getRecentlyAddedScroller(user, clampedLimit, contentFilters, media);
     }
     if (type === ScrollerType.RANDOM) {
-      return this.getRandomScroller(user, clampedLimit, contentFilters);
+      return this.getRandomScroller(user, clampedLimit, contentFilters, media);
     }
     if (type === ScrollerType.UP_NEXT_IN_SERIES) {
-      return this.getUpNextInSeriesScroller(user, clampedLimit, contentFilters);
+      return this.getUpNextInSeriesScroller(user, clampedLimit, contentFilters, media);
     }
 
     switch (type) {
       case ScrollerType.CONTINUE_READING:
-        return this.getContinueReadingScroller(user, clampedLimit, contentFilters);
+        return this.getContinueReadingScroller(user, clampedLimit, contentFilters, media);
       case ScrollerType.CONTINUE_LISTENING:
       case ScrollerType.WANT_TO_READ: {
         const accessibleLibraryIds = await this.libraryService.findAccessibleLibraryIds(user);
         if (accessibleLibraryIds.length === 0) return [];
         if (type === ScrollerType.WANT_TO_READ) {
-          return this.loadCardsByIds(
-            await this.dashboardRepo.findWantToReadBookIds(accessibleLibraryIds, user.id, clampedLimit, contentFilters),
-            user.id,
+          return narrowCardsByMedia(
+            await this.loadCardsByIds(
+              await this.dashboardRepo.findWantToReadBookIds(accessibleLibraryIds, user.id, clampedLimit, contentFilters),
+              user.id,
+            ),
+            media,
           );
         }
-        return this.loadCardsByIds(
-          await this.dashboardRepo.findContinueListeningBookIds(accessibleLibraryIds, user.id, clampedLimit, contentFilters),
-          user.id,
+        return narrowCardsByMedia(
+          await this.loadCardsByIds(
+            await this.dashboardRepo.findContinueListeningBookIds(accessibleLibraryIds, user.id, clampedLimit, contentFilters),
+            user.id,
+          ),
+          media,
         );
       }
     }
@@ -130,10 +144,11 @@ export class DashboardService {
     user: RequestUser,
     limit: number,
     contentFilters: RequestUser['contentFilters'] | undefined,
+    media: ScrollerMedia,
   ): Promise<DashboardScrollerItem[]> {
     const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const localLibraryIds = libraries.map((library) => library.id).filter((id) => id > 0);
-    const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
+    const sourceBackedMediaTypes = narrowMediaTypes(sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id)), media);
 
     if (localLibraryIds.length === 0 && sourceBackedMediaTypes.length === 0) return [];
 
@@ -155,10 +170,11 @@ export class DashboardService {
     user: RequestUser,
     limit: number,
     contentFilters: RequestUser['contentFilters'] | undefined,
+    media: ScrollerMedia,
   ): Promise<DashboardScrollerItem[]> {
     const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const localLibraryIds = libraries.map((library) => library.id).filter((id) => id > 0);
-    const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
+    const sourceBackedMediaTypes = narrowMediaTypes(sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id)), media);
 
     if (localLibraryIds.length === 0 && sourceBackedMediaTypes.length === 0) return [];
 
@@ -179,10 +195,11 @@ export class DashboardService {
     user: RequestUser,
     limit: number,
     contentFilters: RequestUser['contentFilters'] | undefined,
+    media: ScrollerMedia,
   ): Promise<DashboardScrollerItem[]> {
     const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const localLibraryIds = libraries.map((library) => library.id).filter((id) => id > 0);
-    const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
+    const sourceBackedMediaTypes = narrowMediaTypes(sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id)), media);
 
     if (localLibraryIds.length === 0 && sourceBackedMediaTypes.length === 0) return [];
 
@@ -208,10 +225,11 @@ export class DashboardService {
     user: RequestUser,
     limit: number,
     contentFilters: RequestUser['contentFilters'] | undefined,
+    media: ScrollerMedia,
   ): Promise<DashboardScrollerItem[]> {
     const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     const localLibraryIds = libraries.map((library) => library.id).filter((id) => id > 0);
-    const sourceBackedMediaTypes = sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id));
+    const sourceBackedMediaTypes = narrowMediaTypes(sourceBackedMediaTypesForLibraryIds(libraries.map((library) => library.id)), media);
 
     if (localLibraryIds.length === 0 && sourceBackedMediaTypes.length === 0) return [];
 
@@ -299,7 +317,7 @@ export class DashboardService {
     if (sourceBackedMediaTypesForLibraryIds(librariesForUser.map((library) => library.id)).length > 0) {
       const merged = await mapWithConcurrency(dto.items, SCROLLER_QUERY_CONCURRENCY, async (item) => {
         try {
-          return { id: item.id, books: await this.getScroller(item.type, user, item.limit, item.smartScopeId), failed: false };
+          return { id: item.id, books: await this.getScroller(item.type, user, item.limit, item.smartScopeId, item.media ?? 'all'), failed: false };
         } catch (error) {
           const errorClass = error instanceof Error ? error.constructor.name : typeof error;
           const message = sanitizeLogValue(error instanceof Error ? error.message : error);
@@ -454,6 +472,22 @@ function selectRandomScrollerItems(items: DashboardScrollerItem[], limit: number
 
 function isBookCard(item: LibraryBookItem): item is BookCard {
   return !('type' in item && item.type === 'catalog-item');
+}
+
+// Filesystem books carry no media type, so they are narrowed by what their
+// files actually are. A book with both an epub and an m4b counts as either.
+function narrowCardsByMedia(cards: DashboardScrollerItem[], media: ScrollerMedia): DashboardScrollerItem[] {
+  if (media === 'all') return cards;
+  return cards.filter((card) => {
+    const profile = getBookMediaProfile(card.files ?? []);
+    if (media === 'ebook') return profile.hasEbook;
+    if (media === 'audiobook') return profile.hasAudio;
+    return profile.hasComic;
+  });
+}
+
+function narrowMediaTypes(mediaTypes: WarehouseMediaType[], media: ScrollerMedia): WarehouseMediaType[] {
+  return media === 'all' ? mediaTypes : mediaTypes.filter((mediaType) => mediaType === media);
 }
 
 function sourceBackedMediaTypesForLibraryIds(libraryIds: number[]): WarehouseMediaType[] {

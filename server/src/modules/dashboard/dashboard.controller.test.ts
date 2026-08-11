@@ -58,9 +58,9 @@ describe('DashboardController', () => {
       const mockResult = [{ id: 101 }];
       dashboardService.getScroller.mockResolvedValue(mockResult);
 
-      const result = await controller.getScroller('up-next-in-series', 33, 0, user);
+      const result = await controller.getScroller('up-next-in-series', 33, 0, 'all', user);
 
-      expect(dashboardService.getScroller).toHaveBeenCalledWith('up-next-in-series', user, 33, 0);
+      expect(dashboardService.getScroller).toHaveBeenCalledWith('up-next-in-series', user, 33, 0, 'all');
       expect(result).toEqual(mockResult);
     });
 

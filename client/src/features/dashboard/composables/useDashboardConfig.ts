@@ -1,10 +1,10 @@
 import { ref } from 'vue'
 
-import { SCROLLER_TYPES, type ScrollerConfig, type ScrollerType } from '@bookorbit/types'
+import { SCROLLER_MEDIA, SCROLLER_TYPES, type ScrollerConfig, type ScrollerMedia, type ScrollerType } from '@bookorbit/types'
 import { normalizeShelfRows } from '../lib/shelf-rows'
 
 const STORAGE_KEY = 'bookorbit:dashboard:config'
-const MAX_SCROLLERS = 8
+const MAX_SCROLLERS = 12
 
 export const SHELF_LAYOUT = {
   WIDE: 'wide',
@@ -19,14 +19,17 @@ interface StoredDashboardConfig {
 }
 
 export const DEFAULT_SCROLLERS: ScrollerConfig[] = [
-  { id: '2', type: 'recently-added', label: 'Recently Added', enabled: true, order: 1, limit: 20, rows: 1 },
-  { id: '3', type: 'random', label: 'Discover Something New', enabled: true, order: 2, limit: 20, rows: 1 },
-  { id: '1', type: 'continue-reading', label: 'Continue Reading', enabled: true, order: 3, limit: 20, rows: 1 },
-  { id: '5', type: 'continue-listening', label: 'Continue Listening', enabled: true, order: 4, limit: 20, rows: 1 },
-  { id: '6', type: 'want-to-read', label: 'Want to Read', enabled: false, order: 5, limit: 20, rows: 1 },
-  { id: '4', type: 'up-next-in-series', label: 'Up Next in Series', enabled: false, order: 6, limit: 20, rows: 1 },
-  { id: '7', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 7, limit: 20, rows: 1 },
-  { id: '8', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 8, limit: 20, rows: 1 },
+  { id: '1', type: 'continue-reading', label: 'Continue Reading', enabled: true, order: 1, limit: 20, rows: 1, media: 'ebook' },
+  { id: '5', type: 'continue-listening', label: 'Continue Listening', enabled: true, order: 2, limit: 20, rows: 1, media: 'audiobook' },
+  { id: '2', type: 'recently-added', label: 'Recently Added', enabled: true, order: 3, limit: 20, rows: 1, media: 'ebook' },
+  { id: '9', type: 'recently-added', label: 'Recently Added', enabled: true, order: 4, limit: 20, rows: 1, media: 'audiobook' },
+  { id: '3', type: 'random', label: 'Discover Something New', enabled: true, order: 5, limit: 20, rows: 1, media: 'ebook' },
+  { id: '10', type: 'random', label: 'Discover Something New', enabled: true, order: 6, limit: 20, rows: 1, media: 'audiobook' },
+  { id: '7', type: 'catalog-additions', label: 'Library Additions', enabled: true, order: 7, limit: 20, rows: 1, media: 'all' },
+  { id: '8', type: 'catalog-discovery', label: 'Explore Libraries', enabled: true, order: 8, limit: 20, rows: 1, media: 'all' },
+  { id: '11', type: 'recently-added', label: 'Recently Added', enabled: false, order: 9, limit: 20, rows: 1, media: 'comic' },
+  { id: '6', type: 'want-to-read', label: 'Want to Read', enabled: false, order: 10, limit: 20, rows: 1, media: 'all' },
+  { id: '4', type: 'up-next-in-series', label: 'Up Next in Series', enabled: false, order: 11, limit: 20, rows: 1, media: 'all' },
 ]
 
 // Persisted-only. Shelf headings and the type selector resolve their text from the active
@@ -97,6 +100,45 @@ function normalizeId(value: unknown, fallback: string): string {
   return fallback
 }
 
+function normalizeMedia(value: unknown): ScrollerMedia {
+  return typeof value === 'string' && (SCROLLER_MEDIA as readonly string[]).includes(value) ? (value as ScrollerMedia) : 'all'
+}
+
+/**
+ * Layouts saved before shelves could be narrowed by media had ebooks and
+ * audiobooks sharing one rail, which reads as a jumbled list. Such a layout is
+ * replaced once with the split arrangement, carrying over any heading the user
+ * had renamed so their wording survives the upgrade.
+ */
+const PRE_SPLIT_DEFAULT_TYPES: ScrollerType[] = [
+  'recently-added',
+  'random',
+  'continue-reading',
+  'continue-listening',
+  'want-to-read',
+  'up-next-in-series',
+  'catalog-additions',
+  'catalog-discovery',
+]
+
+function isPreSplitDefaultLayout(stored: ScrollerConfig[]): boolean {
+  if (stored.length !== PRE_SPLIT_DEFAULT_TYPES.length) return false
+  const storedTypes = stored.map((scroller) => scroller.type).sort()
+  return [...PRE_SPLIT_DEFAULT_TYPES].sort().every((type, index) => storedTypes[index] === type)
+}
+
+function migrateToSplitMediaLayout(stored: ScrollerConfig[]): ScrollerConfig[] {
+  const renamedByType = new Map<ScrollerType, string>()
+  for (const scroller of stored) {
+    if (scroller.label && scroller.label !== SCROLLER_LABELS[scroller.type]) renamedByType.set(scroller.type, scroller.label)
+  }
+
+  return cloneDefaultScrollers().map((scroller) => {
+    const renamed = renamedByType.get(scroller.type)
+    return renamed ? { ...scroller, label: renamed } : scroller
+  })
+}
+
 function normalizeScroller(value: unknown, index: number): ScrollerConfig | null {
   if (!value || typeof value !== 'object') return null
 
@@ -116,13 +158,24 @@ function normalizeScroller(value: unknown, index: number): ScrollerConfig | null
     order: index + 1,
     limit: normalizePositiveNumber(raw.limit, 20),
     rows: normalizeShelfRows(raw.rows),
+    media: normalizeMedia(raw.media),
     ...(smartScopeId === undefined ? {} : { smartScopeId }),
   }
 }
 
-function normalizeScrollers(value: unknown): ScrollerConfig[] {
+function normalizeScrollers(value: unknown, allowMigration = false): ScrollerConfig[] {
   const storedScrollers = parseStoredScrollers(value)
   if (!storedScrollers) return cloneDefaultScrollers()
+
+  // A layout saved before the split carries no media field. Upgrade it only
+  // when the user never changed which shelves they had, so a customised
+  // arrangement is kept as it is and simply gains the new field.
+  if (allowMigration && storedScrollers.every((scroller) => !scroller || typeof scroller !== 'object' || !('media' in scroller))) {
+    const migrated = storedScrollers
+      .map((scroller, index) => normalizeScroller(scroller, index))
+      .filter((scroller): scroller is ScrollerConfig => scroller !== null)
+    if (isPreSplitDefaultLayout(migrated)) return migrateToSplitMediaLayout(migrated)
+  }
 
   const normalized = storedScrollers
     .map((scroller, index) => normalizeScroller(scroller, index))
@@ -144,7 +197,7 @@ function loadConfig(): StoredDashboardConfig {
         ? normalizeShelfLayout((parsed as { shelfLayout?: unknown }).shelfLayout)
         : SHELF_LAYOUT.WIDE
 
-    return { scrollers: normalizeScrollers(parsed), shelfLayout }
+    return { scrollers: normalizeScrollers(parsed, true), shelfLayout }
   } catch {
     return { scrollers: cloneDefaultScrollers(), shelfLayout: SHELF_LAYOUT.WIDE }
   }
@@ -163,6 +216,7 @@ function areScrollersEqual(left: ScrollerConfig[], right: ScrollerConfig[]): boo
       scroller.order === other.order &&
       scroller.limit === other.limit &&
       scroller.rows === other.rows &&
+      scroller.media === other.media &&
       scroller.smartScopeId === other.smartScopeId
     )
   })
@@ -208,6 +262,7 @@ export function useDashboardConfig() {
       enabled: true,
       order: scrollers.value.length + 1,
       limit: 20,
+      media: 'all',
       rows: 1,
     })
     save()
