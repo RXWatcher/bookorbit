@@ -1,4 +1,19 @@
-import { All, Body, Controller, Get, Headers, HttpCode, HttpStatus, Logger, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  All,
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Logger,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
@@ -16,6 +31,7 @@ import type { KoboAnalyticsBody } from './kobo-analytics.types';
 import { KoboBookIdentityService } from './services/kobo-book-identity.service';
 import { decodeKoboCatalogEbookId } from './kobo-catalog-id';
 import { KoboSyncHistoryService } from './services/kobo-sync-history.service';
+import { buildKoboStoreImageUrl } from './kobo-store-images';
 
 @Controller('kobo/:deviceToken')
 @Public()
@@ -35,37 +51,39 @@ export class KoboDeviceController {
   @Get('v1/books/:bookId/thumbnail/:width/:height/:quality/:isGreyscale/image.jpg')
   async thumbnailFull(
     @Param('bookId') bookId: string,
+    @Param('width') width: string,
+    @Param('height') height: string,
+    @Param('quality') quality: string,
+    @Param('isGreyscale') isGreyscale: string,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
     @CurrentUser() user: RequestUser,
-    @KoboDevice() device: KoboDeviceContext,
-    @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    await this.serveThumbnailOrProxy(bookId, ifNoneMatch, user, device, req, reply);
+    await this.serveThumbnailOrRedirect(bookId, [width, height, quality, isGreyscale], ifNoneMatch, user, reply);
   }
 
   @Get('v1/books/:bookId/thumbnail/:width/:height/false/image.jpg')
   async thumbnailSimple(
     @Param('bookId') bookId: string,
+    @Param('width') width: string,
+    @Param('height') height: string,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
     @CurrentUser() user: RequestUser,
-    @KoboDevice() device: KoboDeviceContext,
-    @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    await this.serveThumbnailOrProxy(bookId, ifNoneMatch, user, device, req, reply);
+    await this.serveThumbnailOrRedirect(bookId, [width, height, 'false'], ifNoneMatch, user, reply);
   }
 
   @Get('v1/books/:bookId/:version/thumbnail/:width/:height/false/image.jpg')
   async thumbnailVersioned(
     @Param('bookId') bookId: string,
+    @Param('width') width: string,
+    @Param('height') height: string,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
     @CurrentUser() user: RequestUser,
-    @KoboDevice() device: KoboDeviceContext,
-    @Req() req: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    await this.serveThumbnailOrProxy(bookId, ifNoneMatch, user, device, req, reply);
+    await this.serveThumbnailOrRedirect(bookId, [width, height, 'false'], ifNoneMatch, user, reply);
   }
 
   @Get('v1/books/:bookId/download')
@@ -160,12 +178,11 @@ export class KoboDeviceController {
     return { Result: 'Success', TestKey: randomUUID(), Tests: {} };
   }
 
-  private async serveThumbnailOrProxy(
+  private async serveThumbnailOrRedirect(
     bookId: string,
+    imageSegments: string[],
     ifNoneMatch: string | undefined,
     user: RequestUser,
-    device: KoboDeviceContext,
-    req: FastifyRequest,
     reply: FastifyReply,
   ) {
     const catalogItemId = decodeKoboCatalogEbookId(bookId);
@@ -175,7 +192,15 @@ export class KoboDeviceController {
     }
 
     const id = await this.bookIdentityService.resolveBookIdByCoverImageId(user.id, bookId);
-    if (id === null) return this.proxyService.forward(req, reply, device.deviceToken);
-    await this.thumbnailService.serveThumbnail(user.id, id, ifNoneMatch, reply);
+    if (id !== null) {
+      await this.thumbnailService.serveThumbnail(user.id, id, ifNoneMatch, reply);
+      return;
+    }
+
+    const storeImageUrl = buildKoboStoreImageUrl(bookId, imageSegments);
+    if (!storeImageUrl) throw new NotFoundException('No cover image');
+    // Found, not Moved Permanently: a store title can later be imported into BookOrbit, and a
+    // cached permanent redirect would keep sending the device to Kobo for a cover we now own.
+    reply.redirect(storeImageUrl, HttpStatus.FOUND);
   }
 }

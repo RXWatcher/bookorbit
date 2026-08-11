@@ -56,7 +56,7 @@
       },
       "preview": {
         "title": "Vista previa de su perfil compartido",
-        "description": "Consulte la información disponible actualmente para los administradores autorizados.",
+        "description": "Consulta la información disponible actualmente para los administradores autorizados.",
         "action": "Cargar vista previa",
         "readingTime": "Tiempo de lectura",
         "activeDays": "Días activos",
@@ -253,6 +253,22 @@
         "showSpineOnComics": {
           "label": "Mostrar lomo en cómics",
           "hint": "Aplicar el efecto de lomo y brillo a las portadas de cómics (cbz, cbr, cb7)"
+        },
+        "detailCoverTint": {
+          "title": "Color de la portada en la ficha del libro",
+          "hint": "Difumina el color extraído de la portada detrás de la imagen y del título en la página de detalles del libro.",
+          "off": {
+            "label": "Desactivado",
+            "hint": "Fondo liso de la tarjeta"
+          },
+          "single": {
+            "label": "Un color",
+            "hint": "Solo el color predominante de la portada."
+          },
+          "duotone": {
+            "label": "Dos colores",
+            "hint": "Añade el color de acento de la portada cuando tiene uno bien definido."
+          }
         },
         "shadow": {
           "title": "Intensidad de la sombra de portada",
@@ -2026,6 +2042,8 @@
         "daysAgo": "Hace {count}d",
         "unknown": "Desconocido",
         "updateAvailable": "Actualización disponible",
+        "manualUpdateRequired": "Actualización manual necesaria",
+        "manualUpdateExplanation": "Esta versión de plugin no puede instalar sus propias actualizaciones. Descarga el plugin y copia bookorbit.koplugin a koreader/plugins/ en este dispositivo.",
         "upToDate": "actualizado",
         "versionUnknown": "Versión desconocida",
         "latestPlugin": "Complemento más reciente: v{version}",
@@ -2094,6 +2112,7 @@
         "stockStep1Prefix": "En su dispositivo KOReader, vaya a",
         "stockStep1Suffix": ".",
         "stockStep2": "Configure el servidor de sincronización personalizado en el URL que se muestra arriba.",
+        "stockStep2InlineUrl": "Configure el servidor de sincronización personalizado en la siguiente URL:",
         "stockStep3": "Ingrese el nombre de usuario y la contraseña que creó, luego toque Iniciar sesión.",
         "locationNote": "BookOrbit guarda ubicaciones EPUB compatibles con KOReader del lector web. La restauración debe aterrizar cerca de la misma posición, aunque la ubicación exacta de la línea puede variar según el lector y el diseño de EPUB.",
         "dangerZone": "Zona de peligro",
@@ -2517,6 +2536,10 @@
       "contentRestrictionsActive": "Restricciones de contenido activas",
       "statusActive": "Activo",
       "statusInactive": "Inactivo",
+      "lockedBadge": "Bloqueado",
+      "unlockAccount": "Desbloquear la cuenta",
+      "unlockHint": "Limpiar bloqueo de inicio de sesión",
+      "unlockAria": "Desbloquear {name}",
       "resetPassword": "Restablecer contraseña",
       "resetPasswordOidcHint": "OIDC usuarios restablecen contraseñas en su proveedor de identidad",
       "resetPasswordSharedHint": "Las cuentas compartidas no tienen contraseñas",
@@ -2529,7 +2552,17 @@
       "errors": {
         "load": "No se pudo cargar",
         "deleteUser": "No se pudo eliminar el usuario",
-        "resetPassword": "No se pudo crear un enlace para restablecer la contraseña"
+        "resetPassword": "No se pudo crear un enlace para restablecer la contraseña",
+        "unlock": "Error al desbloquear la cuenta"
+      },
+      "selfRegistration": {
+        "title": "Auto-registro",
+        "subtitle": "Controla si los visitantes pueden crear sus propias cuentas.",
+        "label": "Permitir auto-registro",
+        "hint": "Cuando está habilitado, la página de inicio de sesión muestra un enlace para crear una cuenta.",
+        "enabledNotice": "Las nuevas cuentas comienzan con el acceso predeterminado a la biblioteca y no otros permisos. Otorga permisos antes de que puedan usar características protegidas.",
+        "loadError": "Error al cargar la configuración de auto-registro",
+        "saveError": "Error al actualizar la configuración de auto-registro"
       },
       "defaultLibraryAccess": {
         "title": "Acceso predeterminado a la biblioteca",
@@ -2861,6 +2894,7 @@
       "UserSuperuserEnable": "Habilitar el acceso de superusuario",
       "UserSuperuserDisable": "Deshabilitar el acceso de superusuario",
       "UserContentFiltersSet": "Actualizar filtros de contenido",
+      "UserUnlock": "Desbloquear la cuenta",
       "ReadingInsightsSharingUpdate": "Actualizar el intercambio de conocimientos",
       "ReadingInsightsProfileView": "Ver información compartida",
       "LibraryCreate": "Crear biblioteca",
@@ -2966,9 +3000,13 @@
       "signingIn": "Iniciando sesión...",
       "orDivider": "o",
       "forgotPassword": "¿Olvidaste tu contraseña?",
+      "noAccount": "¿No tienes una cuenta?",
+      "signUp": "Registro",
+      "registeredNotice": "Cuenta creada. Inicie sesión para continuar. Un administrador necesita conceder permisos antes de poder acceder a la biblioteca.",
       "errors": {
         "invalidCredentials": "Nombre de usuario o contraseña no válidos",
-        "tooManyAttempts": "Demasiados intentos de inicio de sesión. Espere un minuto e inténtelo de nuevo."
+        "tooManyAttempts": "Demasiados intentos de inicio de sesión. Espere un minuto e inténtelo de nuevo.",
+        "accountLocked": "Tu contraseña es correcta, pero esta cuenta está bloqueada temporalmente después de demasiados intentos fallidos de inicio de sesión. ¡Intenta de nuevo en {minutes, plural, one {# minuto} many {# de minutos} other {¡# minutos}}, o reinicia tu contraseña para desbloquearla ahora."
       }
     },
     "oidc": {
@@ -3007,6 +3045,29 @@
       "errors": {
         "invalidLink": "Enlace de reinicio no válido. Por favor solicite uno nuevo.",
         "invalidOrExpired": "Enlace de restablecimiento no válido o caducado. Por favor solicite uno nuevo."
+      }
+    },
+    "register": {
+      "title": "Crea tu cuenta",
+      "subtitle": "Regístrate para empezar",
+      "createAccount": "Crear cuenta",
+      "creatingAccount": "Creando cuenta...",
+      "haveAccount": "¿Ya tienes una cuenta?",
+      "signIn": "Iniciar sesión",
+      "errors": {
+        "closed": "El auto-registro no está abierto en este servidor.",
+        "taken": "Ese nombre de usuario o correo electrónico ya está en uso.",
+        "invalid": "Revisa los datos que has introducido e inténtalo de nuevo.",
+        "tooManyAttempts": "Demasiados intentos. Espera 10 minutos e inténtalo de nuevo.",
+        "failed": "Error al crear la cuenta",
+        "username": {
+          "unsafeCharacters": "Tu nombre de usuario no puede contener caracteres ocultos ni de dirección de texto.",
+          "untrimmed": "Tu nombre de usuario no puede empezar o terminar con un espacio."
+        },
+        "name": {
+          "unsafeCharacters": "Tu nombre no puede contener caracteres ocultos ni de dirección de texto.",
+          "untrimmed": "Tu nombre no puede empezar o terminar con un espacio."
+        }
       }
     },
     "setup": {
@@ -3678,6 +3739,8 @@
         "fileSize": "Tamaño de archivo",
         "library": "Biblioteca",
         "added": "Añadido",
+        "cancelDateAddedEdit": "Cancelar fecha de edición añadida",
+        "editDateAdded": "Editar fecha añadida",
         "dateStarted": "Fecha de inicio",
         "saving": "Guardando...",
         "cancelDateStartedEdit": "Cancelar fecha de inicio editar",
@@ -3689,9 +3752,12 @@
         "synopsis": "Sinopsis",
         "noDescription": "No hay descripción disponible.",
         "dateStartedFutureError": "La fecha de inicio no puede ser futura.",
+        "dateAddedRequiredError": "Se requiere la fecha añadida.",
+        "dateAddedFutureError": "La fecha añadida no puede ser futura.",
         "dateFinishedFutureError": "La fecha de finalización no puede ser futura.",
         "dateFinishedBeforeStartedError": "La fecha de finalización debe ser igual o posterior a la fecha de inicio.",
         "saveReadingDatesError": "No se pudieron guardar las fechas de lectura.",
+        "saveAddedDateError": "Error al guardar la fecha añadida.",
         "koboPendingDelete": "Pendiente de eliminar del dispositivo",
         "koboPendingDeleteTooltip": "Kobo lo eliminará en la próxima sincronización.",
         "koboRemovedByDevice": "Eliminado por dispositivo",
@@ -4735,6 +4801,10 @@
       "cover": "Portada",
       "bookCover": "portada del libro"
     },
+    "libraryLoad": {
+      "errorTitle": "No se pueden cargar tus bibliotecas",
+      "errorDescription": "BookOrbit no ha podido recuperar tus bibliotecas. Los datos de tu biblioteca no se han eliminado."
+    },
     "scroller": {
       "failedToLoad": "No se pudo cargar.",
       "empty": {
@@ -4783,6 +4853,11 @@
         "wideDescription": "Mostrar una casilla por fila.",
         "twoColumns": "Dos columnas",
         "twoColumnsDescription": "Mostrar dos estantes por fila."
+      },
+      "shelfRows": {
+        "label": "Filas de libros",
+        "option": "{count, plural, one {Una fila de libros} many {# de filas de libros} other {# filas de libros}}",
+        "hint": "Establecer cuántas filas de libros muestra cada estantería. Las pantallas estrechas se muestran como mucho dos."
       },
       "reorderHintWidget": "Arrastre para reordenar. Alternar para mostrar u ocultar un widget.",
       "reorderHintShelf": "Arrastre para reordenar. Alternar para mostrar u ocultar un estante.",
@@ -5268,6 +5343,43 @@
       },
       "column": {
         "progress": "Progreso"
+      }
+    },
+    "linkedBooks": {
+      "title": "Libros vinculados",
+      "description": "Muestra los libros que estás leyendo actualmente. Una vez que un libro es emparejado con Hardcover, elige una edición diferente (física, ebook, audiobook) aquí para cambiar lo que tu progreso de lectura sincroniza en su lugar.",
+      "loading": "Cargando libros...",
+      "loadError": "Error al cargar los libros.",
+      "retry": "Reintentar",
+      "empty": "No hay libros que se estén leyendo.",
+      "untitled": "Sin título",
+      "unknownAuthor": "Autor desconocido",
+      "matchMethod": {
+        "isbn": "ISBN",
+        "title": "Título",
+        "cached": "Cacheado",
+        "manual": "Manual",
+        "metadata_id": "Recuperación de metadatos"
+      },
+      "status": {
+        "error": "Error: {error}",
+        "linked": "Vinculado",
+        "linkedWithMethod": "Vinculado ({method})",
+        "notLinked": "Aún no vinculado"
+      },
+      "unmatchedHint": "Este libro no ha sido comparado con Hardcover todavía. Será emparejado automáticamente la próxima vez que se sincronice.",
+      "editionsLoadError": "Error al cargar las ediciones.",
+      "viewEditions": "Ver ediciones",
+      "noEditionsFound": "No se han encontrado ediciones.",
+      "booksTruncated": "Mostrando los primeros libros {count} que estás leyendo.",
+      "editionsTruncated": "Mostrando las primeras {count} ediciones.",
+      "pages": "{count, plural, one {# página} many {# de páginas} other {# páginas}}",
+      "isbn": "ISBN {isbn}",
+      "current": "Actual",
+      "useThis": "Usar este",
+      "toast": {
+        "switched": "Cambiado a {format}",
+        "switchFailed": "Error al cambiar la edición"
       }
     }
   },
@@ -6111,6 +6223,9 @@
       "scrollModeHint": "Utilice \"Sin espacios\" para webtoons y tiras verticales.",
       "readingDirection": "dirección de lectura",
       "pageView": "Vista de página",
+      "twoPagePagedOnly": "Dos páginas se muestran sólo en modo paginado.",
+      "spreadSection": "Distribución de dos páginas",
+      "spreadFallbackHint": "Esta pantalla es demasiado estrecha para dos páginas, por lo que se muestran páginas individuales.",
       "spreadAlignmentLabel": "Alineación extendida",
       "spreadGap": "Brecha de propagación",
       "spreadGapValue": "{value}px",
@@ -6118,6 +6233,9 @@
       "widePages": "Páginas anchas",
       "firstPage": "Primera página",
       "lastPage": "Última página",
+      "zoomControls": "Controles de zoom",
+      "zoomOut": "Alejar",
+      "zoomIn": "Acercar",
       "fit": {
         "page": "Ajuste de página",
         "width": "Ancho de página",
@@ -6758,6 +6876,7 @@
       "clearAllFilters": "Limpiar todos los filtros",
       "expandSeries": "Ampliar serie",
       "collapseSeries": "Contraer serie",
+      "collapseLockedWhileSelecting": "Las series permanecen expandidas durante la selección",
       "expanded": "Ampliado",
       "exportMetadata": "Exportar metadatos",
       "showControlsAria": "Mostrar controles de biblioteca",
@@ -6946,6 +7065,7 @@
     "notFound": "No encontrado",
     "signIn": "Iniciar sesión",
     "initialSetup": "Configuración inicial",
+    "register": "Crear Cuenta",
     "forgotPassword": "Olvidé mi contraseña",
     "resetPassword": "Restablecer contraseña",
     "completingSignIn": "Completando el inicio de sesión",

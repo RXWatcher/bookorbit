@@ -15,7 +15,7 @@ function canonicalPublicRedirectQuery(to: RouteLocationNormalized) {
 
 export function registerAuthGuard(router: Router): void {
   router.beforeEach(async (to) => {
-    const { fetchSetupStatus } = useSetupStatus()
+    const { fetchSetupStatus, allowRegistration } = useSetupStatus()
     let requiresSetup = false
     try {
       requiresSetup = await fetchSetupStatus()
@@ -29,6 +29,12 @@ export function registerAuthGuard(router: Router): void {
     if (!requiresSetup && to.path === '/setup') {
       const { user } = useAuth()
       return user.value ? { path: '/' } : { path: '/login' }
+    }
+
+    if (to.path === '/register') {
+      const { user } = useAuth()
+      if (user.value) return { path: '/' }
+      if (!allowRegistration.value) return { path: '/login' }
     }
 
     if (to.meta.public) return canonicalPublicRedirectQuery(to) ?? true

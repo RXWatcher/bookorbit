@@ -6,6 +6,8 @@ vi.mock('drizzle-orm', () => ({
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ op: 'sql', text: strings.join(''), values })),
 }));
 
+import { books, libraries } from '../../db/schema';
+import { LIBRARY_BOOK_STATUS_PRESENT } from './library.constants';
 import { LibraryRepository } from './library.repository';
 
 describe('LibraryRepository', () => {
@@ -49,6 +51,49 @@ describe('LibraryRepository', () => {
     expect(txUpdate).toHaveBeenCalledTimes(2);
     expect(txUpdateSet).toHaveBeenNthCalledWith(1, { displayOrder: 5 });
     expect(txUpdateSet).toHaveBeenNthCalledWith(2, { displayOrder: 6 });
+  });
+
+  it('findAll counts only present books while retaining empty libraries', async () => {
+    const orderBy = vi.fn().mockResolvedValue([]);
+    const groupBy = vi.fn().mockReturnValue({ orderBy });
+    const leftJoin = vi.fn().mockReturnValue({ groupBy });
+    const from = vi.fn().mockReturnValue({ leftJoin });
+    db.select.mockReturnValue({ from });
+
+    await repo.findAll();
+
+    expect(leftJoin).toHaveBeenCalledWith(books, {
+      op: 'and',
+      clauses: [
+        { op: 'eq', left: books.libraryId, right: libraries.id },
+        { op: 'eq', left: books.status, right: LIBRARY_BOOK_STATUS_PRESENT },
+      ],
+    });
+  });
+
+  it('findAllForUser includes file rename eligibility and counts only present books', async () => {
+    const orderBy = vi.fn().mockResolvedValue([]);
+    const groupBy = vi.fn().mockReturnValue({ orderBy });
+    const leftJoin = vi.fn().mockReturnValue({ groupBy });
+    const innerJoin = vi.fn().mockReturnValue({ leftJoin });
+    const from = vi.fn().mockReturnValue({ innerJoin });
+    db.select.mockReturnValue({ from });
+
+    await repo.findAllForUser(42);
+
+    expect(db.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileRenameEnabled: libraries.fileRenameEnabled,
+      }),
+    );
+    expect(leftJoin).toHaveBeenCalledWith(books, {
+      op: 'and',
+      clauses: [
+        { op: 'eq', left: books.libraryId, right: libraries.id },
+        { op: 'eq', left: books.status, right: LIBRARY_BOOK_STATUS_PRESENT },
+      ],
+    });
+    expect(orderBy).toHaveBeenCalledWith(libraries.displayOrder, libraries.name);
   });
 
   it('getStats aggregates counts, sizes, and format map', async () => {

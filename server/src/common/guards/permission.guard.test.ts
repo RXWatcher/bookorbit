@@ -132,7 +132,7 @@ describe('PermissionGuard', () => {
             permission: Permission.DemoRestricted,
           };
         }
-        if (key === PERMISSION_KEY) return Permission.ManageUsers;
+        if (key === PERMISSION_KEY) return [Permission.ManageUsers];
         return undefined;
       }),
     };
@@ -168,7 +168,7 @@ describe('PermissionGuard', () => {
     const reflector = {
       getAllAndOverride: vi.fn((key: string) => {
         if (key === IS_PUBLIC_KEY) return false;
-        if (key === PERMISSION_KEY) return Permission.ManageUsers;
+        if (key === PERMISSION_KEY) return [Permission.ManageUsers];
         return undefined;
       }),
     };
@@ -182,7 +182,7 @@ describe('PermissionGuard', () => {
     const reflector = {
       getAllAndOverride: vi.fn((key: string) => {
         if (key === IS_PUBLIC_KEY) return false;
-        if (key === PERMISSION_KEY) return Permission.ManageUsers;
+        if (key === PERMISSION_KEY) return [Permission.ManageUsers];
         return undefined;
       }),
     };
@@ -190,5 +190,24 @@ describe('PermissionGuard', () => {
     const guard = new PermissionGuard(reflector as never, permissionService as never);
 
     expect(guard.canActivate(makeContext(makeUser()))).toBe(true);
+  });
+
+  it('requires every permission attached to a route', () => {
+    const reflector = {
+      getAllAndOverride: vi.fn((key: string) => {
+        if (key === IS_PUBLIC_KEY) return false;
+        if (key === PERMISSION_KEY) return [Permission.BookDockAccess, Permission.LibraryUpload];
+        return undefined;
+      }),
+    };
+    const permissionService = {
+      userHas: vi.fn((_user: RequestUser, permission: Permission) => permission === Permission.BookDockAccess),
+      userHasExplicit: vi.fn().mockReturnValue(false),
+    };
+    const guard = new PermissionGuard(reflector as never, permissionService as never);
+
+    expect(() => guard.canActivate(makeContext(makeUser()))).toThrow(`Missing permission: ${Permission.LibraryUpload}`);
+    expect(permissionService.userHas).toHaveBeenCalledWith(expect.any(Object), Permission.BookDockAccess);
+    expect(permissionService.userHas).toHaveBeenCalledWith(expect.any(Object), Permission.LibraryUpload);
   });
 });

@@ -22,14 +22,14 @@ export class LibraryRepository {
         bookCount: sql<number>`count(${books.id})::int`,
       })
       .from(libraries)
-      .leftJoin(books, eq(books.libraryId, libraries.id))
+      .leftJoin(books, and(eq(books.libraryId, libraries.id), eq(books.status, LIBRARY_BOOK_STATUS_PRESENT)))
       .groupBy(libraries.id)
       .orderBy(libraries.displayOrder, libraries.name);
   }
 
   findAllForUser(userId: number, contentFilters?: ContentFilterRules) {
     const filterClauses = contentFilters ? buildContentFilterClauses(contentFilters, this.db) : [];
-    const bookJoinOn = filterClauses.length > 0 ? and(eq(books.libraryId, libraries.id), ...filterClauses)! : eq(books.libraryId, libraries.id);
+    const bookJoinOn = and(eq(books.libraryId, libraries.id), eq(books.status, LIBRARY_BOOK_STATUS_PRESENT), ...filterClauses)!;
 
     return this.db
       .select({
@@ -39,6 +39,7 @@ export class LibraryRepository {
         displayOrder: libraries.displayOrder,
         coverAspectRatio: libraries.coverAspectRatio,
         scanMode: libraries.scanMode,
+        fileRenameEnabled: libraries.fileRenameEnabled,
         createdAt: libraries.createdAt,
         updatedAt: libraries.updatedAt,
         bookCount: sql<number>`count(${books.id})::int`,
