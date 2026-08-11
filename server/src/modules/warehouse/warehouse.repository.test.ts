@@ -89,6 +89,7 @@ function makeDeleteChain() {
 function makeDb() {
   const settingsInsert = makeInsertChain();
   const catalogItemInsert = makeInsertChain();
+  const searchIndexEventInsert = makeInsertChain();
   const catalogItemAuthorInsert = makeInsertChain();
   const catalogDetailInsert = makeInsertChain();
   const userItemInsert = makeInsertChain();
@@ -109,6 +110,7 @@ function makeDb() {
     insert: vi.fn((table: unknown) => {
       if (table === schema.warehouseSettings) return settingsInsert;
       if (table === schema.warehouseCatalogItems) return catalogItemInsert;
+      if (table === schema.searchIndexEvents) return searchIndexEventInsert;
       if (table === schema.warehouseCatalogItemAuthors) return catalogItemAuthorInsert;
       if (table === schema.warehouseCatalogDetails) return catalogDetailInsert;
       if (table === schema.warehouseUserItems) return userItemInsert;
@@ -153,6 +155,7 @@ function makeDb() {
     _chains: {
       settingsInsert,
       catalogItemInsert,
+      searchIndexEventInsert,
       catalogItemAuthorInsert,
       catalogDetailInsert,
       userItemInsert,
@@ -2283,6 +2286,10 @@ describe('WarehouseRepository', () => {
           }),
         }),
       );
+      expect(db.insert).toHaveBeenCalledWith(schema.searchIndexEvents);
+      expect(db._chains.searchIndexEventInsert.values).toHaveBeenCalledWith([
+        { entityType: 'catalog_item', entityId: 'catalog:ebook:bk-1', operation: 'upsert' },
+      ]);
       expect(db.execute).toHaveBeenCalledTimes(1);
       const renderedDelete = renderSql(db.execute.mock.calls[0]?.[0]);
       expect(renderedDelete?.sql).toContain('delete from "warehouse_catalog_item_authors"');

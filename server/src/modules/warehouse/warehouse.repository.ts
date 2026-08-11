@@ -59,6 +59,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
+import { catalogDocumentId } from '../book-search/book-search-document.mapper';
 import type {
   NewWarehouseCatalogDetailRow,
   NewWarehouseCatalogItemAuthorRow,
@@ -520,6 +521,14 @@ export class WarehouseRepository {
           updatedAt: new Date(),
         },
       });
+
+    await this.db.insert(schema.searchIndexEvents).values(
+      items.map((item) => ({
+        entityType: 'catalog_item' as const,
+        entityId: catalogDocumentId(item.mediaType, item.remoteId),
+        operation: 'upsert' as const,
+      })),
+    );
 
     await this.refreshCatalogItemAuthors(items);
 

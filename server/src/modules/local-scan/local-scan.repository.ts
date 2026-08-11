@@ -5,6 +5,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
+import { catalogDocumentId } from '../book-search/book-search-document.mapper';
 import type { CatalogKeyRow, LocalScanSummary } from './local-scan.types';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -84,6 +85,14 @@ export class LocalScanRepository {
       .insert(schema.warehouseCatalogItems)
       .values(rows.map((row) => ({ ...row, source: 'local' as const })))
       .onConflictDoNothing({ target: [schema.warehouseCatalogItems.mediaType, schema.warehouseCatalogItems.remoteId] });
+
+    await this.db.insert(schema.searchIndexEvents).values(
+      rows.map((row) => ({
+        entityType: 'catalog_item' as const,
+        entityId: catalogDocumentId(row.mediaType, row.remoteId),
+        operation: 'upsert' as const,
+      })),
+    );
 
     return result.rowCount ?? 0;
   }
@@ -208,7 +217,7 @@ export class LocalScanRepository {
       return sql`(${id}::int, ${v.title ?? null}::text, ${v.sortTitle ?? null}::text, ${JSON.stringify(v.authors ?? [])}::jsonb, ${v.series ?? null}::text, ${v.seriesIndex ?? null}::real, ${v.publisher ?? null}::text, ${v.language ?? null}::varchar, ${JSON.stringify(v.tags ?? [])}::jsonb, ${v.publishedYear ?? null}::int, ${JSON.stringify(v.identifiers ?? {})}::jsonb, ${v.hasCover ?? false}::boolean)`;
     });
 
-    const result = await this.db.execute(sql`
+    const result = await this.db.execute<{ media_type: string; remote_id: string }>(sql`
       update warehouse_catalog_items as t set
         title = v.title,
         sort_title = v.sort_title,
@@ -224,7 +233,18 @@ export class LocalScanRepository {
         updated_at = now()
       from (values ${sql.join(tuples, sql`, `)}) as v(id, title, sort_title, authors, series, series_index, publisher, language, tags, published_year, identifiers, has_cover)
       where t.id = v.id
+      returning t.media_type, t.remote_id
     `);
+
+    if (result.rows.length > 0) {
+      await this.db.insert(schema.searchIndexEvents).values(
+        result.rows.map((row) => ({
+          entityType: 'catalog_item' as const,
+          entityId: catalogDocumentId(row.media_type, row.remote_id),
+          operation: 'upsert' as const,
+        })),
+      );
+    }
 
     return result.rowCount ?? 0;
   }
