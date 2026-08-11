@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Link, Save, CheckCircle2, AlertCircle, Info, Loader2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { ReadwiseSyncDisabledReason, ReadwiseTokenValidationResult } from '@bookorbit/types'
@@ -7,7 +8,10 @@ import SettingsPageHeader from '@/features/settings/SettingsPageHeader.vue'
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
 import { useReadwiseSettings } from '../composables/useReadwiseSettings'
 
-const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
+  embedded: false,
+})
+const { t } = useI18n()
 
 const { settings, saving, validating, error, fetchSettings, saveSettings, validateToken } = useReadwiseSettings()
 
@@ -62,7 +66,11 @@ function toggleTokenVisible() {
 
 <template>
   <div class="space-y-6">
-    <SettingsPageHeader v-if="!props.embedded" title="Readwise" subtitle="Send your highlights to Readwise automatically." />
+    <SettingsPageHeader
+      v-if="!props.embedded"
+      :title="t('settings.integrations.tabs.readwise')"
+      :subtitle="t('settings.integrations.providerSubtitles.readwise')"
+    />
 
     <div class="border border-border rounded-lg bg-card px-4 py-4 md:px-5 md:py-5 shadow-xs space-y-5">
       <div class="flex items-center gap-3">

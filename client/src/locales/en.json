@@ -1170,14 +1170,30 @@
         "opds": "OPDS",
         "kobo": "Kobo",
         "koreader": "KOReader",
+        "integrations": "Integrations",
         "hardcover": "Hardcover",
         "admin": "Admin",
         "system": "System",
         "account": "Account"
       }
     },
+    "integrations": {
+      "title": "Integrations",
+      "subtitle": "Connect external services to sync your reading data and highlights.",
+      "noPermission": "You do not have permission to use any integrations.",
+      "tabs": {
+        "hardcover": "Hardcover",
+        "readwise": "Readwise",
+        "storygraph": "StoryGraph"
+      },
+      "providerSubtitles": {
+        "readwise": "Send your highlights to Readwise automatically.",
+        "storygraph": "Sync your reading progress and status to The StoryGraph."
+      }
+    },
     "metadata": {
       "title": "Metadata",
+      "subtitle": "Configure metadata providers, matching rules, automation, and author enrichment.",
       "noPermission": "You do not have permission to manage metadata settings.",
       "fields": {
         "title": "Title",

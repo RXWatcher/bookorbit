@@ -385,6 +385,12 @@
   .settings-value {
     @apply text-sm font-medium tabular-nums text-foreground;
   }
+  .settings-card {
+    @apply overflow-hidden rounded-lg border border-border divide-y divide-border shadow-xs;
+  }
+  .settings-row {
+    @apply flex flex-col gap-3 bg-card px-4 py-3.5 md:flex-row md:items-center md:justify-between md:px-5 md:py-4;
+  }
 
   /* ── Settings form controls ─────────────────────────────────
      Use .input-field on <input> and .select-field on <select>
