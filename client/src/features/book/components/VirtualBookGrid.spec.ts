@@ -9,14 +9,14 @@ const scrollToItemMock = vi.fn<(index: number, options?: { align?: string }) => 
 vi.mock('vue-virtual-scroller', () => ({
   RecycleScroller: {
     name: 'RecycleScroller',
-    props: ['items'],
+    props: ['items', 'keyField'],
     emits: ['update'],
     methods: {
       scrollToItem(index: number, options?: { align?: string }) {
         scrollToItemMock(index, options)
       },
     },
-    template: '<div data-testid="recycle-scroller"><slot v-for="item in items" :key="item.id" :item="item" /></div>',
+    template: '<div data-testid="recycle-scroller">' + '<slot v-for="(item, i) in items" :key="keyField(item, i)" :item="item" />' + '</div>',
   },
 }))
 
@@ -89,6 +89,25 @@ function makeBook(id: number, overrides: Partial<BookCard> = {}): BookCard {
 }
 
 describe('VirtualBookGrid', () => {
+  it('gives every slot a distinct scroller key when placeholders are shared', () => {
+    const placeholder = Object.freeze({ id: 0, placeholder: true as const })
+    // Source backed libraries hand out negative ids, so the placeholder key
+    // space has to stay clear of the whole numeric range.
+    const books = [makeBook(-7), placeholder, placeholder, makeBook(-8), placeholder]
+
+    const wrapper = mount(VirtualBookGrid, {
+      props: { books, coverSize: 120, gridGap: 12 },
+    })
+
+    const scroller = wrapper.getComponent({ name: 'RecycleScroller' })
+    const keyField = scroller.props('keyField') as (slot: unknown, index: number) => string | number
+    const keys = books.map((slot, index) => keyField(slot, index))
+
+    expect(new Set(keys).size).toBe(books.length)
+    expect(keys[0]).toBe(-7)
+    expect(keys[1]).toBe('placeholder:1')
+  })
+
   it('uses the virtual scroller by default', () => {
     const wrapper = mount(VirtualBookGrid, {
       props: {

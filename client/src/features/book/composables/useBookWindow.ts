@@ -11,6 +11,13 @@ export type BookWindowQuery = Omit<BookQuery, 'pagination'>
 export type BookPlaceholder = { id: number; placeholder: true }
 export type BookSlot = BookCard | BookPlaceholder
 
+// One shared instance stands in for every unloaded slot. A catalogue of 410k
+// rows costs 3MB of pointers this way instead of 19MB of per-slot objects, and
+// resizing becomes a fill rather than 410k allocations. Consumers must
+// therefore never key or identify a slot by the placeholder's own fields:
+// VirtualBookGrid keys placeholders by index instead.
+const BOOK_PLACEHOLDER: BookPlaceholder = Object.freeze({ id: 0, placeholder: true })
+
 export function isBookPlaceholder(slot: BookSlot): slot is BookPlaceholder {
   return (slot as BookPlaceholder).placeholder === true
 }
@@ -45,17 +52,15 @@ export function useBookWindow(options: { endpoint: Ref<string | null>; query: Re
   const failedAt = new Map<number, number>()
   let generation = 0
   let controller: AbortController | null = null
-  let placeholderSeq = 0
 
-  function makePlaceholder(): BookPlaceholder {
-    placeholderSeq += 1
-    return { id: -placeholderSeq, placeholder: true }
-  }
-
+  // Always returns a fresh array: slots is a shallowRef, so writing back the
+  // same reference after mutating it would not notify consumers.
   function resizeSlots(current: BookSlot[], newTotal: number): BookSlot[] {
-    if (newTotal <= current.length) return current.slice(0, newTotal)
-    const next = current.slice()
-    while (next.length < newTotal) next.push(makePlaceholder())
+    const next = current.slice(0, newTotal)
+    if (next.length < newTotal) {
+      next.length = newTotal
+      next.fill(BOOK_PLACEHOLDER, current.length)
+    }
     return next
   }
 

@@ -159,14 +159,27 @@ describe('useBookWindow', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('keeps placeholder ids unique across loads', async () => {
+  it('shares one placeholder object across every unloaded slot', async () => {
     mockBlocks(300)
     const { window } = makeWindow()
     await flush()
     window.ensureRange(200, 250)
     await flush()
 
-    const ids = window.slots.value.map((slot) => slot.id)
+    const unloaded = window.slots.value.filter(isBookPlaceholder)
+    expect(unloaded.length).toBeGreaterThan(0)
+    expect(new Set(unloaded).size).toBe(1)
+    expect(Object.isFrozen(unloaded[0])).toBe(true)
+  })
+
+  it('keeps loaded book ids distinct from each other', async () => {
+    mockBlocks(300)
+    const { window } = makeWindow()
+    await flush()
+    window.ensureRange(200, 250)
+    await flush()
+
+    const ids = window.loadedCards.value.map((card) => card.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
 

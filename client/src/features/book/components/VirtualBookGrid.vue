@@ -152,6 +152,13 @@ function asBook(slot: BookSlot): BookCard {
   return slot as BookCard
 }
 
+// Unloaded slots all share one placeholder object, so they cannot be keyed by
+// id. Their position is what identifies them. Real ids stay numeric (source
+// backed libraries use negative ones), so the string form cannot collide.
+function slotKey(slot: BookSlot, index: number): string | number {
+  return isBookPlaceholder(slot) ? `placeholder:${index}` : slot.id
+}
+
 function staticItemStyle(book: BookCard): { width: string; maxWidth: string } {
   const scale = book.coverAspectRatio === '1/1' ? squareCoverScale.value : 1
   const width = Math.max(1, Math.round(coverPx.value * scale))
@@ -314,7 +321,7 @@ defineExpose({ scrollToIndex })
       v-else
       ref="scrollerRef"
       :items="books"
-      key-field="id"
+      :key-field="slotKey"
       page-mode
       emit-update
       :item-size="itemSize"
