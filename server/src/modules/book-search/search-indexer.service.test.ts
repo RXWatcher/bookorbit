@@ -15,11 +15,12 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
   const client = {
-    addDocuments: vi.fn().mockResolvedValue(undefined),
-    deleteDocuments: vi.fn().mockResolvedValue(undefined),
+    addDocuments: vi.fn().mockResolvedValue(1),
+    deleteDocuments: vi.fn().mockResolvedValue(2),
     createIndex: vi.fn().mockResolvedValue(undefined),
     applySettings: vi.fn().mockResolvedValue(undefined),
     deleteIndex: vi.fn().mockResolvedValue(undefined),
+    waitForTask: vi.fn().mockResolvedValue(undefined),
   };
   // The stored active index has to move when save() is called, because the rebuild reads it
   // back to confirm the flip landed before it deletes the index it replaced.
@@ -93,6 +94,95 @@ describe('SearchIndexerService', () => {
 
     expect(result.failed).toBeGreaterThan(0);
     expect(repository.deleteEvents).not.toHaveBeenCalled();
+  });
+
+  it('applies a delete before a later reinsert of the same document', async () => {
+    const { repository, client, settings } = makeDeps({
+      claimBatch: vi.fn().mockResolvedValue([
+        { id: 1, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'upsert' },
+        { id: 2, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'delete' },
+        { id: 3, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'upsert' },
+      ]),
+      getCatalogRowsByKeys: vi.fn().mockResolvedValue([CATALOG_ROW]),
+      getNativeRowsByIds: vi.fn().mockResolvedValue([]),
+    });
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await expect(service.drain()).resolves.toEqual({ applied: 3, failed: 0 });
+
+    // The reinsert must be the last thing Meilisearch sees, otherwise the document that the
+    // batch ends with present has been deleted.
+    expect(client.addDocuments.mock.invocationCallOrder[0]).toBeLessThan(client.deleteDocuments.mock.invocationCallOrder[0]);
+    expect(client.addDocuments.mock.invocationCallOrder[1]).toBeGreaterThan(client.deleteDocuments.mock.invocationCallOrder[0]);
+    expect(repository.deleteEvents).toHaveBeenCalledWith([1, 2, 3]);
+  });
+
+  it('keeps a failed batch and everything after it in the outbox', async () => {
+    const { repository, client, settings } = makeDeps({
+      claimBatch: vi.fn().mockResolvedValue([
+        { id: 1, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'delete' },
+        { id: 2, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'upsert' },
+      ]),
+      getCatalogRowsByKeys: vi.fn().mockResolvedValue([CATALOG_ROW]),
+      getNativeRowsByIds: vi.fn().mockResolvedValue([]),
+    });
+    client.deleteDocuments.mockRejectedValue(new Error('meili down'));
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await expect(service.drain()).resolves.toEqual({ applied: 0, failed: 2 });
+
+    expect(client.addDocuments).not.toHaveBeenCalled();
+    expect(repository.deleteEvents).not.toHaveBeenCalled();
+  });
+
+  it('keeps the events when the submitted task never succeeds', async () => {
+    const { repository, client, settings } = makeDeps({
+      claimBatch: vi.fn().mockResolvedValue([{ id: 1, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'delete' }]),
+    });
+    client.waitForTask.mockRejectedValue(new Error('task failed'));
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await expect(service.drain()).resolves.toEqual({ applied: 0, failed: 1 });
+
+    expect(client.waitForTask).toHaveBeenCalledWith(2);
+    expect(repository.deleteEvents).not.toHaveBeenCalled();
+  });
+
+  it('waits for the last indexing task before activating the rebuilt index', async () => {
+    const { repository, client, settings } = makeDeps({
+      streamCatalogDocuments: vi.fn().mockImplementation(async function* () {
+        await Promise.resolve();
+        yield [CATALOG_ROW];
+      }),
+    });
+    client.addDocuments.mockResolvedValue(77);
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await service.rebuild();
+
+    expect(client.waitForTask).toHaveBeenCalledWith(77, expect.any(Number));
+    expect(client.waitForTask.mock.invocationCallOrder[0]).toBeLessThan(settings.save.mock.invocationCallOrder[0]);
+  });
+
+  it('does not activate a rebuilt index whose last task never succeeded', async () => {
+    const { repository, client, settings } = makeDeps({
+      streamCatalogDocuments: vi.fn().mockImplementation(async function* () {
+        await Promise.resolve();
+        yield [CATALOG_ROW];
+      }),
+    });
+    client.addDocuments.mockResolvedValue(77);
+    client.waitForTask.mockRejectedValue(new Error('task failed'));
+    const service = new SearchIndexerService(repository as never, settings as never);
+    (service as unknown as { clientFor: () => unknown }).clientFor = () => client;
+
+    await expect(service.rebuild()).rejects.toThrow('task failed');
+    expect(settings.save).not.toHaveBeenCalled();
+    expect(client.deleteIndex).toHaveBeenCalledTimes(1);
   });
 
   it('only activates the new index after the rebuild finishes', async () => {

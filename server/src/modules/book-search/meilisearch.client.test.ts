@@ -131,6 +131,55 @@ describe('MeilisearchClient', () => {
     await expect(client.addDocuments('books', [])).rejects.toBeInstanceOf(GatewayTimeoutException);
   });
 
+  it('raises the maximum total hits above the default so deep pages are not blank', async () => {
+    const fetchMock = mockFetch(() => ({ body: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).applySettings('books');
+
+    const init = fetchMock.mock.calls[0][1] as { body: string };
+    const body = JSON.parse(init.body) as { pagination: { maxTotalHits: number } };
+    expect(body.pagination.maxTotalHits).toBeGreaterThanOrEqual(500_000);
+  });
+
+  it('returns the task id of a write so the caller can confirm it landed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch(() => ({ status: 202, body: { taskUid: 9, status: 'enqueued' } })),
+    );
+
+    const client = new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' });
+
+    await expect(client.addDocuments('books', [])).resolves.toBe(9);
+    await expect(client.deleteDocuments('books', ['catalog:ebook:1'])).resolves.toBe(9);
+  });
+
+  it('resolves waitForTask once the task succeeded', async () => {
+    const fetchMock = mockFetch(() => ({ body: { status: 'succeeded' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).waitForTask(9)).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0][0]).toBe('http://meili:7700/tasks/9');
+  });
+
+  it('raises when the task failed, so the caller keeps its outbox events', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch(() => ({ body: { status: 'failed' } })),
+    );
+
+    await expect(new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).waitForTask(9)).rejects.toBeInstanceOf(HttpException);
+  });
+
+  it('raises a gateway timeout when the task is still running at the deadline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch(() => ({ body: { status: 'processing' } })),
+    );
+
+    await expect(new MeilisearchClient({ url: 'http://meili:7700', apiKey: 'k' }).waitForTask(9, 0)).rejects.toBeInstanceOf(GatewayTimeoutException);
+  });
+
   it('returns false from health rather than throwing when the server is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
 

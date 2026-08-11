@@ -11,6 +11,9 @@ import { SearchIndexRepository } from './search-index.repository';
 export const DRAIN_BATCH_SIZE = 500;
 const REBUILD_BATCH_SIZE = 1000;
 const REBUILD_INDEX_PREFIX = 'bookorbit_books_rebuild_';
+/** A full rebuild is hundreds of batches over 400,000 rows, and the final task only completes
+ *  once every earlier one has, so this wait is measured in minutes rather than seconds. */
+const REBUILD_TASK_TIMEOUT_MS = 30 * 60 * 1000;
 
 interface OutboxEvent {
   id: number;
@@ -26,6 +29,29 @@ function parseCatalogEntityId(entityId: string): { mediaType: string; remoteId: 
 
 function parseNativeEntityId(entityId: string): number {
   return Number(entityId.split(':')[1]);
+}
+
+interface OutboxRun {
+  operation: 'upsert' | 'delete';
+  events: OutboxEvent[];
+}
+
+/** Events are claimed in id order and applied in consecutive same-operation runs, so a delete
+ *  followed by a reinsert of the same document inside one batch keeps that order. Grouping all
+ *  upserts and then all deletes would have applied the delete last and lost the document. */
+function groupConsecutiveRuns(events: OutboxEvent[]): OutboxRun[] {
+  const runs: OutboxRun[] = [];
+
+  for (const event of events) {
+    const current = runs[runs.length - 1];
+    if (current && current.operation === event.operation) {
+      current.events.push(event);
+      continue;
+    }
+    runs.push({ operation: event.operation, events: [event] });
+  }
+
+  return runs;
 }
 
 @Injectable()
@@ -86,54 +112,48 @@ export class SearchIndexerService {
       throw error;
     }
 
-    const upserts = events.filter((event) => event.operation === 'upsert');
-    const deletes = events.filter((event) => event.operation === 'delete');
-
-    let applied = 0;
-    let failed = 0;
+    const runs = groupConsecutiveRuns(events);
     const succeededIds: number[] = [];
+    let applied = 0;
 
-    if (upserts.length > 0) {
+    for (const run of runs) {
       try {
-        const documents = await this.loadUpsertDocuments(upserts);
-        await client.addDocuments(config.activeIndex, documents);
-        succeededIds.push(...upserts.map((event) => event.id));
-        applied += upserts.length;
+        await this.applyRun(client, config.activeIndex, run);
       } catch (error) {
-        failed += upserts.length;
         const errorClass = error instanceof Error ? error.name : 'UnknownError';
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `[search_index.drain] [fail] op=upsert count=${upserts.length} durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${sanitizeLogValue(message)}" - failed to write upserts, events left in outbox`,
+          `[search_index.drain] [fail] op=${run.operation} count=${run.events.length} durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${sanitizeLogValue(message)}" - failed to apply a batch, it and everything after it stay in the outbox`,
         );
+        break;
       }
-    }
 
-    if (deletes.length > 0) {
-      try {
-        await client.deleteDocuments(
-          config.activeIndex,
-          deletes.map((event) => event.entityId),
-        );
-        succeededIds.push(...deletes.map((event) => event.id));
-        applied += deletes.length;
-      } catch (error) {
-        failed += deletes.length;
-        const errorClass = error instanceof Error ? error.name : 'UnknownError';
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          `[search_index.drain] [fail] op=delete count=${deletes.length} durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${sanitizeLogValue(message)}" - failed to delete documents, events left in outbox`,
-        );
-      }
+      succeededIds.push(...run.events.map((event) => event.id));
+      applied += run.events.length;
     }
 
     if (succeededIds.length > 0) {
       await this.repository.deleteEvents(succeededIds);
     }
 
+    const failed = events.length - applied;
     this.logger.log(`[search_index.drain] [end] durationMs=${Date.now() - startedAt} applied=${applied} failed=${failed} - outbox drain completed`);
 
     return { applied, failed };
+  }
+
+  private async applyRun(client: MeilisearchClient, index: string, run: OutboxRun): Promise<void> {
+    const taskUid =
+      run.operation === 'upsert'
+        ? await client.addDocuments(index, await this.loadUpsertDocuments(run.events))
+        : await client.deleteDocuments(
+            index,
+            run.events.map((event) => event.entityId),
+          );
+
+    if (typeof taskUid === 'number') {
+      await client.waitForTask(taskUid);
+    }
   }
 
   /** Best effort only: the cleanup outcome must never change which error the caller sees,
@@ -202,15 +222,23 @@ export class SearchIndexerService {
       await client.applySettings(index);
 
       let indexed = 0;
+      let lastTaskUid: number | null = null;
 
       for await (const batch of this.repository.streamCatalogDocuments(REBUILD_BATCH_SIZE)) {
-        await client.addDocuments(index, batch.map(mapCatalogRowToDocument));
+        lastTaskUid = await client.addDocuments(index, batch.map(mapCatalogRowToDocument));
         indexed += batch.length;
       }
 
       for await (const batch of this.repository.streamNativeDocuments(REBUILD_BATCH_SIZE)) {
-        await client.addDocuments(index, batch.map(mapNativeBookToDocument));
+        lastTaskUid = await client.addDocuments(index, batch.map(mapNativeBookToDocument));
         indexed += batch.length;
+      }
+
+      // Meilisearch processes an index's tasks in submission order, so the last one succeeding
+      // means the whole rebuild has landed. Flipping the pointer before that would activate a
+      // half populated index.
+      if (typeof lastTaskUid === 'number') {
+        await client.waitForTask(lastTaskUid, REBUILD_TASK_TIMEOUT_MS);
       }
 
       await this.settings.save({ activeIndex: index });

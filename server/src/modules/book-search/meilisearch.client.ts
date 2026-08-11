@@ -9,6 +9,17 @@ interface MeilisearchClientOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_TASK_TIMEOUT_MS = 60_000;
+const TASK_POLL_INTERVAL_MS = 500;
+
+/** The catalogue is over 400,000 rows and Meilisearch answers 1000 by default, which would
+ *  leave every page past hit 1000 blank while the reported total claimed hundreds of
+ *  thousands. Matched to MAX_BOOK_QUERY_OFFSET_ROWS, the app's own pagination ceiling. */
+const MAX_TOTAL_HITS = 1_000_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class MeilisearchClient {
   constructor(private readonly options: MeilisearchClientOptions) {}
@@ -68,6 +79,7 @@ export class MeilisearchClient {
         searchableAttributes: ['title', 'sortTitle', 'authors', 'series', 'narrators', 'publisher', 'tags', 'genres', 'identifiers'],
         filterableAttributes: ['mediaType', 'source', 'language', 'format', 'publishedYear', 'libraryId', 'hasCover', 'tags', 'genres'],
         sortableAttributes: ['sortTitle', 'publishedYear', 'addedAt', 'durationSeconds'],
+        pagination: { maxTotalHits: MAX_TOTAL_HITS },
       },
     });
   }
@@ -83,18 +95,42 @@ export class MeilisearchClient {
     await this.request(`/indexes/${index}`, { method: 'DELETE' });
   }
 
-  async addDocuments(index: string, documents: BookSearchDocument[]): Promise<void> {
-    await this.request(`/indexes/${index}/documents`, {
+  /** Writes are asynchronous: Meilisearch answers 202 with a task id and applies the change
+   *  later, so the returned id is what a caller needs to confirm the write actually landed. */
+  async addDocuments(index: string, documents: BookSearchDocument[]): Promise<number | null> {
+    const body = await this.request<{ taskUid?: number }>(`/indexes/${index}/documents`, {
       method: 'PUT',
       body: documents,
     });
+    return typeof body?.taskUid === 'number' ? body.taskUid : null;
   }
 
-  async deleteDocuments(index: string, ids: string[]): Promise<void> {
-    await this.request(`/indexes/${index}/documents/delete-batch`, {
+  async deleteDocuments(index: string, ids: string[]): Promise<number | null> {
+    const body = await this.request<{ taskUid?: number }>(`/indexes/${index}/documents/delete-batch`, {
       method: 'POST',
       body: ids,
     });
+    return typeof body?.taskUid === 'number' ? body.taskUid : null;
+  }
+
+  /** Resolves only when the task succeeded. A failed, cancelled or still running task raises,
+   *  so a caller can keep its outbox events and retry rather than record a phantom write. */
+  async waitForTask(taskUid: number, timeoutMs: number = DEFAULT_TASK_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+
+    for (;;) {
+      const task = await this.request<{ status?: string }>(`/tasks/${taskUid}`, { method: 'GET' });
+
+      if (task?.status === 'succeeded') return;
+      if (task?.status === 'failed' || task?.status === 'canceled') {
+        throw new BadGatewayException(`Search server task ${taskUid} ${task.status}`);
+      }
+      if (Date.now() >= deadline) {
+        throw new GatewayTimeoutException(`Search server task ${taskUid} did not finish in time`);
+      }
+
+      await sleep(TASK_POLL_INTERVAL_MS);
+    }
   }
 
   async search(index: string, params: { q: string; offset: number; limit: number; filter?: string[] }): Promise<{ ids: string[]; total: number }> {
