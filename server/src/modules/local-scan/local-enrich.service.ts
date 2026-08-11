@@ -125,7 +125,10 @@ export class LocalEnrichService {
             const fromArchive = await this.comicInfoFromArchive(row.localPath);
             if (fromArchive) summary.comicInfoRead += 1;
             else summary.noSidecar += 1;
-            const comicValues = fromArchive ?? this.comicFallbackFromPath(row.localPath);
+            // Layered, not replaced: plenty of issues are untitled, so a ComicInfo.xml can
+            // carry a series and a writer but no <Title>. title is NOT NULL, so the
+            // filename has to remain the floor under whatever the archive provides.
+            const comicValues: LocalEnrichmentValues = { ...this.comicFallbackFromPath(row.localPath), ...fromArchive };
             if (await hasCoverFile(bookDir)) {
               comicValues.hasCover = true;
               summary.coversFound += 1;

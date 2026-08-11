@@ -148,6 +148,38 @@ describe('LocalEnrichService', () => {
 
     // The Calibre fallback reads the parent directory as the author, which for a comic is
     // the language folder. That would stamp "English" on every comic in the library.
+    // title is NOT NULL. An untitled issue whose ComicInfo carries only a series and a
+    // writer must not blank the title, which aborted a whole enrichment batch.
+    it('keeps the filename title when ComicInfo has no Title element', async () => {
+      cbzMocks.readCbzZipIndex.mockResolvedValue({
+        entries: [{ name: 'ComicInfo.xml', compression: 0, compressedSize: 1, uncompressedSize: 1, localHeaderOffset: 0, dataStart: 0 }],
+        comment: null,
+      });
+      cbzMocks.extractCbzZipEntry.mockResolvedValue(
+        Buffer.from('<ComicInfo><Series>Batman, Incorporated</Series><Writer>Grant Morrison</Writer></ComicInfo>', 'utf8'),
+      );
+      const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
+
+      await new LocalEnrichService(repository as never).enrichAll();
+
+      const values = applied.get(1)!;
+      expect(values.title).toBe('Batman #13 (2012)');
+      expect(values).toMatchObject({ series: 'Batman, Incorporated', authors: ['Grant Morrison'] });
+    });
+
+    it('falls back to the filename issue when ComicInfo has no Number', async () => {
+      cbzMocks.readCbzZipIndex.mockResolvedValue({
+        entries: [{ name: 'ComicInfo.xml', compression: 0, compressedSize: 1, uncompressedSize: 1, localHeaderOffset: 0, dataStart: 0 }],
+        comment: null,
+      });
+      cbzMocks.extractCbzZipEntry.mockResolvedValue(Buffer.from('<ComicInfo><Series>Batman, Incorporated</Series></ComicInfo>', 'utf8'));
+      const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
+
+      await new LocalEnrichService(repository as never).enrichAll();
+
+      expect(applied.get(1)).toMatchObject({ seriesIndex: 13 });
+    });
+
     it('never invents an author from the folder when there is no ComicInfo', async () => {
       cbzMocks.readCbzZipIndex.mockResolvedValue(null);
       const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
