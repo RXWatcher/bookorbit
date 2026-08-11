@@ -78,6 +78,7 @@ import { AccountActivityModule } from './modules/account-activity/account-activi
 import { SharedReadingInsightsModule } from './modules/shared-reading-insights/shared-reading-insights.module';
 import { BookDuplicatesModule } from './modules/book-duplicates/book-duplicates.module';
 import { BookMoveModule } from './modules/book-move/book-move.module';
+import { BookSearchModule } from './modules/book-search/book-search.module';
 
 @Module({
   imports: [
@@ -162,6 +163,7 @@ import { BookMoveModule } from './modules/book-move/book-move.module';
     SharedReadingInsightsModule,
     BookDuplicatesModule,
     BookMoveModule,
+    BookSearchModule,
     BrowseCountsModule,
   ],
   providers: [

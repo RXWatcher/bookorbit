@@ -46,6 +46,7 @@ import { LocalScanModule } from '../local-scan/local-scan.module';
   exports: [
     WarehouseClientService,
     WarehouseRepository,
+    WarehouseSecretService,
     WarehouseSettingsService,
     WarehouseCatalogCoverCacheService,
     WarehouseCatalogSyncService,

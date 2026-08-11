@@ -202,4 +202,11 @@ export class SearchIndexerService {
       throw error;
     }
   }
+
+  rebuildInBackground(): void {
+    void this.rebuild().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[search_index.rebuild_background] [fail] error="${sanitizeLogValue(message)}" - detached rebuild failed`);
+    });
+  }
 }
