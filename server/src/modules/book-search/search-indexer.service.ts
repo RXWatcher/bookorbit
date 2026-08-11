@@ -8,7 +8,7 @@ import type { BookSearchDocument } from './book-search.types';
 import { MeilisearchClient } from './meilisearch.client';
 import { SearchIndexRepository } from './search-index.repository';
 
-const DRAIN_BATCH_SIZE = 500;
+export const DRAIN_BATCH_SIZE = 500;
 const REBUILD_BATCH_SIZE = 1000;
 const REBUILD_INDEX_PREFIX = 'bookorbit_books_rebuild_';
 
