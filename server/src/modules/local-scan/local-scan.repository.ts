@@ -195,12 +195,18 @@ export class LocalScanRepository {
 
   /** Local rows that still carry only a directory-derived title, walked by id so a long
    *  enrichment run holds one page at a time rather than the whole set. */
-  async *streamLocalItemsNeedingEnrichment(batchSize: number): AsyncGenerator<Array<{ id: number; localPath: string | null }>> {
+  async *streamLocalItemsNeedingEnrichment(
+    batchSize: number,
+  ): AsyncGenerator<Array<{ id: number; localPath: string | null; mediaType: WarehouseMediaType }>> {
     let cursor = 0;
 
     for (;;) {
       const batch = await this.db
-        .select({ id: schema.warehouseCatalogItems.id, localPath: schema.warehouseCatalogItems.localPath })
+        .select({
+          id: schema.warehouseCatalogItems.id,
+          localPath: schema.warehouseCatalogItems.localPath,
+          mediaType: schema.warehouseCatalogItems.mediaType,
+        })
         .from(schema.warehouseCatalogItems)
         .where(
           and(

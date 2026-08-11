@@ -2,6 +2,12 @@ import * as fs from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+const cbzMocks = vi.hoisted(() => ({
+  readCbzZipIndex: vi.fn<(path: string) => Promise<{ entries: Array<{ fileName: string }> } | null>>(),
+  extractCbzZipEntry: vi.fn<() => Promise<Buffer | null>>(),
+}));
+vi.mock('../../common/cbz-zip-reader', () => cbzMocks);
+
 import { LocalEnrichService } from './local-enrich.service';
 
 const OPF = `<?xml version='1.0' encoding='utf-8'?>
@@ -17,7 +23,7 @@ const OPF = `<?xml version='1.0' encoding='utf-8'?>
   </metadata>
 </package>`;
 
-function makeRepository(rows: Array<{ id: number; localPath: string | null }>) {
+function makeRepository(rows: Array<{ id: number; localPath: string | null; mediaType?: string }>) {
   const applied = new Map<number, Record<string, unknown>>();
   const repository = {
     streamLocalItemsNeedingEnrichment: vi.fn().mockImplementation(async function* () {
@@ -105,5 +111,57 @@ describe('LocalEnrichService', () => {
     expect(summary.examined).toBe(1);
     expect(summary.enriched).toBe(0);
     expect(applied.size).toBe(0);
+  });
+  describe('comics', () => {
+    const COMIC_XML =
+      '<ComicInfo><Title>The Dark Knight</Title><Series>Batman, Incorporated</Series>' +
+      '<Number>13</Number><Writer>Grant Morrison</Writer><Publisher>DC Comics</Publisher><Year>2013</Year></ComicInfo>';
+    const COMIC_PATH = '/comics/English/Batman (2012)/Batman #13 (2012).cbz';
+
+    beforeEach(() => {
+      cbzMocks.readCbzZipIndex.mockReset();
+      cbzMocks.extractCbzZipEntry.mockReset();
+    });
+
+    it('prefers an embedded ComicInfo.xml', async () => {
+      cbzMocks.readCbzZipIndex.mockResolvedValue({ entries: [{ fileName: 'ComicInfo.xml' }] });
+      cbzMocks.extractCbzZipEntry.mockResolvedValue(Buffer.from(COMIC_XML, 'utf8'));
+      const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
+
+      const summary = await new LocalEnrichService(repository as never).enrichAll();
+
+      expect(summary.comicInfoRead).toBe(1);
+      expect(applied.get(1)).toMatchObject({
+        title: 'The Dark Knight',
+        series: 'Batman, Incorporated',
+        seriesIndex: 13,
+        authors: ['Grant Morrison'],
+        publisher: 'DC Comics',
+        publishedYear: 2013,
+      });
+    });
+
+    // The Calibre fallback reads the parent directory as the author, which for a comic is
+    // the language folder. That would stamp "English" on every comic in the library.
+    it('never invents an author from the folder when there is no ComicInfo', async () => {
+      cbzMocks.readCbzZipIndex.mockResolvedValue(null);
+      const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
+
+      const summary = await new LocalEnrichService(repository as never).enrichAll();
+
+      const values = applied.get(1)!;
+      expect(summary.comicInfoRead).toBe(0);
+      expect(values.authors).toBeUndefined();
+      expect(values).toMatchObject({ title: 'Batman #13 (2012)', series: 'Batman', seriesIndex: 13 });
+    });
+
+    it('falls back to the filename when the archive cannot be read', async () => {
+      cbzMocks.readCbzZipIndex.mockRejectedValue(new Error('corrupt'));
+      const { repository, applied } = makeRepository([{ id: 1, localPath: COMIC_PATH, mediaType: 'comic' }]);
+
+      await new LocalEnrichService(repository as never).enrichAll();
+
+      expect(applied.get(1)).toMatchObject({ series: 'Batman', seriesIndex: 13 });
+    });
   });
 });

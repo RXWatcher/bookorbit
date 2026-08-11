@@ -2,7 +2,9 @@ import { readdir, readFile } from 'fs/promises';
 import { basename, dirname, join } from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 
+import { extractCbzZipEntry, readCbzZipIndex } from '../../common/cbz-zip-reader';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
+import { parseComicInfo } from './comic-info.parser';
 import { LocalScanRepository, type LocalEnrichmentValues } from './local-scan.repository';
 import { parseOpfSidecar } from './opf-sidecar.parser';
 
@@ -11,6 +13,8 @@ const SIDECAR_NAME = 'metadata.opf';
 const COVER_NAMES = ['cover.jpg', 'cover.jpeg', 'cover.png'];
 /** Calibre appends the library id to the book directory, as in "Title (61069)". */
 const TRAILING_CALIBRE_ID = / \(\d+\)$/;
+/** "<Series> #<Issue>", the layout every comic on disk follows. */
+const COMIC_FILENAME = /^(?<series>.+?)\s*#\s*(?<issue>\d{1,5}(?:\.\d+)?)/;
 
 export interface LocalEnrichSummary {
   examined: number;
@@ -18,6 +22,8 @@ export interface LocalEnrichSummary {
   noSidecar: number;
   unparsable: number;
   coversFound: number;
+  /** Comics whose metadata came from an embedded ComicInfo.xml rather than the filename. */
+  comicInfoRead: number;
 }
 
 /** One directory read answers the cover question, rather than probing each candidate name. */
@@ -45,9 +51,65 @@ export class LocalEnrichService {
     return { title, authors: authorDir ? [authorDir] : [] };
   }
 
+  /**
+   * A comic lives at <root>/<Series>/<Series> #<Issue>.cbz, so the Calibre fallback would
+   * read the language folder as the author and strip the issue off the title. Series and
+   * issue come from the filename instead, and no author is invented.
+   */
+  private comicFallbackFromPath(localPath: string): LocalEnrichmentValues {
+    const fileName = basename(localPath);
+    const stem = fileName.replace(/\.[^.]+$/, '');
+    const match = COMIC_FILENAME.exec(stem.trim());
+    if (!match?.groups) return { title: stem };
+
+    const series = match.groups.series?.replace(/\(\s*\d{4}\s*\)/g, ' ').trim();
+    const issue = Number.parseFloat(match.groups.issue ?? '');
+    return {
+      title: stem,
+      series: series && series.length > 0 ? series : null,
+      seriesIndex: Number.isFinite(issue) ? issue : null,
+    };
+  }
+
+  /** Roughly 95% of these archives carry a scraped ComicInfo.xml, which beats any filename. */
+  private async comicInfoFromArchive(localPath: string): Promise<LocalEnrichmentValues | null> {
+    let index;
+    try {
+      index = await readCbzZipIndex(localPath);
+    } catch {
+      return null;
+    }
+    if (!index) return null;
+
+    const entry = index.entries.find((candidate) => basename(candidate.fileName).toLowerCase() === 'comicinfo.xml');
+    if (!entry) return null;
+
+    let raw: Buffer | null;
+    try {
+      raw = await extractCbzZipEntry(localPath, entry);
+    } catch {
+      return null;
+    }
+    if (!raw) return null;
+
+    const info = parseComicInfo(raw.toString('utf8'));
+    if (!info) return null;
+
+    const values: LocalEnrichmentValues = {};
+    if (info.title) values.title = info.title;
+    if (info.series) values.series = info.series;
+    if (info.issueNumber !== null) values.seriesIndex = info.issueNumber;
+    if (info.authors.length > 0) values.authors = info.authors;
+    if (info.publisher) values.publisher = info.publisher;
+    if (info.publishedYear !== null) values.publishedYear = info.publishedYear;
+    if (info.language) values.language = info.language;
+    if (Object.keys(info.identifiers).length > 0) values.identifiers = info.identifiers;
+    return values;
+  }
+
   async enrichAll(): Promise<LocalEnrichSummary> {
     const startedAt = Date.now();
-    const summary: LocalEnrichSummary = { examined: 0, enriched: 0, noSidecar: 0, unparsable: 0, coversFound: 0 };
+    const summary: LocalEnrichSummary = { examined: 0, enriched: 0, noSidecar: 0, unparsable: 0, coversFound: 0, comicInfoRead: 0 };
     this.logger.log('[local_enrich.run] [start] - sidecar enrichment started');
 
     let pending: Array<{ id: number; values: LocalEnrichmentValues }> = [];
@@ -59,6 +121,24 @@ export class LocalEnrichService {
           if (!row.localPath) continue;
 
           const bookDir = dirname(row.localPath);
+
+          if (row.mediaType === 'comic') {
+            const fromArchive = await this.comicInfoFromArchive(row.localPath);
+            if (fromArchive) summary.comicInfoRead += 1;
+            else summary.noSidecar += 1;
+            const comicValues = fromArchive ?? this.comicFallbackFromPath(row.localPath);
+            if (await hasCoverFile(bookDir)) {
+              comicValues.hasCover = true;
+              summary.coversFound += 1;
+            }
+            pending.push({ id: row.id, values: comicValues });
+            if (pending.length >= BATCH_SIZE) {
+              summary.enriched += await this.repository.applyEnrichmentBatch(pending);
+              pending = [];
+            }
+            continue;
+          }
+
           const sidecarPath = join(bookDir, SIDECAR_NAME);
 
           let values: LocalEnrichmentValues;
@@ -117,7 +197,7 @@ export class LocalEnrichService {
     }
 
     this.logger.log(
-      `[local_enrich.run] [end] durationMs=${Date.now() - startedAt} examined=${summary.examined} enriched=${summary.enriched} noSidecar=${summary.noSidecar} unparsable=${summary.unparsable} coversFound=${summary.coversFound} - sidecar enrichment completed`,
+      `[local_enrich.run] [end] durationMs=${Date.now() - startedAt} examined=${summary.examined} enriched=${summary.enriched} noSidecar=${summary.noSidecar} unparsable=${summary.unparsable} coversFound=${summary.coversFound} comicInfoRead=${summary.comicInfoRead} - sidecar enrichment completed`,
     );
 
     return summary;
