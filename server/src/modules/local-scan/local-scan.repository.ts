@@ -81,20 +81,22 @@ export class LocalScanRepository {
   async insertLocalItems(rows: NewLocalCatalogItem[]): Promise<number> {
     if (rows.length === 0) return 0;
 
-    const result = await this.db
-      .insert(schema.warehouseCatalogItems)
-      .values(rows.map((row) => ({ ...row, source: 'local' as const })))
-      .onConflictDoNothing({ target: [schema.warehouseCatalogItems.mediaType, schema.warehouseCatalogItems.remoteId] });
+    return this.db.transaction(async (tx) => {
+      const result = await tx
+        .insert(schema.warehouseCatalogItems)
+        .values(rows.map((row) => ({ ...row, source: 'local' as const })))
+        .onConflictDoNothing({ target: [schema.warehouseCatalogItems.mediaType, schema.warehouseCatalogItems.remoteId] });
 
-    await this.db.insert(schema.searchIndexEvents).values(
-      rows.map((row) => ({
-        entityType: 'catalog_item' as const,
-        entityId: catalogDocumentId(row.mediaType, row.remoteId),
-        operation: 'upsert' as const,
-      })),
-    );
+      await tx.insert(schema.searchIndexEvents).values(
+        rows.map((row) => ({
+          entityType: 'catalog_item' as const,
+          entityId: catalogDocumentId(row.mediaType, row.remoteId),
+          operation: 'upsert' as const,
+        })),
+      );
 
-    return result.rowCount ?? 0;
+      return result.rowCount ?? 0;
+    });
   }
 
   /** Warehouse rows written since the scan began, so a book the sync landed mid walk can be
@@ -217,36 +219,38 @@ export class LocalScanRepository {
       return sql`(${id}::int, ${v.title ?? null}::text, ${v.sortTitle ?? null}::text, ${JSON.stringify(v.authors ?? [])}::jsonb, ${v.series ?? null}::text, ${v.seriesIndex ?? null}::real, ${v.publisher ?? null}::text, ${v.language ?? null}::varchar, ${JSON.stringify(v.tags ?? [])}::jsonb, ${v.publishedYear ?? null}::int, ${JSON.stringify(v.identifiers ?? {})}::jsonb, ${v.hasCover ?? false}::boolean)`;
     });
 
-    const result = await this.db.execute<{ media_type: string; remote_id: string }>(sql`
-      update warehouse_catalog_items as t set
-        title = v.title,
-        sort_title = v.sort_title,
-        authors = v.authors,
-        series = v.series,
-        series_index = v.series_index,
-        publisher = v.publisher,
-        language = v.language,
-        tags = v.tags,
-        published_year = v.published_year,
-        identifiers = v.identifiers,
-        has_cover = v.has_cover,
-        updated_at = now()
-      from (values ${sql.join(tuples, sql`, `)}) as v(id, title, sort_title, authors, series, series_index, publisher, language, tags, published_year, identifiers, has_cover)
-      where t.id = v.id
-      returning t.media_type, t.remote_id
-    `);
+    return this.db.transaction(async (tx) => {
+      const result = await tx.execute<{ media_type: string; remote_id: string }>(sql`
+        update warehouse_catalog_items as t set
+          title = v.title,
+          sort_title = v.sort_title,
+          authors = v.authors,
+          series = v.series,
+          series_index = v.series_index,
+          publisher = v.publisher,
+          language = v.language,
+          tags = v.tags,
+          published_year = v.published_year,
+          identifiers = v.identifiers,
+          has_cover = v.has_cover,
+          updated_at = now()
+        from (values ${sql.join(tuples, sql`, `)}) as v(id, title, sort_title, authors, series, series_index, publisher, language, tags, published_year, identifiers, has_cover)
+        where t.id = v.id
+        returning t.media_type, t.remote_id
+      `);
 
-    if (result.rows.length > 0) {
-      await this.db.insert(schema.searchIndexEvents).values(
-        result.rows.map((row) => ({
-          entityType: 'catalog_item' as const,
-          entityId: catalogDocumentId(row.media_type, row.remote_id),
-          operation: 'upsert' as const,
-        })),
-      );
-    }
+      if (result.rows.length > 0) {
+        await tx.insert(schema.searchIndexEvents).values(
+          result.rows.map((row) => ({
+            entityType: 'catalog_item' as const,
+            entityId: catalogDocumentId(row.media_type, row.remote_id),
+            operation: 'upsert' as const,
+          })),
+        );
+      }
 
-    return result.rowCount ?? 0;
+      return result.rowCount ?? 0;
+    });
   }
 
   async findAllRootPaths(): Promise<string[]> {

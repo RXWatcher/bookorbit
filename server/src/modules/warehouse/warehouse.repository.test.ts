@@ -128,6 +128,7 @@ function makeDb() {
     }),
     execute: vi.fn(),
     select: vi.fn(),
+    transaction: vi.fn(),
     query: {
       warehouseSettings: {
         findFirst: vi.fn(),
@@ -168,6 +169,8 @@ function makeDb() {
       bookmarkDelete,
     },
   };
+
+  db.transaction.mockImplementation((callback: (tx: typeof db) => unknown) => callback(db));
 
   return db;
 }
@@ -2243,6 +2246,7 @@ describe('WarehouseRepository', () => {
     it('returns 0 without hitting the database when no items are provided', async () => {
       await expect(repo.upsertCatalogItems([])).resolves.toBe(0);
       expect(db.insert).not.toHaveBeenCalled();
+      expect(db.transaction).not.toHaveBeenCalled();
     });
 
     it('upserts by media type and remote id and returns the saved count', async () => {
@@ -2272,6 +2276,7 @@ describe('WarehouseRepository', () => {
 
       await expect(repo.upsertCatalogItems(items)).resolves.toBe(1);
 
+      expect(db.transaction).toHaveBeenCalledTimes(1);
       expect(db.insert).toHaveBeenCalledWith(schema.warehouseCatalogItems);
       expect(db._chains.catalogItemInsert.values).toHaveBeenCalledWith(items);
       expect(db._chains.catalogItemInsert.onConflictDoUpdate).toHaveBeenCalledWith(

@@ -81,6 +81,7 @@ import { catalogAuthorCanonicalName, catalogAuthorRefs } from './catalog-link-re
 import { normalizeWarehouseRequestStatus } from './warehouse-request.mapper';
 
 type Db = NodePgDatabase<typeof schema>;
+type CatalogWriteExecutor = Pick<Db, 'insert' | 'execute'>;
 
 /** Caps how many ANDed ILIKE clauses one query can build. */
 const MAX_SEARCH_WORDS = 8;
@@ -493,53 +494,58 @@ export class WarehouseRepository {
       return 0;
     }
 
-    await this.db
-      .insert(schema.warehouseCatalogItems)
-      .values(items)
-      .onConflictDoUpdate({
-        target: [schema.warehouseCatalogItems.mediaType, schema.warehouseCatalogItems.remoteId],
-        set: {
-          title: sql`excluded.title`,
-          subtitle: sql`excluded.subtitle`,
-          sortTitle: sql`excluded.sort_title`,
-          authors: sql`excluded.authors`,
-          narrators: sql`excluded.narrators`,
-          series: sql`excluded.series`,
-          seriesIndex: sql`excluded.series_index`,
-          genres: sql`excluded.genres`,
-          tags: sql`excluded.tags`,
-          language: sql`excluded.language`,
-          publisher: sql`excluded.publisher`,
-          identifiers: sql`excluded.identifiers`,
-          format: sql`excluded.format`,
-          durationSeconds: sql`excluded.duration_seconds`,
-          hasCover: sql`excluded.has_cover`,
-          upstreamCreatedAt: sql`excluded.upstream_created_at`,
-          upstreamUpdatedAt: sql`excluded.upstream_updated_at`,
-          rawPayload: sql`excluded.raw_payload`,
-          syncedAt: sql`excluded.synced_at`,
-          updatedAt: new Date(),
-        },
-      });
+    await this.db.transaction(async (tx) => {
+      await tx
+        .insert(schema.warehouseCatalogItems)
+        .values(items)
+        .onConflictDoUpdate({
+          target: [schema.warehouseCatalogItems.mediaType, schema.warehouseCatalogItems.remoteId],
+          set: {
+            title: sql`excluded.title`,
+            subtitle: sql`excluded.subtitle`,
+            sortTitle: sql`excluded.sort_title`,
+            authors: sql`excluded.authors`,
+            narrators: sql`excluded.narrators`,
+            series: sql`excluded.series`,
+            seriesIndex: sql`excluded.series_index`,
+            genres: sql`excluded.genres`,
+            tags: sql`excluded.tags`,
+            language: sql`excluded.language`,
+            publisher: sql`excluded.publisher`,
+            identifiers: sql`excluded.identifiers`,
+            format: sql`excluded.format`,
+            durationSeconds: sql`excluded.duration_seconds`,
+            hasCover: sql`excluded.has_cover`,
+            upstreamCreatedAt: sql`excluded.upstream_created_at`,
+            upstreamUpdatedAt: sql`excluded.upstream_updated_at`,
+            rawPayload: sql`excluded.raw_payload`,
+            syncedAt: sql`excluded.synced_at`,
+            updatedAt: new Date(),
+          },
+        });
 
-    await this.db.insert(schema.searchIndexEvents).values(
-      items.map((item) => ({
-        entityType: 'catalog_item' as const,
-        entityId: catalogDocumentId(item.mediaType, item.remoteId),
-        operation: 'upsert' as const,
-      })),
-    );
+      await tx.insert(schema.searchIndexEvents).values(
+        items.map((item) => ({
+          entityType: 'catalog_item' as const,
+          entityId: catalogDocumentId(item.mediaType, item.remoteId),
+          operation: 'upsert' as const,
+        })),
+      );
 
-    await this.refreshCatalogItemAuthors(items);
+      await this.refreshCatalogItemAuthors(items, tx);
+    });
 
     return items.length;
   }
 
-  private async refreshCatalogItemAuthors(items: Array<Omit<NewWarehouseCatalogItemRow, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void> {
+  private async refreshCatalogItemAuthors(
+    items: Array<Omit<NewWarehouseCatalogItemRow, 'id' | 'createdAt' | 'updatedAt'>>,
+    executor: CatalogWriteExecutor = this.db,
+  ): Promise<void> {
     const authorRows = catalogItemAuthorRows(items);
     const itemKeys = items.map((item) => sql`(${item.mediaType}::warehouse_media_type, ${item.remoteId})`);
 
-    await this.db.execute(sql`
+    await executor.execute(sql`
       delete from ${schema.warehouseCatalogItemAuthors}
       where (${schema.warehouseCatalogItemAuthors.mediaType}, ${schema.warehouseCatalogItemAuthors.remoteId})
         in (${sql.join(itemKeys, sql`, `)})
@@ -549,7 +555,7 @@ export class WarehouseRepository {
       return;
     }
 
-    await this.db.insert(schema.warehouseCatalogItemAuthors).values(authorRows).onConflictDoNothing();
+    await executor.insert(schema.warehouseCatalogItemAuthors).values(authorRows).onConflictDoNothing();
   }
 
   findCatalogItem(mediaType: WarehouseMediaType, remoteId: string) {
