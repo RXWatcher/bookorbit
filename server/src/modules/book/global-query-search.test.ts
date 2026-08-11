@@ -365,6 +365,41 @@ describe('globalQuery search routing', () => {
     expect(result).toEqual({ items: [localBook], total: 1, page: 0, size: 10 });
   });
 
+  it('resolves the content filter names for a filtered user and passes them to the provider', async () => {
+    const { service, bookSearchService, libraryService, contentFilterRepository } = makeService();
+    const user = makeUser({ id: 7 });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }]);
+    const resolved = {
+      includeTags: [{ id: 1, name: 'Cozy' }],
+      excludeTags: [{ id: 2, name: 'Adult' }],
+      includeGenres: [],
+      excludeGenres: [{ id: 3, name: 'Horror' }],
+    };
+    contentFilterRepository.findByUserIdWithNames.mockResolvedValue(resolved);
+    bookSearchService.search.mockResolvedValue(null);
+    vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [], total: 0, page: 0, size: 10 } as never);
+
+    await service.globalQuery(user, { filter: null, sort: [], pagination: { page: 0, size: 10 }, q: 'dune' } as never);
+
+    // The provider filters on tag and genre NAMES, so the ids on the request user are not
+    // enough: they have to be resolved before the query is built.
+    expect(contentFilterRepository.findByUserIdWithNames).toHaveBeenCalledWith(7);
+    expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: resolved }), { allowSqlFallback: false });
+  });
+
+  it('sends no content filters for a superuser and does not resolve any', async () => {
+    const { service, bookSearchService, libraryService, contentFilterRepository } = makeService();
+    const user = makeUser({ id: 7, isSuperuser: true });
+    libraryService.findAll.mockResolvedValue([{ id: 3 }]);
+    bookSearchService.search.mockResolvedValue(null);
+    vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [], total: 0, page: 0, size: 10 } as never);
+
+    await service.globalQuery(user, { filter: null, sort: [], pagination: { page: 0, size: 10 }, q: 'dune' } as never);
+
+    expect(contentFilterRepository.findByUserIdWithNames).not.toHaveBeenCalled();
+    expect(bookSearchService.search).toHaveBeenCalledWith(expect.objectContaining({ contentFilters: undefined }), { allowSqlFallback: false });
+  });
+
   it('does not ask the provider for a catalogue media type the user has no library for', async () => {
     const { service, bookSearchService, warehouseCatalog, libraryService } = makeService();
     const user = makeUser({ id: 7 });
