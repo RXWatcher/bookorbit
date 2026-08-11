@@ -50,6 +50,16 @@ function makeRepository(root: string, options: RepoOptions = {}) {
   return { repository, inserted, deleted, failures, finished };
 }
 
+function makeWarehouse(series: Array<{ id: string; title: string }> = []) {
+  return {
+    listComicSeries: vi.fn().mockImplementation(({ page }: { page: number }) => Promise.resolve({ items: page === 0 ? series : [] })),
+  };
+}
+
+function makeService(repository: unknown, warehouse: unknown = makeWarehouse()) {
+  return new LocalScanService(repository as never, warehouse as never);
+}
+
 describe('LocalScanService', () => {
   let root: string;
 
@@ -70,7 +80,7 @@ describe('LocalScanService', () => {
       catalogRows: [[{ remoteId: 'r1', title: 'Known', rawPayload: { calibre_path: 'Author/Known (1)' } }]],
     });
 
-    const summary = await new LocalScanService(repository as never).scanRoot(7);
+    const summary = await makeService(repository).scanRoot(7);
 
     expect(summary.inserted).toBe(1);
     expect(summary.matched).toBe(1);
@@ -81,12 +91,12 @@ describe('LocalScanService', () => {
 
   it('derives remote id from the book directory so a rescan cannot duplicate the book', async () => {
     const first = makeRepository(root);
-    await new LocalScanService(first.repository as never).scanRoot(7);
+    await makeService(first.repository).scanRoot(7);
 
     // A second format arriving beside the first must not change the book's identity.
     await fs.writeFile(join(root, 'Author', 'Missing (2)', 'b.mobi'), 'x');
     const second = makeRepository(root);
-    await new LocalScanService(second.repository as never).scanRoot(7);
+    await makeService(second.repository).scanRoot(7);
 
     const idsFor = (rows: Array<Record<string, unknown>>, dir: string) =>
       rows.filter((r) => String(r.localPath).includes(dir)).map((r) => r.remoteId);
@@ -100,7 +110,7 @@ describe('LocalScanService', () => {
     await fs.writeFile(join(root, 'Author', 'Missing (2)', 'second.epub'), 'x');
     const { repository } = makeRepository(root);
 
-    const summary = await new LocalScanService(repository as never).scanRoot(7);
+    const summary = await makeService(repository).scanRoot(7);
 
     expect(summary.unkeyed).toBe(1);
     expect(summary.deduped).toBe(1);
@@ -111,7 +121,7 @@ describe('LocalScanService', () => {
       lateRows: [{ remoteId: 'r9', title: 'Missing', rawPayload: { calibre_path: 'Author/Missing (2)' } }],
     });
 
-    const summary = await new LocalScanService(repository as never).scanRoot(7);
+    const summary = await makeService(repository).scanRoot(7);
 
     expect(summary.reconciled).toBe(1);
     expect(deleted).toHaveLength(1);
@@ -119,7 +129,7 @@ describe('LocalScanService', () => {
 
   it('records failure state and releases the lock when the run throws', async () => {
     const { repository, failures } = makeRepository(root, { insertThrows: true });
-    const service = new LocalScanService(repository as never);
+    const service = makeService(repository);
 
     await expect(service.scanRoot(7)).rejects.toThrow('insert exploded');
     expect(failures).toHaveLength(1);
@@ -130,7 +140,7 @@ describe('LocalScanService', () => {
   it('refuses to run when another scan holds the root lock', async () => {
     const { repository } = makeRepository(root, { locked: false });
 
-    await expect(new LocalScanService(repository as never).scanRoot(7)).rejects.toThrow('already being scanned');
+    await expect(makeService(repository).scanRoot(7)).rejects.toThrow('already being scanned');
     expect(repository.markScanStarted).not.toHaveBeenCalled();
   });
 
@@ -138,6 +148,44 @@ describe('LocalScanService', () => {
     const { repository } = makeRepository(root);
     repository.findEnabledRoots.mockResolvedValue([]);
 
-    await expect(new LocalScanService(repository as never).scanRoot(99)).rejects.toThrow('Scan root 99 not found or disabled');
+    await expect(makeService(repository).scanRoot(99)).rejects.toThrow('Scan root 99 not found or disabled');
+  });
+  describe('comic roots', () => {
+    async function comicRoot() {
+      const dir = await fs.mkdtemp(join(tmpdir(), 'bookorbit-comics-'));
+      await fs.mkdir(join(dir, 'Nightwing (2014)'), { recursive: true });
+      await fs.writeFile(join(dir, 'Nightwing (2014)', 'Nightwing #15.cbz'), 'x');
+      await fs.writeFile(join(dir, 'Nightwing (2014)', 'Nightwing #16.cbz'), 'x');
+      return dir;
+    }
+
+    it('matches comics against series titles resolved from the warehouse', async () => {
+      const dir = await comicRoot();
+      const { repository, inserted } = makeRepository(dir, {
+        catalogRows: [[{ remoteId: 'c1', title: 'Trigon-Ometry', rawPayload: { seriesId: 's1', issueNumber: '15' } }]],
+      });
+      repository.findEnabledRoots.mockResolvedValue([{ id: 7, mediaType: 'comic', absolutePath: dir, excludePatterns: [] }]);
+
+      const summary = await makeService(repository, makeWarehouse([{ id: 's1', title: 'Nightwing' }])).scanRoot(7);
+
+      // #15 is already catalogued under its story title; only #16 is genuinely new.
+      expect(summary.matched).toBe(1);
+      expect(inserted.map((r) => r.title)).toEqual(['Nightwing #16']);
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+
+    // An empty map keys nothing, and anything unkeyed is inserted, so proceeding would
+    // duplicate every comic in the catalogue. Failing loudly is the whole point.
+    it('fails the scan rather than scanning with no series titles', async () => {
+      const dir = await comicRoot();
+      const { repository, inserted, failures } = makeRepository(dir);
+      repository.findEnabledRoots.mockResolvedValue([{ id: 7, mediaType: 'comic', absolutePath: dir, excludePatterns: [] }]);
+
+      await expect(makeService(repository, makeWarehouse([])).scanRoot(7)).rejects.toThrow(/series titles are unavailable/i);
+
+      expect(inserted).toHaveLength(0);
+      expect(failures).toHaveLength(1);
+      await fs.rm(dir, { recursive: true, force: true });
+    });
   });
 });

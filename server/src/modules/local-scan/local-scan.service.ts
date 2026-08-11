@@ -1,10 +1,11 @@
 import { createHash } from 'crypto';
 import { stat } from 'fs/promises';
 import { extname } from 'path';
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, forwardRef } from '@nestjs/common';
 import type { WarehouseMediaType } from '@bookorbit/types';
 
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
+import { WarehouseCatalogService } from '../warehouse/warehouse-catalog.service';
 import { LocalScanRepository, type NewLocalCatalogItem } from './local-scan.repository';
 import { AudiobookMatchStrategy } from './strategies/audiobook-match.strategy';
 import { ComicMatchStrategy } from './strategies/comic-match.strategy';
@@ -17,6 +18,8 @@ const CATALOG_BATCH_SIZE = 5000;
 const INSERT_BATCH_SIZE = 500;
 const DEFAULT_EXCLUDES = ['.caltrash', '.calnotes'];
 const UNKEYED_SAMPLE_LIMIT = 5;
+const COMIC_SERIES_PAGE_SIZE = 100;
+const COMIC_SERIES_MAX_PAGES = 200;
 
 const EXTENSIONS: Record<WarehouseMediaType, string[]> = {
   ebook: ['.epub', '.mobi', '.azw3', '.azw', '.pdf', '.fb2'],
@@ -51,19 +54,47 @@ function emptySummary(rootId: number): LocalScanSummary {
 export class LocalScanService {
   private readonly logger = new Logger(LocalScanService.name);
 
-  constructor(private readonly repository: LocalScanRepository) {}
+  constructor(
+    private readonly repository: LocalScanRepository,
+    @Inject(forwardRef(() => WarehouseCatalogService))
+    private readonly warehouseCatalog: WarehouseCatalogService,
+  ) {}
 
-  private strategyFor(mediaType: WarehouseMediaType): LocalMatchStrategy {
+  private async strategyFor(mediaType: WarehouseMediaType): Promise<LocalMatchStrategy> {
     switch (mediaType) {
       case 'ebook':
         return new EbookMatchStrategy();
       case 'audiobook':
         return new AudiobookMatchStrategy(AUDIOBOOK_REMOTE_PREFIX);
       case 'comic':
-        return new ComicMatchStrategy();
+        return new ComicMatchStrategy(await this.loadComicSeriesTitles());
       default:
         throw new NotFoundException(`No local match strategy for media type ${String(mediaType)}`);
     }
+  }
+
+  /**
+   * Comic identity is (series, issue), and the series name exists only upstream. An empty
+   * or partial map keys nothing, and a comic that keys nothing is inserted as a new local
+   * row, so a silent failure here would duplicate the entire comic catalogue. Abort instead.
+   */
+  private async loadComicSeriesTitles(): Promise<ReadonlyMap<string, string>> {
+    const titles = new Map<string, string>();
+    for (let page = 0; page < COMIC_SERIES_MAX_PAGES; page++) {
+      const result = await this.warehouseCatalog.listComicSeries({ page, limit: COMIC_SERIES_PAGE_SIZE });
+      const items = result.items ?? [];
+      if (items.length === 0) break;
+      for (const series of items) {
+        if (series.id && series.title) titles.set(series.id, series.title);
+      }
+      if (items.length < COMIC_SERIES_PAGE_SIZE) break;
+    }
+
+    if (titles.size === 0) {
+      throw new ServiceUnavailableException('Comic series titles are unavailable, so a comic scan would duplicate the catalogue');
+    }
+    this.logger.log(`[local_scan.comic_series] [end] seriesCount=${titles.size} - resolved comic series titles`);
+    return titles;
   }
 
   getStatuses() {
@@ -119,7 +150,7 @@ export class LocalScanService {
     await this.repository.markScanStarted(rootId);
 
     try {
-      const strategy = this.strategyFor(root.mediaType);
+      const strategy = await this.strategyFor(root.mediaType);
 
       const catalogKeys = new Set<string>();
       const catalogFallbackKeys = new Set<string>();
