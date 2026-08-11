@@ -209,6 +209,42 @@ describe('mapWarehouseEbookCatalogItemRow', () => {
 });
 
 describe('mapWarehouseComicCatalogItemRow', () => {
+  // A comic payload carries seriesId but no series name. Without the lookup every comic
+  // stores a null series, and the library becomes a flat list of story titles.
+  it('resolves the series name from seriesId', () => {
+    const row = mapWarehouseComicCatalogItemRow(
+      { id: 'c1', title: 'Trigon-Ometry', seriesId: 's-nightwing', issueNumber: '15' } as never,
+      new Date('2026-01-01T00:00:00Z'),
+      new Map([['s-nightwing', 'Nightwing']]),
+    );
+    expect(row.series).toBe('Nightwing');
+    expect(row.seriesIndex).toBe(15);
+  });
+
+  it('accepts the snake case series_id spelling', () => {
+    const row = mapWarehouseComicCatalogItemRow(
+      { id: 'c1', title: 'T', series_id: 's-batman' } as never,
+      new Date('2026-01-01T00:00:00Z'),
+      new Map([['s-batman', 'Batman']]),
+    );
+    expect(row.series).toBe('Batman');
+  });
+
+  it('prefers an explicit series name over the lookup', () => {
+    const row = mapWarehouseComicCatalogItemRow(
+      { id: 'c1', title: 'T', series: 'Explicit', seriesId: 's-batman' } as never,
+      new Date('2026-01-01T00:00:00Z'),
+      new Map([['s-batman', 'Batman']]),
+    );
+    expect(row.series).toBe('Explicit');
+  });
+
+  it('leaves series null when the map is missing or has no entry', () => {
+    const payload = { id: 'c1', title: 'T', seriesId: 's-unknown' } as never;
+    expect(mapWarehouseComicCatalogItemRow(payload, new Date()).series).toBeNull();
+    expect(mapWarehouseComicCatalogItemRow(payload, new Date(), new Map()).series).toBeNull();
+  });
+
   const syncedAt = new Date('2026-06-02T12:34:56.000Z');
 
   it('maps comic summaries into source-backed catalog rows without storage paths', () => {

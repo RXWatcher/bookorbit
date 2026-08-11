@@ -97,7 +97,18 @@ export function mapWarehouseAudiobookCatalogItemRow(payload: WarehouseRawAudiobo
   };
 }
 
-export function mapWarehouseComicCatalogItemRow(payload: WarehouseRawComicSummary, syncedAt: Date): NewCatalogItem {
+function comicSeriesFromId(raw: Record<string, unknown>, seriesTitles?: ReadonlyMap<string, string>): string | null {
+  if (!seriesTitles || seriesTitles.size === 0) return null;
+  const seriesId = stringValue(raw.seriesId) || stringValue(raw.series_id);
+  if (!seriesId) return null;
+  return seriesTitles.get(seriesId) ?? null;
+}
+
+export function mapWarehouseComicCatalogItemRow(
+  payload: WarehouseRawComicSummary,
+  syncedAt: Date,
+  seriesTitles?: ReadonlyMap<string, string>,
+): NewCatalogItem {
   const raw = sanitizedComicPayload(asRecord(payload));
   const title = textValue(raw.title) ?? UNTITLED_TITLE;
 
@@ -109,7 +120,8 @@ export function mapWarehouseComicCatalogItemRow(payload: WarehouseRawComicSummar
     sortTitle: textValue(raw.sortTitle) ?? textValue(raw.sort_title) ?? title,
     authors: authorList(raw),
     narrators: [],
-    series: seriesTitle(raw),
+    // Comics carry a seriesId, not a series name; the name only exists in /comics/series.
+    series: seriesTitle(raw) ?? comicSeriesFromId(raw, seriesTitles),
     seriesIndex: firstNonNegativeNumber(raw.seriesIndex, raw.series_index, raw.issueNumber, raw.issue_number),
     genres: namedList(raw, 'genres', 'genre'),
     tags: namedList(raw, 'tags', 'tag'),

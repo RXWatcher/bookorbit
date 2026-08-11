@@ -9,6 +9,8 @@ import { WarehouseSecretService } from './warehouse-secret.service';
 import { mapWarehouseAudiobookCatalogItemRow, mapWarehouseComicCatalogItemRow, mapWarehouseEbookCatalogItemRow } from './warehouse-catalog.mapper';
 import { WarehouseApiError } from './warehouse.errors';
 
+const COMIC_SERIES_PAGE_SIZE = 100;
+const COMIC_SERIES_MAX_PAGES = 200;
 const PAGE_LIMIT = 100;
 const DISABLED_MESSAGE = 'Enable the catalog source before running a catalog sync.';
 const MISSING_CREDENTIALS_MESSAGE = 'Catalog source credentials are missing. Save the catalog source configuration and try again.';
@@ -96,11 +98,44 @@ export class WarehouseCatalogSyncService implements OnModuleInit {
   }
 
   async syncComics(): Promise<WarehouseCatalogSyncSummary> {
+    const seriesTitles = await this.loadComicSeriesTitles();
     return this.syncCatalog(
       'comic',
       (request) => this.client.listComics(request),
-      (item, syncedAt) => mapWarehouseComicCatalogItemRow(item, syncedAt),
+      (item, syncedAt) => mapWarehouseComicCatalogItemRow(item, syncedAt, seriesTitles),
     );
+  }
+
+  /**
+   * A comic payload carries seriesId but no series name, so without this lookup every
+   * comic row stores a null series and the library is a flat list of story titles with
+   * nothing grouping them.
+   *
+   * Unlike the local scan, a missing map here is not damaging: series simply stays as it
+   * would have been anyway, so this degrades to a warning rather than failing the sync.
+   */
+  private async loadComicSeriesTitles(): Promise<ReadonlyMap<string, string>> {
+    const titles = new Map<string, string>();
+    try {
+      const settings = await this.repository.findSettings();
+      const encryptedSecret = settings ? encryptedSecretFromRow(settings) : null;
+      if (!settings?.enabled || !encryptedSecret || !settings.baseUrl.trim()) return titles;
+
+      const apiKey = this.secret.decrypt(encryptedSecret);
+      for (let page = 0; page < COMIC_SERIES_MAX_PAGES; page++) {
+        const result = await this.client.listComicSeries({ baseUrl: settings.baseUrl, apiKey, page, limit: COMIC_SERIES_PAGE_SIZE });
+        const items = result.items ?? [];
+        if (items.length === 0) break;
+        for (const series of items) {
+          if (series.id && series.title) titles.set(series.id, series.title);
+        }
+        if (items.length < COMIC_SERIES_PAGE_SIZE) break;
+      }
+      this.logger.log(`[catalog.sync] [comic_series] seriesCount=${titles.size} - resolved comic series titles`);
+    } catch (error) {
+      this.logger.warn(`[catalog.sync] [comic_series] failed, comic series will stay unset - ${String(error)}`);
+    }
+    return titles;
   }
 
   async syncAll(): Promise<WarehouseCatalogSyncSummary[]> {
