@@ -597,10 +597,20 @@ export class WarehouseRepository {
     remoteId: string,
     facets: Pick<NewWarehouseCatalogItemRow, 'genres' | 'narrators'>,
   ): Promise<void> {
-    await this.db
-      .update(schema.warehouseCatalogItems)
-      .set({ genres: facets.genres, narrators: facets.narrators, updatedAt: new Date() })
-      .where(and(eq(schema.warehouseCatalogItems.mediaType, mediaType), eq(schema.warehouseCatalogItems.remoteId, remoteId)));
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(schema.warehouseCatalogItems)
+        .set({ genres: facets.genres, narrators: facets.narrators, updatedAt: new Date() })
+        .where(and(eq(schema.warehouseCatalogItems.mediaType, mediaType), eq(schema.warehouseCatalogItems.remoteId, remoteId)));
+
+      await tx.insert(schema.searchIndexEvents).values([
+        {
+          entityType: 'catalog_item' as const,
+          entityId: catalogDocumentId(mediaType, remoteId),
+          operation: 'upsert' as const,
+        },
+      ]);
+    });
   }
 
   /**

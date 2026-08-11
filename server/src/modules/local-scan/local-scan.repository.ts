@@ -123,17 +123,32 @@ export class LocalScanRepository {
   async deleteLocalItemsByRemoteIds(mediaType: WarehouseMediaType, remoteIds: string[]): Promise<number> {
     if (remoteIds.length === 0) return 0;
 
-    const result = await this.db
-      .delete(schema.warehouseCatalogItems)
-      .where(
-        and(
-          eq(schema.warehouseCatalogItems.mediaType, mediaType),
-          eq(schema.warehouseCatalogItems.source, 'local'),
-          inArray(schema.warehouseCatalogItems.remoteId, remoteIds),
-        ),
-      );
+    return this.db.transaction(async (tx) => {
+      // Only the rows the delete actually matched are enqueued, so a remote id that belongs to
+      // a warehouse row rather than a local one never has its document removed from the index.
+      const deleted = await tx
+        .delete(schema.warehouseCatalogItems)
+        .where(
+          and(
+            eq(schema.warehouseCatalogItems.mediaType, mediaType),
+            eq(schema.warehouseCatalogItems.source, 'local'),
+            inArray(schema.warehouseCatalogItems.remoteId, remoteIds),
+          ),
+        )
+        .returning({ remoteId: schema.warehouseCatalogItems.remoteId });
 
-    return result.rowCount ?? 0;
+      if (deleted.length > 0) {
+        await tx.insert(schema.searchIndexEvents).values(
+          deleted.map((row) => ({
+            entityType: 'catalog_item' as const,
+            entityId: catalogDocumentId(mediaType, row.remoteId),
+            operation: 'delete' as const,
+          })),
+        );
+      }
+
+      return deleted.length;
+    });
   }
 
   /** Session scoped advisory lock keyed on the root, so two concurrent scans of the same root

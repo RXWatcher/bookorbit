@@ -106,6 +106,28 @@ function makeDb() {
   bookmarkDelete.where.mockReturnValue(bookmarkDelete);
   bookmarkDelete.returning.mockResolvedValue([]);
 
+  const insertFor = (table: unknown) => {
+    if (table === schema.warehouseSettings) return settingsInsert;
+    if (table === schema.warehouseCatalogItems) return catalogItemInsert;
+    if (table === schema.searchIndexEvents) return searchIndexEventInsert;
+    if (table === schema.warehouseCatalogItemAuthors) return catalogItemAuthorInsert;
+    if (table === schema.warehouseCatalogDetails) return catalogDetailInsert;
+    if (table === schema.warehouseUserItems) return userItemInsert;
+    if (table === schema.warehouseUserState) return userStateInsert;
+    if (table === schema.warehouseBookmarks) return bookmarkInsert;
+    if (table === schema.warehouseRequests) return requestInsert;
+    if (table === schema.warehouseCatalogSyncRuns) return syncRunInsert;
+    throw new Error(`Unexpected insert table: ${String(table)}`);
+  };
+
+  /** A DISTINCT handle from `db`, so a write that goes through `this.db` inside a transaction
+   *  fails the "not called" assertions instead of silently reusing the same chain. */
+  const tx = {
+    insert: vi.fn(insertFor),
+    update: vi.fn().mockReturnValue(updateChain),
+    execute: vi.fn(),
+  };
+
   const db = {
     insert: vi.fn((table: unknown) => {
       if (table === schema.warehouseSettings) return settingsInsert;
@@ -153,6 +175,7 @@ function makeDb() {
         findMany: vi.fn(),
       },
     },
+    tx,
     _chains: {
       settingsInsert,
       catalogItemInsert,
@@ -170,7 +193,7 @@ function makeDb() {
     },
   };
 
-  db.transaction.mockImplementation((callback: (tx: typeof db) => unknown) => callback(db));
+  db.transaction.mockImplementation((callback: (handle: typeof tx) => unknown) => callback(tx));
 
   return db;
 }
@@ -2277,7 +2300,9 @@ describe('WarehouseRepository', () => {
       await expect(repo.upsertCatalogItems(items)).resolves.toBe(1);
 
       expect(db.transaction).toHaveBeenCalledTimes(1);
-      expect(db.insert).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(db.execute).not.toHaveBeenCalled();
+      expect(db.tx.insert).toHaveBeenCalledWith(schema.warehouseCatalogItems);
       expect(db._chains.catalogItemInsert.values).toHaveBeenCalledWith(items);
       expect(db._chains.catalogItemInsert.onConflictDoUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2291,16 +2316,16 @@ describe('WarehouseRepository', () => {
           }),
         }),
       );
-      expect(db.insert).toHaveBeenCalledWith(schema.searchIndexEvents);
+      expect(db.tx.insert).toHaveBeenCalledWith(schema.searchIndexEvents);
       expect(db._chains.searchIndexEventInsert.values).toHaveBeenCalledWith([
         { entityType: 'catalog_item', entityId: 'catalog:ebook:bk-1', operation: 'upsert' },
       ]);
-      expect(db.execute).toHaveBeenCalledTimes(1);
-      const renderedDelete = renderSql(db.execute.mock.calls[0]?.[0]);
+      expect(db.tx.execute).toHaveBeenCalledTimes(1);
+      const renderedDelete = renderSql(db.tx.execute.mock.calls[0]?.[0]);
       expect(renderedDelete?.sql).toContain('delete from "warehouse_catalog_item_authors"');
       expect(renderedDelete?.sql).toContain('where ("warehouse_catalog_item_authors"."media_type", "warehouse_catalog_item_authors"."remote_id")');
       expect(renderedDelete?.params).toEqual(expect.arrayContaining(['ebook', 'bk-1']));
-      expect(db.insert).toHaveBeenCalledWith(schema.warehouseCatalogItemAuthors);
+      expect(db.tx.insert).toHaveBeenCalledWith(schema.warehouseCatalogItemAuthors);
       expect(db._chains.catalogItemAuthorInsert.values).toHaveBeenCalledWith([
         expect.objectContaining({
           mediaType: 'ebook',
@@ -2325,6 +2350,22 @@ describe('WarehouseRepository', () => {
         }),
       ]);
       expect(db._chains.catalogItemAuthorInsert.onConflictDoNothing).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateCatalogItemFacets', () => {
+    it('writes the facets and the index enqueue through the same transaction handle', async () => {
+      await repo.updateCatalogItemFacets('audiobook', 'ab-1', { genres: ['Sci-Fi'], narrators: ['Reader'] });
+
+      expect(db.transaction).toHaveBeenCalledTimes(1);
+      expect(db.update).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(db.tx.update).toHaveBeenCalledWith(schema.warehouseCatalogItems);
+      expect(db._chains.updateChain.set).toHaveBeenCalledWith(expect.objectContaining({ genres: ['Sci-Fi'], narrators: ['Reader'] }));
+      expect(db.tx.insert).toHaveBeenCalledWith(schema.searchIndexEvents);
+      expect(db._chains.searchIndexEventInsert.values).toHaveBeenCalledWith([
+        { entityType: 'catalog_item', entityId: 'catalog:audiobook:ab-1', operation: 'upsert' },
+      ]);
     });
   });
 

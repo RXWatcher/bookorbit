@@ -3,15 +3,19 @@ import { LocalScanRepository } from './local-scan.repository';
 /** `insert` on the outer fake `db` never resolves usefully: it exists only so a future
  *  regression that writes through `this.db` instead of the transaction's `tx` fails loudly
  *  instead of silently reusing the working chain. All real writes go through `txInsert`. */
-function makeDb(rowCount: number | null = 2) {
+function makeDb(rowCount: number | null = 2, deletedRows: Array<{ remoteId: string }> = [{ remoteId: 'local:aaa' }]) {
   const onConflictDoNothing = vi.fn().mockResolvedValue({ rowCount });
   const values = vi.fn().mockReturnValue({ onConflictDoNothing });
   const txInsert = vi.fn().mockReturnValue({ values });
-  const tx = { insert: txInsert };
+  const returning = vi.fn().mockResolvedValue(deletedRows);
+  const deleteWhere = vi.fn().mockReturnValue({ returning });
+  const txDelete = vi.fn().mockReturnValue({ where: deleteWhere });
+  const tx = { insert: txInsert, delete: txDelete };
   const insert = vi.fn();
-  const transaction = vi.fn((callback: (tx: { insert: typeof txInsert }) => unknown) => callback(tx));
-  const db = { insert, transaction };
-  return { db: db as never, insert, values, onConflictDoNothing, txInsert, transaction };
+  const dbDelete = vi.fn();
+  const transaction = vi.fn((callback: (tx: typeof tx) => unknown) => callback(tx));
+  const db = { insert, delete: dbDelete, transaction };
+  return { db: db as never, insert, dbDelete, values, onConflictDoNothing, txInsert, txDelete, returning, transaction };
 }
 
 const ROW = {
@@ -74,5 +78,38 @@ describe('LocalScanRepository', () => {
     expect(insert).not.toHaveBeenCalled();
     expect(txInsert).toHaveBeenCalledTimes(2);
     expect(values.mock.calls[1]).toEqual([[{ entityType: 'catalog_item', entityId: 'catalog:ebook:local:aaa', operation: 'upsert' }]]);
+  });
+
+  it('enqueues a delete event for every local row the delete actually removed', async () => {
+    const { db, dbDelete, transaction, txDelete, values } = makeDb(2, [{ remoteId: 'local:aaa' }, { remoteId: 'local:bbb' }]);
+    const repository = new LocalScanRepository(db);
+
+    await expect(repository.deleteLocalItemsByRemoteIds('ebook', ['local:aaa', 'local:bbb', 'local:ccc'])).resolves.toBe(2);
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(dbDelete).not.toHaveBeenCalled();
+    expect(txDelete).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith([
+      { entityType: 'catalog_item', entityId: 'catalog:ebook:local:aaa', operation: 'delete' },
+      { entityType: 'catalog_item', entityId: 'catalog:ebook:local:bbb', operation: 'delete' },
+    ]);
+  });
+
+  it('enqueues nothing when the delete matched no local rows', async () => {
+    const { db, txInsert } = makeDb(2, []);
+    const repository = new LocalScanRepository(db);
+
+    await expect(repository.deleteLocalItemsByRemoteIds('ebook', ['local:aaa'])).resolves.toBe(0);
+
+    expect(txInsert).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when given no remote ids to delete', async () => {
+    const { db, transaction } = makeDb();
+    const repository = new LocalScanRepository(db);
+
+    await expect(repository.deleteLocalItemsByRemoteIds('ebook', [])).resolves.toBe(0);
+
+    expect(transaction).not.toHaveBeenCalled();
   });
 });
