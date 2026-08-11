@@ -4,6 +4,7 @@ import type { RequestUser } from '../../common/types/request-user';
 import { CLOUD_AUDIO_LIBRARY_ID, CLOUD_EBOOK_LIBRARY_ID, EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 import * as schema from '../../db/schema';
 import { books } from '../../db/schema';
+import { catalogDocumentId, nativeDocumentId } from '../book-search/book-search-document.mapper';
 import { BookQueryBuilder } from './book-query-builder.service';
 import { BookSortBuilder } from './book-sort-builder.service';
 import { BookService } from './book.service';
@@ -149,7 +150,7 @@ describe('globalQuery search routing', () => {
 
     // Provider returns the relevant book first; the old merge would have sorted it by title
     // and buried it, which is the defect this task removes.
-    const ids = ['catalog:audiobook:relevant', 'catalog:ebook:aaa-alphabetically-first'];
+    const ids = [catalogDocumentId('audiobook', 'relevant'), catalogDocumentId('ebook', 'aaa-alphabetically-first')];
     bookSearchService.search.mockResolvedValue({ ids, total: 2, page: 0, size: 10, provider: 'meilisearch' });
 
     const relevantCard = makeBookCard({
@@ -196,7 +197,7 @@ describe('globalQuery search routing', () => {
     // a real `WHERE remote_id IN (...)` query) hands rows back in the opposite order. A naive
     // implementation that just concatenates whatever the loader returned, ignoring the
     // requested id order, would produce [firstCard, secondCard] here and this test would catch it.
-    const ids = ['catalog:ebook:second', 'catalog:ebook:first'];
+    const ids = [catalogDocumentId('ebook', 'second'), catalogDocumentId('ebook', 'first')];
     bookSearchService.search.mockResolvedValue({ ids, total: 2, page: 0, size: 10, provider: 'meilisearch' });
 
     const firstCard = makeBookCard({ title: 'First Row From DB', catalogSource: { mediaType: 'ebook', remoteId: 'first' } });
@@ -223,7 +224,7 @@ describe('globalQuery search routing', () => {
     // A stale or lagging index is the first line of defence's failure mode; the read-time
     // library filter is what must still exclude it.
     bookSearchService.search.mockResolvedValue({
-      ids: ['native:10', 'native:20'],
+      ids: [nativeDocumentId(10), nativeDocumentId(20)],
       total: 2,
       page: 0,
       size: 10,
@@ -263,7 +264,7 @@ describe('globalQuery search routing', () => {
     // matches an empty field, so the index happily returns the excluded book. Only the
     // read-time filter keeps it out of the response.
     bookSearchService.search.mockResolvedValue({
-      ids: ['native:10', 'native:20'],
+      ids: [nativeDocumentId(10), nativeDocumentId(20)],
       total: 2,
       page: 0,
       size: 10,
@@ -298,7 +299,7 @@ describe('globalQuery search routing', () => {
       contentFilters: { includeTagIds: [], excludeTagIds: [42], includeGenreIds: [], excludeGenreIds: [] },
     });
     libraryService.findAll.mockResolvedValue([{ id: 3 }]);
-    bookSearchService.search.mockResolvedValue({ ids: ['native:10'], total: 1, page: 0, size: 10, provider: 'meilisearch' });
+    bookSearchService.search.mockResolvedValue({ ids: [nativeDocumentId(10)], total: 1, page: 0, size: 10, provider: 'meilisearch' });
     const executeBooksQuerySpy = vi.spyOn(service, 'executeBooksQuery').mockResolvedValue({ items: [], total: 0, page: 0, size: 1 } as never);
 
     await service.globalQuery(user, { filter: null, sort: [], pagination: { page: 0, size: 10 }, q: 'dune' } as never);
@@ -407,7 +408,7 @@ describe('globalQuery search routing', () => {
     // The index still holds audiobook documents, and the merge path would never surface them
     // for this user, so neither the query nor the row load may include them.
     bookSearchService.search.mockResolvedValue({
-      ids: ['catalog:ebook:allowed', 'catalog:audiobook:not-allowed'],
+      ids: [catalogDocumentId('ebook', 'allowed'), catalogDocumentId('audiobook', 'not-allowed')],
       total: 2,
       page: 0,
       size: 10,

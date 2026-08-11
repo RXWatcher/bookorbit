@@ -1,3 +1,4 @@
+import { catalogDocumentId } from './book-search-document.mapper';
 import { SqlSearchProvider } from './sql-search.provider';
 import type { BookSearchQuery } from './book-search.types';
 
@@ -26,7 +27,7 @@ describe('SqlSearchProvider', () => {
     const provider = new SqlSearchProvider(repository as never);
 
     await expect(provider.search(BASE_QUERY)).resolves.toEqual({
-      ids: ['catalog:ebook:99'],
+      ids: [catalogDocumentId('ebook', '99')],
       total: 1,
       page: 0,
       size: 10,

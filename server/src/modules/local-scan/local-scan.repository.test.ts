@@ -1,3 +1,4 @@
+import { catalogDocumentId } from '../book-search/book-search-document.mapper';
 import { LocalScanRepository } from './local-scan.repository';
 
 /** `insert` on the outer fake `db` never resolves usefully: it exists only so a future
@@ -77,7 +78,7 @@ describe('LocalScanRepository', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(insert).not.toHaveBeenCalled();
     expect(txInsert).toHaveBeenCalledTimes(2);
-    expect(values.mock.calls[1]).toEqual([[{ entityType: 'catalog_item', entityId: 'catalog:ebook:local:aaa', operation: 'upsert' }]]);
+    expect(values.mock.calls[1]).toEqual([[{ entityType: 'catalog_item', entityId: catalogDocumentId('ebook', 'local:aaa'), operation: 'upsert' }]]);
   });
 
   it('enqueues a delete event for every local row the delete actually removed', async () => {
@@ -90,8 +91,8 @@ describe('LocalScanRepository', () => {
     expect(dbDelete).not.toHaveBeenCalled();
     expect(txDelete).toHaveBeenCalledTimes(1);
     expect(values).toHaveBeenCalledWith([
-      { entityType: 'catalog_item', entityId: 'catalog:ebook:local:aaa', operation: 'delete' },
-      { entityType: 'catalog_item', entityId: 'catalog:ebook:local:bbb', operation: 'delete' },
+      { entityType: 'catalog_item', entityId: catalogDocumentId('ebook', 'local:aaa'), operation: 'delete' },
+      { entityType: 'catalog_item', entityId: catalogDocumentId('ebook', 'local:bbb'), operation: 'delete' },
     ]);
   });
 

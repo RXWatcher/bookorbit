@@ -2,6 +2,7 @@ import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 
 import * as schema from '../../db/schema';
+import { catalogDocumentId } from '../book-search/book-search-document.mapper';
 import { WarehouseRepository } from './warehouse.repository';
 
 const dialect = new PgDialect();
@@ -2318,7 +2319,7 @@ describe('WarehouseRepository', () => {
       );
       expect(db.tx.insert).toHaveBeenCalledWith(schema.searchIndexEvents);
       expect(db._chains.searchIndexEventInsert.values).toHaveBeenCalledWith([
-        { entityType: 'catalog_item', entityId: 'catalog:ebook:bk-1', operation: 'upsert' },
+        { entityType: 'catalog_item', entityId: catalogDocumentId('ebook', 'bk-1'), operation: 'upsert' },
       ]);
       expect(db.tx.execute).toHaveBeenCalledTimes(1);
       const renderedDelete = renderSql(db.tx.execute.mock.calls[0]?.[0]);
@@ -2364,7 +2365,7 @@ describe('WarehouseRepository', () => {
       expect(db._chains.updateChain.set).toHaveBeenCalledWith(expect.objectContaining({ genres: ['Sci-Fi'], narrators: ['Reader'] }));
       expect(db.tx.insert).toHaveBeenCalledWith(schema.searchIndexEvents);
       expect(db._chains.searchIndexEventInsert.values).toHaveBeenCalledWith([
-        { entityType: 'catalog_item', entityId: 'catalog:audiobook:ab-1', operation: 'upsert' },
+        { entityType: 'catalog_item', entityId: catalogDocumentId('audiobook', 'ab-1'), operation: 'upsert' },
       ]);
     });
   });

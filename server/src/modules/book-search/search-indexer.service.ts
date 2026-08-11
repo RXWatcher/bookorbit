@@ -2,7 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import type { WarehouseMediaType } from '@bookorbit/types';
 
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
-import { mapCatalogRowToDocument, mapNativeBookToDocument } from './book-search-document.mapper';
+import { mapCatalogRowToDocument, mapNativeBookToDocument, parseSearchDocumentId } from './book-search-document.mapper';
 import { BookSearchSettingsService, DEFAULT_BOOK_SEARCH_INDEX } from './book-search.settings';
 import type { BookSearchDocument } from './book-search.types';
 import { MeilisearchClient } from './meilisearch.client';
@@ -20,15 +20,6 @@ interface OutboxEvent {
   entityType: 'catalog_item' | 'native_book';
   entityId: string;
   operation: 'upsert' | 'delete';
-}
-
-function parseCatalogEntityId(entityId: string): { mediaType: string; remoteId: string } {
-  const parts = entityId.split(':');
-  return { mediaType: parts[1] ?? '', remoteId: parts.slice(2).join(':') };
-}
-
-function parseNativeEntityId(entityId: string): number {
-  return Number(entityId.split(':')[1]);
 }
 
 interface OutboxRun {
@@ -73,17 +64,22 @@ export class SearchIndexerService {
   }
 
   private async loadUpsertDocuments(events: OutboxEvent[]): Promise<BookSearchDocument[]> {
-    const catalogKeys = events
-      .filter((event) => event.entityType === 'catalog_item')
-      .map((event) => parseCatalogEntityId(event.entityId))
-      .filter((key) => key.mediaType !== '' && key.remoteId !== '');
-    const nativeIds = events
-      .filter((event) => event.entityType === 'native_book')
-      .map((event) => parseNativeEntityId(event.entityId))
-      .filter((id) => Number.isFinite(id));
+    const catalogKeys: { mediaType: WarehouseMediaType; remoteId: string }[] = [];
+    const nativeIds: number[] = [];
+
+    for (const event of events) {
+      const parsed = parseSearchDocumentId(event.entityId);
+      if (!parsed) continue;
+
+      if (parsed.source === 'catalog' && event.entityType === 'catalog_item') {
+        catalogKeys.push({ mediaType: parsed.mediaType as WarehouseMediaType, remoteId: parsed.remoteId });
+      } else if (parsed.source === 'native' && event.entityType === 'native_book') {
+        nativeIds.push(parsed.bookId);
+      }
+    }
 
     const [catalogRows, nativeRows] = await Promise.all([
-      this.repository.getCatalogRowsByKeys(catalogKeys as { mediaType: WarehouseMediaType; remoteId: string }[]),
+      this.repository.getCatalogRowsByKeys(catalogKeys),
       this.repository.getNativeRowsByIds(nativeIds),
     ]);
 

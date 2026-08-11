@@ -98,7 +98,11 @@ import { WarehouseRepository } from '../warehouse/warehouse.repository';
 import { ComicMetadataRepository } from '../metadata/comic-metadata.repository';
 import { CustomMetadataService } from '../custom-metadata/custom-metadata.service';
 import { BookSearchService } from '../book-search/book-search.service';
-import { catalogDocumentId, nativeDocumentId } from '../book-search/book-search-document.mapper';
+import {
+  catalogDocumentId,
+  nativeDocumentId,
+  parseSearchDocumentId as parseSearchDocumentIdFromMapper,
+} from '../book-search/book-search-document.mapper';
 import { ContentFilterRepository } from '../user/content-filter.repository';
 import { BookDetailDto } from './dto/book-detail.dto';
 import type { BulkMetadataField } from './dto/bulk-set-metadata.dto';
@@ -357,24 +361,13 @@ function sortLibraryBookItems(items: LibraryBookItem[], sort: BookQuery['sort'],
 
 type ParsedSearchDocumentId = { source: 'native'; bookId: number } | { source: 'catalog'; mediaType: WarehouseMediaType; remoteId: string };
 
-/** Reverses catalogDocumentId/nativeDocumentId. A catalogue remote id may itself contain
- *  colons, so only the first two segments are treated as delimiters. */
+/** Thin wrapper over the mapper's shared parser: this call site knows the media type is
+ *  actually a WarehouseMediaType, whereas the mapper (shared with the outbox drain, which has
+ *  no such guarantee) only promises a string. */
 function parseSearchDocumentId(id: string): ParsedSearchDocumentId | null {
-  if (id.startsWith('native:')) {
-    const bookId = Number(id.slice('native:'.length));
-    return Number.isFinite(bookId) ? { source: 'native', bookId } : null;
-  }
-
-  if (id.startsWith('catalog:')) {
-    const rest = id.slice('catalog:'.length);
-    const separatorIndex = rest.indexOf(':');
-    if (separatorIndex === -1) return null;
-    const mediaType = rest.slice(0, separatorIndex) as WarehouseMediaType;
-    const remoteId = rest.slice(separatorIndex + 1);
-    return remoteId ? { source: 'catalog', mediaType, remoteId } : null;
-  }
-
-  return null;
+  const parsed = parseSearchDocumentIdFromMapper(id);
+  if (!parsed) return null;
+  return parsed.source === 'native' ? parsed : { source: 'catalog', mediaType: parsed.mediaType as WarehouseMediaType, remoteId: parsed.remoteId };
 }
 
 type MetadataSaveResult = {

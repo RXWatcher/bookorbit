@@ -1,4 +1,7 @@
+import { catalogDocumentId } from './book-search-document.mapper';
 import { SearchIndexerService } from './search-indexer.service';
+
+const CATALOG_ID = catalogDocumentId('ebook', '1');
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
   const repository = {
@@ -81,7 +84,7 @@ describe('SearchIndexerService', () => {
         {
           id: 1,
           entityType: 'catalog_item',
-          entityId: 'catalog:ebook:1',
+          entityId: CATALOG_ID,
           operation: 'delete',
         },
       ]),
@@ -99,9 +102,9 @@ describe('SearchIndexerService', () => {
   it('applies a delete before a later reinsert of the same document', async () => {
     const { repository, client, settings } = makeDeps({
       claimBatch: vi.fn().mockResolvedValue([
-        { id: 1, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'upsert' },
-        { id: 2, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'delete' },
-        { id: 3, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'upsert' },
+        { id: 1, entityType: 'catalog_item', entityId: CATALOG_ID, operation: 'upsert' },
+        { id: 2, entityType: 'catalog_item', entityId: CATALOG_ID, operation: 'delete' },
+        { id: 3, entityType: 'catalog_item', entityId: CATALOG_ID, operation: 'upsert' },
       ]),
       getCatalogRowsByKeys: vi.fn().mockResolvedValue([CATALOG_ROW]),
       getNativeRowsByIds: vi.fn().mockResolvedValue([]),
@@ -121,8 +124,8 @@ describe('SearchIndexerService', () => {
   it('keeps a failed batch and everything after it in the outbox', async () => {
     const { repository, client, settings } = makeDeps({
       claimBatch: vi.fn().mockResolvedValue([
-        { id: 1, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'delete' },
-        { id: 2, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'upsert' },
+        { id: 1, entityType: 'catalog_item', entityId: CATALOG_ID, operation: 'delete' },
+        { id: 2, entityType: 'catalog_item', entityId: CATALOG_ID, operation: 'upsert' },
       ]),
       getCatalogRowsByKeys: vi.fn().mockResolvedValue([CATALOG_ROW]),
       getNativeRowsByIds: vi.fn().mockResolvedValue([]),
@@ -139,7 +142,7 @@ describe('SearchIndexerService', () => {
 
   it('keeps the events when the submitted task never succeeds', async () => {
     const { repository, client, settings } = makeDeps({
-      claimBatch: vi.fn().mockResolvedValue([{ id: 1, entityType: 'catalog_item', entityId: 'catalog:ebook:1', operation: 'delete' }]),
+      claimBatch: vi.fn().mockResolvedValue([{ id: 1, entityType: 'catalog_item', entityId: CATALOG_ID, operation: 'delete' }]),
     });
     client.waitForTask.mockRejectedValue(new Error('task failed'));
     const service = new SearchIndexerService(repository as never, settings as never);
