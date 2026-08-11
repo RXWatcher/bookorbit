@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, gt, inArray } from 'drizzle-orm';
+import type { WarehouseMediaType } from '@bookorbit/types';
+import { and, asc, eq, gt, inArray, or } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { DB } from '../../db';
@@ -121,5 +122,70 @@ export class SearchIndexRepository {
         fileSizeBytes: null,
       }));
     }
+  }
+
+  async getCatalogRowsByKeys(keys: { mediaType: WarehouseMediaType; remoteId: string }[]): Promise<CatalogDocumentRow[]> {
+    if (keys.length === 0) return [];
+
+    return this.db
+      .select({
+        mediaType: schema.warehouseCatalogItems.mediaType,
+        remoteId: schema.warehouseCatalogItems.remoteId,
+        title: schema.warehouseCatalogItems.title,
+        sortTitle: schema.warehouseCatalogItems.sortTitle,
+        authors: schema.warehouseCatalogItems.authors,
+        narrators: schema.warehouseCatalogItems.narrators,
+        series: schema.warehouseCatalogItems.series,
+        seriesIndex: schema.warehouseCatalogItems.seriesIndex,
+        publisher: schema.warehouseCatalogItems.publisher,
+        language: schema.warehouseCatalogItems.language,
+        tags: schema.warehouseCatalogItems.tags,
+        genres: schema.warehouseCatalogItems.genres,
+        identifiers: schema.warehouseCatalogItems.identifiers,
+        format: schema.warehouseCatalogItems.format,
+        publishedYear: schema.warehouseCatalogItems.publishedYear,
+        hasCover: schema.warehouseCatalogItems.hasCover,
+        durationSeconds: schema.warehouseCatalogItems.durationSeconds,
+        fileSizeBytes: schema.warehouseCatalogItems.fileSizeBytes,
+        syncedAt: schema.warehouseCatalogItems.syncedAt,
+      })
+      .from(schema.warehouseCatalogItems)
+      .where(
+        or(
+          ...keys.map((key) =>
+            and(eq(schema.warehouseCatalogItems.mediaType, key.mediaType), eq(schema.warehouseCatalogItems.remoteId, key.remoteId)),
+          ),
+        ),
+      );
+  }
+
+  async getNativeRowsByIds(ids: number[]): Promise<NativeDocumentRow[]> {
+    if (ids.length === 0) return [];
+
+    const rows = await this.db
+      .select({
+        id: schema.books.id,
+        libraryId: schema.books.libraryId,
+        title: schema.bookMetadata.title,
+        sortTitle: schema.books.primaryAuthorSortName,
+        series: schema.bookMetadata.seriesName,
+        seriesIndex: schema.bookMetadata.seriesIndex,
+        publisher: schema.bookMetadata.publisher,
+        language: schema.bookMetadata.language,
+        publishedYear: schema.bookMetadata.publishedYear,
+        createdAt: schema.books.addedAt,
+      })
+      .from(schema.books)
+      .leftJoin(schema.bookMetadata, eq(schema.bookMetadata.bookId, schema.books.id))
+      .where(inArray(schema.books.id, ids));
+
+    return rows.map((row) => ({
+      ...row,
+      title: row.title ?? '(untitled)',
+      authors: [],
+      format: null,
+      hasCover: false,
+      fileSizeBytes: null,
+    }));
   }
 }
