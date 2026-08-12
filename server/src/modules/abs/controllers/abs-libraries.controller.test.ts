@@ -14,6 +14,7 @@ function build(opts: BuildOpts = {}) {
     findAll: vi.fn().mockResolvedValue(opts.libraries ?? []),
     findAccessibleLibraryIds: vi.fn().mockResolvedValue(opts.accessibleIds ?? []),
     findOne: vi.fn().mockResolvedValue(opts.findOne ?? null),
+    verifyUserAccess: vi.fn().mockResolvedValue(undefined),
   } as unknown as LibraryService;
   const catalogService = {
     listLibraryItems: vi.fn().mockResolvedValue({ results: [], total: 0 }),
@@ -30,6 +31,26 @@ describe('AbsLibrariesController#list', () => {
     expect(libraries).toHaveLength(1);
     expect(libraries[0].id).toBe('lib_1');
   });
+
+  // On a warehouse-backed deployment the only libraries are the virtual source-backed ones, so
+  // omitting this flag makes an ABS client see an empty server even with a full catalogue.
+  it('asks for source-backed libraries, not just filesystem ones', async () => {
+    const { controller, libraryService } = build({ libraries: [] });
+    await controller.list(makeAbsUser());
+    expect(libraryService.findAll).toHaveBeenCalledWith(expect.anything(), { includeSourceBacked: true });
+  });
+
+  it('exposes the virtual warehouse libraries with their negative ids intact', async () => {
+    const { controller } = build({
+      libraries: [
+        { id: -1, name: 'Books' },
+        { id: -2, name: 'Audiobooks' },
+        { id: -3, name: 'Comics' },
+      ],
+    });
+    const libraries = (await controller.list(makeAbsUser())).libraries as Record<string, unknown>[];
+    expect(libraries.map((library) => library.id)).toEqual(['lib_-1', 'lib_-2', 'lib_-3']);
+  });
 });
 
 describe('AbsLibrariesController#getOne', () => {
@@ -41,6 +62,14 @@ describe('AbsLibrariesController#getOne', () => {
   it('404s when a scoped user cannot access the library (no existence leak)', async () => {
     const { controller } = build({ accessibleIds: [9] });
     expect(await thrownStatus(() => controller.getOne(makeAbsUser({ isSuperuser: false }), 'lib_2'))).toBe(404);
+  });
+
+  // A virtual library is never in findAccessibleLibraryIds, so consulting it would 404 every time.
+  it('resolves a source-backed library without consulting the native access list', async () => {
+    const { controller, libraryService } = build({ findOne: { id: -2, name: 'Audiobooks' } });
+    const library = await controller.getOne(makeAbsUser({ isSuperuser: false }), 'lib_-2');
+    expect(library.id).toBe('lib_-2');
+    expect(libraryService.findAccessibleLibraryIds).not.toHaveBeenCalled();
   });
 
   it('404s when the library does not exist', async () => {

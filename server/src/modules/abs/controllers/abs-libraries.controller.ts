@@ -8,6 +8,7 @@ import { LibraryService } from '../../library/library.service';
 import { AbsExceptionFilter } from '../abs-exception.filter';
 import { AbsHttpException } from '../abs-errors';
 import { decodeAbsId } from '../abs-id.util';
+import { isSourceBackedLibraryId } from '../abs-library-source';
 import { clampAbsPagination } from '../abs-pagination.util';
 import { AbsAuthGuard } from '../auth/abs-auth.guard';
 import { toAbsLibrary } from '../mappers/abs-library.mapper';
@@ -32,7 +33,9 @@ export class AbsLibrariesController {
 
   @Get()
   async list(@CurrentUser() user: RequestUser): Promise<Record<string, unknown>> {
-    const libraries = await this.libraryService.findAll(user);
+    // Source-backed libraries are opt-in and are the only libraries that exist on a
+    // warehouse-backed deployment, so an ABS client sees nothing without this flag.
+    const libraries = await this.libraryService.findAll(user, { includeSourceBacked: true });
     return { libraries: libraries.map(toAbsLibrary) };
   }
 
@@ -40,8 +43,12 @@ export class AbsLibrariesController {
   async getOne(@CurrentUser() user: RequestUser, @Param('id') id: string): Promise<Record<string, unknown>> {
     const libraryId = decodeAbsId('library', id);
     if (libraryId === null) throw AbsHttpException.notFound();
-    const accessible = await this.libraryService.findAccessibleLibraryIds(user);
-    if (!user.isSuperuser && !accessible.includes(libraryId)) throw AbsHttpException.notFound();
+    // findAccessibleLibraryIds only knows native libraries; the virtual source-backed ones are
+    // gated by the catalog being enabled, which findOne below already enforces.
+    if (!isSourceBackedLibraryId(libraryId)) {
+      const accessible = await this.libraryService.findAccessibleLibraryIds(user);
+      if (!user.isSuperuser && !accessible.includes(libraryId)) throw AbsHttpException.notFound();
+    }
 
     const library = await this.libraryService.findOne(libraryId).catch(() => null);
     if (!library) throw AbsHttpException.notFound();

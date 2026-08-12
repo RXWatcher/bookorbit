@@ -26,15 +26,20 @@ export function encodeAbsId(type: AbsIdType, id: number): string {
 
 /**
  * Decode a prefixed ABS id back to its integer. Returns null when the string does not match the
- * expected prefix or does not carry a positive integer, so callers can answer with a 404 rather
+ * expected prefix or does not carry a non-zero integer, so callers can answer with a 404 rather
  * than throwing on malformed client input.
+ *
+ * Negative ids are legal and load-bearing. Source-backed content is virtual and lives in the
+ * negative id space: libraries are -1/-2/-3, and warehouse catalog items are encoded by
+ * `encodeWarehouseBookId` into negative book ids blocked by media type. So `lib_-1` and
+ * `li_-1000123` both have to round-trip. Zero stays rejected, as no table uses it.
  */
 export function decodeAbsId(type: AbsIdType, value: string | undefined | null): number | null {
   if (!value) return null;
   const prefix = `${ABS_ID_PREFIX[type]}_`;
   if (!value.startsWith(prefix)) return null;
   const raw = value.slice(prefix.length);
-  if (!/^\d+$/.test(raw)) return null;
+  if (!/^-?\d+$/.test(raw)) return null;
   const id = Number.parseInt(raw, 10);
-  return Number.isInteger(id) && id > 0 ? id : null;
+  return Number.isInteger(id) && id !== 0 ? id : null;
 }

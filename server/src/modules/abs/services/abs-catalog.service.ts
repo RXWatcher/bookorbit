@@ -6,6 +6,7 @@ import { Permission } from '@bookorbit/types';
 import type { RequestUser } from '../../../common/types/request-user';
 import { LibraryService } from '../../library/library.service';
 import { AbsHttpException } from '../abs-errors';
+import { isSourceBackedLibraryId } from '../abs-library-source';
 import { decodeAbsFilter } from '../abs-filter.util';
 import { decodeAbsId, encodeAbsId } from '../abs-id.util';
 import { AbsReadRepository, type AbsAudioFileRow, type AbsItemRow, type AbsItemSortField } from '../abs-read.repository';
@@ -85,6 +86,20 @@ export class AbsCatalogService {
   ) {}
 
   private async assertLibraryAccess(user: RequestUser, libraryId: number): Promise<void> {
+    // The virtual source-backed libraries have no `libraries` row, so findAccessibleLibraryIds
+    // never lists them. They are visible whenever the warehouse catalog is enabled; per-item
+    // access is still enforced downstream by the warehouse's own user-scoped queries.
+    if (isSourceBackedLibraryId(libraryId)) {
+      // verifyUserAccess is the canonical check for virtual libraries: it resolves the library
+      // through the warehouse and rejects when the catalog is off. ABS answers 404 rather than
+      // 403 so a client cannot probe which libraries exist.
+      try {
+        await this.libraryService.verifyUserAccess(user.id, libraryId, user.isSuperuser);
+      } catch {
+        throw AbsHttpException.notFound();
+      }
+      return;
+    }
     if (user.isSuperuser) return;
     const accessible = await this.libraryService.findAccessibleLibraryIds(user);
     if (!accessible.includes(libraryId)) throw AbsHttpException.notFound();
