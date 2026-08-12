@@ -11,6 +11,8 @@ import { AbsReadRepository } from './abs-read.repository';
 import { AbsSocketGateway } from './abs-socket.gateway';
 import { AbsAuthController } from './auth/abs-auth.controller';
 import { AbsAuthGuard } from './auth/abs-auth.guard';
+import { WarehouseModule } from '../warehouse/warehouse.module';
+import { AbsWarehouseReadRepository } from './abs-warehouse-read.repository';
 import { AbsDiscoveryController } from './auth/abs-discovery.controller';
 import { AbsOpenidController } from './auth/abs-openid.controller';
 import { AbsSessionService } from './auth/abs-session.service';
@@ -38,7 +40,7 @@ import { AbsTranscodeService } from './services/abs-transcode.service';
  * via raw bodies + a controller-scoped AbsExceptionFilter, and reuses BookOrbit services for data.
  */
 @Module({
-  imports: [JwtModule.register({}), UserModule, LibraryModule, AchievementModule, AuthModule],
+  imports: [JwtModule.register({}), UserModule, LibraryModule, AchievementModule, AuthModule, WarehouseModule],
   controllers: [
     AbsDiscoveryController,
     AbsAuthController,
@@ -58,6 +60,7 @@ import { AbsTranscodeService } from './services/abs-transcode.service';
     AbsSessionService,
     AbsAuthGuard,
     AbsReadRepository,
+    AbsWarehouseReadRepository,
     AbsPlaybackSessionRepository,
     AbsProgressService,
     AbsCatalogService,

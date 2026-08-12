@@ -4,6 +4,7 @@ import type { LibraryService } from '../../library/library.service';
 import type { AbsAudioFileRow, AbsItemRow, AbsReadRepository } from '../abs-read.repository';
 import { makeAbsUser, thrownStatus } from '../__testing__/abs-test-helpers';
 import { AbsCatalogService, parseAbsSort } from './abs-catalog.service';
+import type { AbsWarehouseReadRepository } from '../abs-warehouse-read.repository';
 import type { AbsProgressService } from './abs-progress.service';
 
 function item(overrides: Partial<AbsItemRow> = {}): AbsItemRow {
@@ -35,6 +36,8 @@ function audioFile(overrides: Partial<AbsAudioFileRow> = {}): AbsAudioFileRow {
 
 interface BuildOpts {
   listItems?: { rows: AbsItemRow[]; total: number };
+  warehouseItems?: { rows: AbsItemRow[]; total: number };
+  warehouseFindItem?: AbsItemRow | null;
   findItem?: AbsItemRow | null;
   findItemsByIds?: AbsItemRow[];
   accessibleIds?: number[];
@@ -68,9 +71,58 @@ function build(opts: BuildOpts = {}) {
     listMediaProgressForUser: vi.fn().mockResolvedValue([]),
     getMediaProgress: vi.fn().mockResolvedValue(null),
   } as unknown as AbsProgressService;
-  const libraryService = { findAccessibleLibraryIds: vi.fn().mockResolvedValue(opts.accessibleIds ?? [5]) } as unknown as LibraryService;
-  return { service: new AbsCatalogService(readRepo, progressService, libraryService), readRepo };
+  const libraryService = {
+    findAccessibleLibraryIds: vi.fn().mockResolvedValue(opts.accessibleIds ?? [5]),
+    verifyUserAccess: vi.fn().mockResolvedValue(undefined),
+  } as unknown as LibraryService;
+  const warehouseRepo = {
+    listItems: vi.fn().mockResolvedValue(opts.warehouseItems ?? { rows: [], total: 0 }),
+    findItem: vi.fn().mockResolvedValue(opts.warehouseFindItem ?? null),
+    // Mirrors the real contract: one entry per requested id, never a gap.
+    relationsFor: vi.fn((_user: unknown, ids: number[]) =>
+      Promise.resolve(new Map(ids.map((id) => [id, { authors: [], narrators: [], series: [], audioFiles: [] }]))),
+    ),
+  } as unknown as AbsWarehouseReadRepository;
+  return { service: new AbsCatalogService(readRepo, progressService, libraryService, warehouseRepo), readRepo, warehouseRepo, libraryService };
 }
+
+// The virtual source-backed libraries hold every item on a warehouse-backed deployment, so browse
+// has to leave the native tables entirely for a negative library id.
+describe('AbsCatalogService#listLibraryItems source routing', () => {
+  const query = { limit: 10, page: 0, sort: 'addedAt' as const, rawSort: undefined, desc: false, minified: false, filter: undefined };
+
+  it('reads a source-backed library from the warehouse, not from books', async () => {
+    const warehouseRow = item({ id: -1000007, libraryId: -2, title: 'Dune' });
+    const { service, readRepo, warehouseRepo } = build({ warehouseItems: { rows: [warehouseRow], total: 1 } });
+
+    const result = await service.listLibraryItems(makeAbsUser(), -2, query);
+
+    expect(result.total).toBe(1);
+    expect((result.results as Record<string, unknown>[])[0].id).toBe('li_-1000007');
+    expect(warehouseRepo.listItems).toHaveBeenCalled();
+    expect(readRepo.listItems).not.toHaveBeenCalled();
+  });
+
+  it('opens a warehouse item by its negative id without touching the native repository', async () => {
+    const warehouseRow = item({ id: -1000007, libraryId: -2, title: 'Dune' });
+    const { service, readRepo, warehouseRepo } = build({ warehouseFindItem: warehouseRow });
+
+    const result = await service.getLibraryItem(makeAbsUser(), -1000007);
+
+    expect(result.id).toBe('li_-1000007');
+    expect(warehouseRepo.findItem).toHaveBeenCalledWith(expect.anything(), -1000007);
+    expect(readRepo.findItem).not.toHaveBeenCalled();
+  });
+
+  it('still reads a native library from books', async () => {
+    const { service, readRepo, warehouseRepo } = build({ listItems: { rows: [item()], total: 1 } });
+
+    await service.listLibraryItems(makeAbsUser(), 5, query);
+
+    expect(readRepo.listItems).toHaveBeenCalled();
+    expect(warehouseRepo.listItems).not.toHaveBeenCalled();
+  });
+});
 
 describe('parseAbsSort', () => {
   it('maps ABS sort strings to repository columns, defaulting to addedAt', () => {

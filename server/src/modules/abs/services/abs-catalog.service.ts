@@ -7,6 +7,7 @@ import type { RequestUser } from '../../../common/types/request-user';
 import { LibraryService } from '../../library/library.service';
 import { AbsHttpException } from '../abs-errors';
 import { isSourceBackedLibraryId } from '../abs-library-source';
+import { AbsWarehouseReadRepository } from '../abs-warehouse-read.repository';
 import { decodeAbsFilter } from '../abs-filter.util';
 import { decodeAbsId, encodeAbsId } from '../abs-id.util';
 import { AbsReadRepository, type AbsAudioFileRow, type AbsItemRow, type AbsItemSortField } from '../abs-read.repository';
@@ -83,6 +84,7 @@ export class AbsCatalogService {
     private readonly readRepo: AbsReadRepository,
     private readonly progressService: AbsProgressService,
     private readonly libraryService: LibraryService,
+    private readonly warehouseRepo: AbsWarehouseReadRepository,
   ) {}
 
   private async assertLibraryAccess(user: RequestUser, libraryId: number): Promise<void> {
@@ -152,11 +154,7 @@ export class AbsCatalogService {
     return relations;
   }
 
-  /** `GET /api/libraries/:id/items` — the primary browse endpoint envelope. */
-  async listLibraryItems(user: RequestUser, libraryId: number, query: AbsItemQuery): Promise<Record<string, unknown>> {
-    await this.assertLibraryAccess(user, libraryId);
-
-    const offset = query.limit > 0 ? query.page * query.limit : 0;
+  private async listNativeItems(libraryId: number, query: AbsItemQuery, offset: number) {
     const { rows, total } = await this.readRepo.listItems({
       libraryId,
       limit: query.limit,
@@ -165,7 +163,29 @@ export class AbsCatalogService {
       desc: query.desc,
       extraWhere: this.buildFilterWhere(query.filter),
     });
-    const relations = await this.relationsFor(rows);
+    return { rows, total, relations: await this.relationsFor(rows) };
+  }
+
+  private async listWarehouseItems(user: RequestUser, libraryId: number, query: AbsItemQuery, offset: number) {
+    const { rows, total } = await this.warehouseRepo.listItems(user, libraryId, { limit: query.limit, offset });
+    const relations = await this.warehouseRepo.relationsFor(
+      user,
+      rows.map((row) => row.id),
+    );
+    return { rows, total, relations };
+  }
+
+  /** `GET /api/libraries/:id/items` — the primary browse endpoint envelope. */
+  async listLibraryItems(user: RequestUser, libraryId: number, query: AbsItemQuery): Promise<Record<string, unknown>> {
+    await this.assertLibraryAccess(user, libraryId);
+
+    const offset = query.limit > 0 ? query.page * query.limit : 0;
+
+    // Source-backed libraries are virtual and have no rows in `books`, so they are read from the
+    // warehouse catalogue instead. Both paths return the same row and relation shapes.
+    const { rows, total, relations } = isSourceBackedLibraryId(libraryId)
+      ? await this.listWarehouseItems(user, libraryId, query, offset)
+      : await this.listNativeItems(libraryId, query, offset);
 
     // ABS's getLibraryItems always serializes list rows via toOldJSONMinified() regardless of the
     // `minified` query param, and never attaches userMediaProgress to list rows — clients read
@@ -195,12 +215,14 @@ export class AbsCatalogService {
    * the userMediaProgress key even when the user has none (explicit null); without it, no key.
    */
   async getLibraryItem(user: RequestUser, bookId: number, minified = false, includeProgress = false): Promise<Record<string, unknown>> {
-    const item = await this.readRepo.findItem(bookId);
+    // A negative id is a warehouse catalogue item (encodeWarehouseBookId); native books are positive.
+    const fromWarehouse = bookId < 0;
+    const item = fromWarehouse ? await this.warehouseRepo.findItem(user, bookId) : await this.readRepo.findItem(bookId);
     if (!item || item.status === 'processing') throw AbsHttpException.notFound();
     await this.assertLibraryAccess(user, item.libraryId);
 
     const [relations, progress] = await Promise.all([
-      this.relationsFor([item]),
+      fromWarehouse ? this.warehouseRepo.relationsFor(user, [item.id]) : this.relationsFor([item]),
       this.progressService.getMediaProgress(user.id, bookId, item.libraryId),
     ]);
     return toAbsLibraryItem(item, relations.get(item.id)!, {

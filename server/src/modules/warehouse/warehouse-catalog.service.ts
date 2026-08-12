@@ -3,6 +3,7 @@ import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundE
 import type {
   AcquisitionLagPoint,
   BookCard,
+  SortSpec,
   BooksAddedDataPoint,
   BookQuery,
   ChordDiagramData,
@@ -222,6 +223,38 @@ export class WarehouseCatalogService {
     }
 
     return mapComicCatalogItem(item);
+  }
+
+  /**
+   * Raw catalog rows for protocol adapters (ABS, and any future OPDS-style consumer).
+   *
+   * The dashboard/browse helpers return UI-shaped `DashboardCatalogItem`s, which deliberately drop
+   * the numeric catalog item id and the storage columns. An adapter has to build its own stable
+   * ids and resolve bytes, so it needs the rows as stored. Kept here rather than letting adapters
+   * reach into WarehouseRepository, so database access stays inside the warehouse boundary.
+   */
+  async listCatalogRowsForAdapter(
+    user: RequestUser,
+    mediaType: WarehouseMediaType,
+    options: { limit: number; offset: number; sort?: SortSpec[]; q?: string; includeTotal?: boolean },
+  ): Promise<{ rows: UserOwnedCatalogItemRow[]; total: number | null }> {
+    if (!(await this.isCatalogEnabled())) {
+      return { rows: [], total: 0 };
+    }
+
+    const limit = Math.max(1, options.limit);
+    const page = limit > 0 ? Math.floor(options.offset / limit) : 0;
+    const result = await this.repository.queryUserCatalogItems(user.id, {
+      includeAllCatalogItems: true,
+      mediaType,
+      q: options.q,
+      sort: options.sort,
+      page,
+      limit,
+      includeTotal: options.includeTotal !== false,
+      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
+    });
+    return { rows: result.rows, total: result.total };
   }
 
   async findAccessibleCatalogItemById(
