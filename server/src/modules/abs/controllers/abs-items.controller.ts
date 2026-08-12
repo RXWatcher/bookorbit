@@ -17,6 +17,7 @@ import { AbsHttpException } from '../abs-errors';
 import { decodeAbsId } from '../abs-id.util';
 import { AbsAuthGuard } from '../auth/abs-auth.guard';
 import { AbsAllowQueryToken } from '../auth/abs-query-token.decorator';
+import { sendBinaryResponse } from '../../warehouse/warehouse-binary-response';
 import { AbsCatalogService } from '../services/abs-catalog.service';
 import { AbsPlaybackService, type StartSessionBody } from '../services/abs-playback.service';
 import { AbsStreamService } from '../services/abs-stream.service';
@@ -102,6 +103,8 @@ export class AbsItemsController {
     const fileId = Number.parseInt(fileid, 10);
     if (bookId === null || !Number.isInteger(fileId)) throw AbsHttpException.notFound();
 
+    if (await this.sendWarehouseBinary(user, bookId, req, reply, 'stream')) return;
+
     const file = await this.catalogService.getItemFile(user, bookId, fileId);
     await this.streamService.streamFile(req, reply, file.absolutePath, file.format);
   }
@@ -125,6 +128,8 @@ export class AbsItemsController {
     const fileId = Number.parseInt(fileid, 10);
     if (bookId === null || !Number.isInteger(fileId)) throw AbsHttpException.notFound();
 
+    if (await this.sendWarehouseBinary(user, bookId, req, reply, 'download')) return;
+
     const file = await this.catalogService.getDownloadFile(user, bookId, fileId);
     reply.header('Content-Disposition', attachmentDisposition(basename(file.absolutePath)));
     await this.streamService.streamFile(req, reply, file.absolutePath, file.format);
@@ -134,9 +139,17 @@ export class AbsItemsController {
   @Get(':id/download')
   @UseGuards(AbsAuthGuard)
   @AbsAllowQueryToken()
-  async downloadItem(@CurrentUser() user: RequestUser, @Param('id') id: string, @Res() reply: FastifyReply): Promise<void> {
+  async downloadItem(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
     const bookId = decodeAbsId('libraryItem', id);
     if (bookId === null) throw AbsHttpException.notFound();
+
+    // A warehouse item is a single file, so it is sent directly rather than zipped.
+    if (await this.sendWarehouseBinary(user, bookId, req, reply, 'download')) return;
 
     const { title, files } = await this.catalogService.getDownloadBundle(user, bookId);
 
@@ -174,13 +187,53 @@ export class AbsItemsController {
     }
   }
 
-  /** Unauthenticated cover image (token optional). Serves the stored cover with ETag caching. */
+  /**
+   * Serves a warehouse-backed item's bytes, returning true when it did so.
+   *
+   * Warehouse items carry negative ids and have no row in `book_files`, so the native path cannot
+   * resolve them. Range headers are forwarded so seeking works for both the on-disk and the
+   * upstream-proxied halves of the catalogue.
+   */
+  private async sendWarehouseBinary(
+    user: RequestUser,
+    bookId: number,
+    req: FastifyRequest,
+    reply: FastifyReply,
+    disposition: 'stream' | 'download',
+  ): Promise<boolean> {
+    if (bookId >= 0) return false;
+
+    const range = typeof req.headers.range === 'string' ? req.headers.range : undefined;
+    const resolved = await this.catalogService.warehouseBinary(user, bookId, range, disposition);
+    if (!resolved) throw AbsHttpException.notFound();
+
+    sendBinaryResponse(reply, resolved.binary, resolved.kind, disposition === 'download' ? resolved.fileName : undefined);
+    return true;
+  }
+
+  /**
+   * Cover image. Authenticated, accepting `?token=` because `<img>` tags cannot set a header, which
+   * is the case the ABS guide introduces query-param auth for. Warehouse covers need a user to
+   * resolve the catalogue row under that user's content filters, so this route can no longer be
+   * anonymous; native covers keep their ETag caching path unchanged.
+   */
   @Get(':id/cover')
-  async cover(@Param('id') id: string, @Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
+  @UseGuards(AbsAuthGuard)
+  @AbsAllowQueryToken()
+  async cover(@CurrentUser() user: RequestUser, @Param('id') id: string, @Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
     const bookId = decodeAbsId('libraryItem', id);
     if (bookId === null) throw AbsHttpException.notFound();
 
     reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    // Warehouse covers come from the catalogue's own cover cache, not the on-disk cover dir.
+    if (bookId < 0) {
+      const cover = await this.catalogService.warehouseCover(user, bookId);
+      if (!cover) throw AbsHttpException.notFound();
+      reply.header('Cache-Control', 'no-cache');
+      sendBinaryResponse(reply, cover.binary, cover.kind);
+      return;
+    }
     const dir = bookCoverDirPath(this.appDataPath, bookId);
     try {
       const files = await readdir(dir);

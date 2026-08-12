@@ -222,7 +222,7 @@ export class AbsCatalogService {
     await this.assertLibraryAccess(user, item.libraryId);
 
     const [relations, progress] = await Promise.all([
-      fromWarehouse ? this.warehouseRepo.relationsFor(user, [item.id]) : this.relationsFor([item]),
+      this.relationsForMixed(user, [item]),
       this.progressService.getMediaProgress(user.id, bookId, item.libraryId),
     ]);
     return toAbsLibraryItem(item, relations.get(item.id)!, {
@@ -233,10 +233,12 @@ export class AbsCatalogService {
 
   /** `POST /api/items/batch/get` — fetch many items by id, access-filtered (no progress, as ABS). */
   async getLibraryItemsBatch(user: RequestUser, bookIds: number[]): Promise<Record<string, unknown>[]> {
-    const items = await this.readRepo.findItemsByIds(bookIds);
+    const items = await this.findItemsByIdsMixed(user, bookIds);
     const accessible = user.isSuperuser ? null : new Set(await this.libraryService.findAccessibleLibraryIds(user));
-    const visible = items.filter((i) => i.status !== 'processing' && (!accessible || accessible.has(i.libraryId)));
-    const relations = await this.relationsFor(visible);
+    const visible = items.filter(
+      (i) => i.status !== 'processing' && (!accessible || isSourceBackedLibraryId(i.libraryId) || accessible.has(i.libraryId)),
+    );
+    const relations = await this.relationsForMixed(user, visible);
     return visible.map((row) => toAbsLibraryItem(row, relations.get(row.id)!, {}));
   }
 
@@ -245,10 +247,30 @@ export class AbsCatalogService {
    * (browse, series books, search, shelves) never attach userMediaProgress — only the single-item
    * detail endpoint does.
    */
-  private async assembleItems(rows: AbsItemRow[], minified: boolean): Promise<Record<string, unknown>[]> {
+  /**
+   * Turns rows into ABS items, resolving relations from whichever source each row came from.
+   * A page can legitimately mix sources, so rows are split by id sign and the two relation maps
+   * merged rather than assuming one backend.
+   */
+  private async assembleItems(user: RequestUser, rows: AbsItemRow[], minified: boolean): Promise<Record<string, unknown>[]> {
     if (rows.length === 0) return [];
-    const relations = await this.relationsFor(rows);
+    const relations = await this.relationsForMixed(user, rows);
     return rows.map((row) => toAbsLibraryItem(row, relations.get(row.id)!, { minified }));
+  }
+
+  private async relationsForMixed(user: RequestUser, rows: AbsItemRow[]): Promise<Map<number, AbsItemRelations>> {
+    const warehouseRows = rows.filter((row) => row.id < 0);
+    const nativeRows = rows.filter((row) => row.id >= 0);
+    const [nativeRelations, warehouseRelations] = await Promise.all([
+      nativeRows.length ? this.relationsFor(nativeRows) : new Map<number, AbsItemRelations>(),
+      warehouseRows.length
+        ? this.warehouseRepo.relationsFor(
+            user,
+            warehouseRows.map((row) => row.id),
+          )
+        : new Map<number, AbsItemRelations>(),
+    ]);
+    return new Map<number, AbsItemRelations>([...nativeRelations, ...warehouseRelations]);
   }
 
   /** `GET /api/libraries/:id/search` — title/author search; client reads the `book` array. */
@@ -257,8 +279,10 @@ export class AbsCatalogService {
     const term = query.trim();
     if (!term) return { book: [], tags: [], authors: [], series: [] };
 
-    const rows = await this.readRepo.searchItems(libraryId, term, limit);
-    const items = await this.assembleItems(rows, true);
+    const rows = isSourceBackedLibraryId(libraryId)
+      ? (await this.warehouseRepo.listItems(user, libraryId, { limit: limit > 0 ? limit : 12, offset: 0, q: term })).rows
+      : await this.readRepo.searchItems(libraryId, term, limit);
+    const items = await this.assembleItems(user, rows, true);
     return {
       book: items.map((libraryItem, i) => ({ libraryItem, matchKey: 'title', matchText: rows[i].title ?? '' })),
       tags: [],
@@ -279,7 +303,7 @@ export class AbsCatalogService {
     const rows = await this.readRepo.findItemsByIds(bookIds);
     // ABS serializes series books via toOldJSONMinified() (seriesFilters.getFilteredSeries),
     // regardless of the request's `minified` flag — match it so Prologue's minified decode succeeds.
-    const itemsByBook = new Map((await this.assembleItems(rows, true)).map((it, i) => [rows[i].id, it]));
+    const itemsByBook = new Map((await this.assembleItems(user, rows, true)).map((it, i) => [rows[i].id, it]));
 
     // Element shape is EXACTLY ABS Series.toOldJSON + books (seriesFilters.getFilteredSeries):
     // no libraryItemIds, and totalDuration only exists when sorting by it — extra keys break strict
@@ -324,7 +348,7 @@ export class AbsCatalogService {
     const rows = await this.readRepo.findItemsByIds(bookIds);
     // ABS serializes collection books via toOldJSONExpanded() (Collection.toOldJSONExpanded),
     // regardless of the request's `minified` flag — match it for a consistent strict-decode shape.
-    const itemsByBook = new Map((await this.assembleItems(rows, false)).map((it, i) => [rows[i].id, it]));
+    const itemsByBook = new Map((await this.assembleItems(user, rows, false)).map((it, i) => [rows[i].id, it]));
 
     const results = page.map((c) => ({
       id: encodeAbsId('collection', c.id),
@@ -420,8 +444,10 @@ export class AbsCatalogService {
     await this.assertLibraryAccess(user, libraryId);
 
     const inProgress = await this.itemsInProgressForLibrary(user, libraryId);
-    const { rows: recentRows } = await this.readRepo.listItems({ libraryId, limit: 10, offset: 0, sort: 'addedAt', desc: true });
-    const recent = await this.assembleItems(recentRows, true);
+    const { rows: recentRows } = isSourceBackedLibraryId(libraryId)
+      ? await this.warehouseRepo.listItems(user, libraryId, { limit: 10, offset: 0 })
+      : await this.readRepo.listItems({ libraryId, limit: 10, offset: 0, sort: 'addedAt', desc: true });
+    const recent = await this.assembleItems(user, recentRows, true);
 
     const shelves: Record<string, unknown>[] = [];
     if (inProgress.length > 0) {
@@ -448,17 +474,34 @@ export class AbsCatalogService {
     const bookIds = await this.progressService.listInProgressBookIds(user.id, { excludeHidden: true });
     const rows = (await this.readRepo.findItemsByIds(bookIds)).filter((r) => r.libraryId === libraryId);
     const ordered = orderByIds(rows, bookIds);
-    return this.assembleItems(ordered, true);
+    return this.assembleItems(user, ordered, true);
+  }
+
+  /** Resolves ids from whichever source each belongs to; a set can legitimately mix the two. */
+  private async findItemsByIdsMixed(user: RequestUser, bookIds: number[]): Promise<AbsItemRow[]> {
+    const warehouseIds = bookIds.filter((id) => id < 0);
+    const nativeIds = bookIds.filter((id) => id >= 0);
+    const [native, warehouse] = await Promise.all([
+      nativeIds.length ? this.readRepo.findItemsByIds(nativeIds) : Promise.resolve([]),
+      warehouseIds.length ? this.warehouseRepo.findItemsByIds(user, warehouseIds) : Promise.resolve([]),
+    ]);
+    return [...native, ...warehouse];
   }
 
   private async itemsForBookIds(user: RequestUser, bookIds: number[], minified: boolean): Promise<Record<string, unknown>[]> {
-    const items = await this.readRepo.findItemsByIds(bookIds);
+    const items = await this.findItemsByIdsMixed(user, bookIds);
     const accessible = user.isSuperuser ? null : new Set(await this.libraryService.findAccessibleLibraryIds(user));
     const visible = orderByIds(
-      items.filter((i) => i.status !== 'processing' && (!accessible || accessible.has(i.libraryId))),
+      items.filter(
+        (i) =>
+          i.status !== 'processing' &&
+          // Virtual libraries never appear in findAccessibleLibraryIds; the warehouse queries
+          // behind them are already user-scoped, so they are visible on their own terms.
+          (!accessible || isSourceBackedLibraryId(i.libraryId) || accessible.has(i.libraryId)),
+      ),
       bookIds,
     );
-    return this.assembleItems(visible, minified);
+    return this.assembleItems(user, visible, minified);
   }
 
   private async progressMap(userId: number, rows: AbsItemRow[]): Promise<Map<number, Record<string, unknown>>> {
@@ -473,6 +516,21 @@ export class AbsCatalogService {
       }
     }
     return byBook;
+  }
+
+  /**
+   * Bytes for a warehouse-backed item, or null when the id is not a warehouse item. Controllers
+   * call this rather than the repository directly, keeping data access inside the service layer.
+   */
+  async warehouseBinary(user: RequestUser, bookId: number, range: string | undefined, disposition: 'stream' | 'download') {
+    if (bookId >= 0) return null;
+    return this.warehouseRepo.binaryFor(user, bookId, range, disposition);
+  }
+
+  /** Cover bytes for a warehouse-backed item, or null when the id is not a warehouse item. */
+  async warehouseCover(user: RequestUser, bookId: number) {
+    if (bookId >= 0) return null;
+    return this.warehouseRepo.coverFor(user, bookId);
   }
 
   /** Audio files for playback (used by the playback service). */

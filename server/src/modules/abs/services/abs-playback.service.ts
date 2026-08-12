@@ -13,6 +13,7 @@ import { AbsReadRepository, type AbsAudioFileRow, type AbsItemRow } from '../abs
 import { AbsSocketGateway } from '../abs-socket.gateway';
 import { buildDirectPlayTracks, buildTranscodeTrack } from '../mappers/abs-item.mapper';
 import { absDateParts, buildAbsDeviceInfo, toAbsSessionJson } from '../mappers/abs-session.mapper';
+import { AbsWarehouseReadRepository } from '../abs-warehouse-read.repository';
 import { AbsProgressService } from './abs-progress.service';
 import { AbsTranscodeService } from './abs-transcode.service';
 
@@ -112,17 +113,22 @@ export class AbsPlaybackService {
     private readonly libraryService: LibraryService,
     private readonly transcodeService: AbsTranscodeService,
     private readonly sessionRepo: AbsPlaybackSessionRepository,
+    private readonly warehouseRepo: AbsWarehouseReadRepository,
   ) {}
 
   async startSession(user: RequestUser, bookId: number, body: StartSessionBody, ipAddress?: string): Promise<Record<string, unknown>> {
-    const item = await this.readRepo.findItem(bookId);
+    // Negative ids are warehouse catalogue items; they have no `books` or `book_files` rows.
+    const fromWarehouse = bookId < 0;
+    const item = fromWarehouse ? await this.warehouseRepo.findItem(user, bookId) : await this.readRepo.findItem(bookId);
     if (!item || item.status === 'processing') throw AbsHttpException.notFound();
-    if (!user.isSuperuser) {
+    if (!user.isSuperuser && !fromWarehouse) {
       const accessible = await this.libraryService.findAccessibleLibraryIds(user);
       if (!accessible.includes(item.libraryId)) throw AbsHttpException.notFound();
     }
 
-    const audioFiles = await this.readRepo.audioFilesByBookId(bookId);
+    const audioFiles = fromWarehouse
+      ? ((await this.warehouseRepo.relationsFor(user, [bookId])).get(bookId)?.audioFiles ?? [])
+      : await this.readRepo.audioFilesByBookId(bookId);
     if (audioFiles.length === 0) throw AbsHttpException.notFound();
 
     const { mediaMetadata, authorName } = await this.mediaSnapshot(item);

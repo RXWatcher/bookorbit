@@ -3,6 +3,7 @@ import type { AbsPlaybackSessionRepository } from '../abs-playback-session.repos
 import type { AbsAudioFileRow, AbsItemRow, AbsReadRepository } from '../abs-read.repository';
 import type { AbsSocketGateway } from '../abs-socket.gateway';
 import { makeAbsUser, thrownStatus } from '../__testing__/abs-test-helpers';
+import type { AbsWarehouseReadRepository } from '../abs-warehouse-read.repository';
 import { AbsPlaybackService } from './abs-playback.service';
 import type { AbsProgressService } from './abs-progress.service';
 import type { AbsTranscodeService } from './abs-transcode.service';
@@ -73,7 +74,11 @@ function build(opts: BuildOpts = {}) {
     updateFromLocal: vi.fn().mockResolvedValue(undefined),
     findById: vi.fn().mockResolvedValue(opts.existingRow ?? null),
   } as unknown as AbsPlaybackSessionRepository;
-  const service = new AbsPlaybackService(readRepo, progressService, socketGateway, libraryService, transcodeService, sessionRepo);
+  const warehouseRepo = {
+    findItem: vi.fn().mockResolvedValue(null),
+    relationsFor: vi.fn().mockResolvedValue(new Map()),
+  } as unknown as AbsWarehouseReadRepository;
+  const service = new AbsPlaybackService(readRepo, progressService, socketGateway, libraryService, transcodeService, sessionRepo, warehouseRepo);
   return { service, readRepo, progressService, socketGateway, transcodeService, sessionRepo };
 }
 

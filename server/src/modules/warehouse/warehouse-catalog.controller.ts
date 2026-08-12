@@ -1,6 +1,4 @@
-import { Buffer } from 'node:buffer';
-
-import { BadGatewayException, Body, Controller, Get, Headers, NotFoundException, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, NotFoundException, Param, Post, Query, Res } from '@nestjs/common';
 import type {
   WarehouseAudiobookCatalogQuery,
   WarehouseAudiobookCatalogSort,
@@ -19,10 +17,10 @@ import type { FastifyReply } from 'fastify';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../common/types/request-user';
 import { ListWarehouseRequestsDto, SubmitWarehouseComicRequestDto } from './dto/warehouse-request.dto';
+import { sendBinaryResponse } from './warehouse-binary-response';
 import { WarehouseCatalogService } from './warehouse-catalog.service';
-import type { WarehouseBinaryResponse } from './warehouse-client.service';
 import { WarehouseRequestService } from './warehouse-request.service';
-import { LIBRARY_ITEM_NOT_AVAILABLE_MESSAGE, LIBRARY_MEDIA_UNAVAILABLE_MESSAGE } from './warehouse-user-facing-messages';
+import { LIBRARY_ITEM_NOT_AVAILABLE_MESSAGE } from './warehouse-user-facing-messages';
 
 type CatalogQueryValue = string | number | boolean | undefined;
 type RawEbookCatalogQuery = Partial<Record<keyof WarehouseEbookCatalogQuery, CatalogQueryValue>>;
@@ -30,7 +28,6 @@ type RawComicCatalogQuery = Partial<Record<keyof WarehouseComicCatalogQuery, Cat
 type RawComicSeriesQuery = Partial<Record<keyof WarehouseComicSeriesQuery, CatalogQueryValue>>;
 type RawAudiobookCatalogQuery = Partial<Record<keyof WarehouseAudiobookCatalogQuery, CatalogQueryValue>>;
 type RawComicRequestQuery = Partial<Record<keyof WarehouseRequestListQuery, CatalogQueryValue>>;
-type BinaryContentKind = 'ebook-cover' | 'audiobook-cover' | 'comic-cover' | 'comic-page' | 'audio' | 'ebook' | 'comic';
 type PublicComicCatalogItem = Omit<WarehouseComicCatalogItem, 'id' | 'source'> & { id: string };
 type PublicComicCatalogPage = Omit<WarehouseComicCatalogPage, 'items'> & { items: PublicComicCatalogItem[] };
 
@@ -39,30 +36,6 @@ const VALID_AUDIOBOOK_SORTS: WarehouseAudiobookCatalogSort[] = ['title', 'author
 const VALID_ORDERS: WarehouseCatalogOrder[] = ['asc', 'desc'];
 const VALID_REQUEST_STATUSES: WarehouseRequestStatus[] = ['pending', 'processing', 'completed', 'failed', 'cancelled', 'unknown'];
 const VALID_EBOOK_COVER_SIZES = new Set(['thumbnail', 'medium', 'original']);
-const DEFAULT_BINARY_CONTENT_TYPE = 'application/octet-stream';
-const EBOOK_MEDIA_UNAVAILABLE_MESSAGE = LIBRARY_MEDIA_UNAVAILABLE_MESSAGE;
-const AUDIOBOOK_MEDIA_UNAVAILABLE_MESSAGE = LIBRARY_MEDIA_UNAVAILABLE_MESSAGE;
-const EBOOK_DOWNLOAD_CONTENT_TYPES = new Set([
-  'application/epub+zip',
-  'application/pdf',
-  'application/octet-stream',
-  'application/zip',
-  'application/x-zip-compressed',
-  'application/x-mobipocket-ebook',
-  'application/vnd.amazon.ebook',
-  'application/x-cbz',
-  'application/x-cbr',
-]);
-const DOWNLOAD_CONTENT_TYPES = new Set(['application/octet-stream', 'application/zip', 'application/x-zip-compressed']);
-const COMIC_DOWNLOAD_CONTENT_TYPES = new Set([
-  'application/octet-stream',
-  'application/zip',
-  'application/x-zip-compressed',
-  'application/vnd.comicbook+zip',
-  'application/x-cbz',
-  'application/vnd.comicbook-rar',
-  'application/x-cbr',
-]);
 
 @Controller('catalog')
 export class WarehouseCatalogController {
@@ -628,161 +601,4 @@ function decodeDimensionId(value: string): string {
   } catch {
     return value.trim();
   }
-}
-
-function sendBinaryResponse(reply: FastifyReply, binary: WarehouseBinaryResponse, expectedContent: BinaryContentKind, downloadFallbackName?: string) {
-  const contentType = safeContentType(binary.contentType, expectedContent);
-  const contentLength = binary.contentLength ?? (Buffer.isBuffer(binary.body) ? binary.body.length : null);
-
-  if (binary.status === 206) {
-    if (!isPartialContentRange(binary.contentRange)) {
-      throw mediaUnavailableException(expectedContent);
-    }
-
-    reply.status(206);
-  }
-
-  if (binary.status === 416) {
-    if (!isUnsatisfiedContentRange(binary.contentRange)) {
-      throw mediaUnavailableException(expectedContent);
-    }
-
-    reply.status(416);
-  }
-
-  if (contentLength !== null) {
-    reply.header('Content-Length', String(contentLength));
-  }
-
-  if ((binary.status === 206 || binary.status === 416) && binary.contentRange) {
-    reply.header('Content-Range', binary.contentRange);
-  }
-
-  if (binary.acceptRanges) {
-    reply.header('Accept-Ranges', binary.acceptRanges);
-  }
-
-  if (downloadFallbackName) {
-    reply.header('Content-Disposition', safeContentDisposition(downloadFallbackName));
-  }
-
-  reply.type(contentType);
-  return reply.send(binary.body);
-}
-
-function safeContentType(contentType: string, expectedContent: BinaryContentKind): string {
-  const normalized = contentType.trim() || DEFAULT_BINARY_CONTENT_TYPE;
-  const mediaType = normalized.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-
-  if (
-    (expectedContent === 'ebook-cover' || expectedContent === 'audiobook-cover' || expectedContent === 'comic-cover') &&
-    mediaType.startsWith('image/')
-  ) {
-    return mediaType;
-  }
-
-  if (expectedContent === 'comic-page' && mediaType.startsWith('image/')) {
-    return mediaType;
-  }
-
-  if (expectedContent === 'ebook' && EBOOK_DOWNLOAD_CONTENT_TYPES.has(mediaType)) {
-    return mediaType;
-  }
-
-  if (expectedContent === 'comic' && COMIC_DOWNLOAD_CONTENT_TYPES.has(mediaType)) {
-    return mediaType;
-  }
-
-  if (expectedContent === 'audio' && (mediaType.startsWith('audio/') || DOWNLOAD_CONTENT_TYPES.has(mediaType))) {
-    return mediaType;
-  }
-
-  throw mediaUnavailableException(expectedContent);
-}
-
-function mediaUnavailableException(expectedContent: BinaryContentKind): BadGatewayException {
-  return new BadGatewayException(
-    expectedContent === 'ebook' || expectedContent === 'ebook-cover'
-      ? EBOOK_MEDIA_UNAVAILABLE_MESSAGE
-      : expectedContent === 'comic' || expectedContent === 'comic-page'
-        ? LIBRARY_MEDIA_UNAVAILABLE_MESSAGE
-        : AUDIOBOOK_MEDIA_UNAVAILABLE_MESSAGE,
-  );
-}
-
-function isPartialContentRange(value: string | null | undefined): value is string {
-  const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i.exec(value ?? '');
-  if (!match) {
-    return false;
-  }
-
-  const start = BigInt(match[1] as string);
-  const end = BigInt(match[2] as string);
-  if (start > end) {
-    return false;
-  }
-
-  const total = match[3] as string;
-  return total === '*' || end < BigInt(total);
-}
-
-function isUnsatisfiedContentRange(value: string | null | undefined): value is string {
-  return /^bytes \*\/\d+$/i.test(value ?? '');
-}
-
-function safeContentDisposition(fallback: string): string {
-  const displayName = safeDisplayFileName(fallback);
-  const asciiName = asciiAttachmentFileName(displayName, fallback);
-
-  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeRfc5987Value(displayName)}`;
-}
-
-function safeDisplayFileName(fileName: string): string {
-  const safe = Array.from(fileName, safeDisplayFileNameChar)
-    .join('')
-    .replace(/_+/g, '_')
-    .replace(/\.+/g, '.')
-    .replace(/^[.\s_]+/, '')
-    .trim();
-
-  return safe || 'download.bin';
-}
-
-function safeDisplayFileNameChar(char: string): string {
-  const code = char.charCodeAt(0);
-  if (code < 32 || code === 127) {
-    return '_';
-  }
-
-  if (char === '"') {
-    return '';
-  }
-
-  if (char === '\\' || char === '/' || ':*?<>|'.includes(char)) {
-    return '_';
-  }
-
-  return char;
-}
-
-function asciiAttachmentFileName(fileName: string, fallback: string): string {
-  const safe = Array.from(fileName.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''), asciiAttachmentFileNameChar)
-    .join('')
-    .replace(/_+/g, '_')
-    .trim();
-
-  return safe || fallback;
-}
-
-function asciiAttachmentFileNameChar(char: string): string {
-  const code = char.charCodeAt(0);
-  if (code < 32 || code >= 127 || char === '"' || char === '\\') {
-    return '_';
-  }
-
-  return char;
-}
-
-function encodeRfc5987Value(value: string): string {
-  return encodeURIComponent(value).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }

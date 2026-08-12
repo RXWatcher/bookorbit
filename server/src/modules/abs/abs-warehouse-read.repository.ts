@@ -75,6 +75,49 @@ export class AbsWarehouseReadRepository {
     return row ? toAbsItemRow(row as WarehouseRowLike, libraryIdForMediaType(decoded.mediaType)) : null;
   }
 
+  /**
+   * Bytes for a warehouse item, with Range preserved. `streamAudiobook` already prefers a local
+   * file when the row has a `local_path` and falls back to the upstream proxy otherwise, so both
+   * the on-disk and remote halves of the catalogue are covered by the one call.
+   */
+  async binaryFor(user: RequestUser, bookId: number, range: string | undefined, disposition: 'stream' | 'download') {
+    const decoded = decodeWarehouseBookId(bookId);
+    if (!this.catalog || !decoded) return null;
+
+    const row = (await this.catalog.findAccessibleCatalogItemById(user, decoded.mediaType, decoded.catalogItemId)) as
+      (WarehouseRowLike & { remoteId: string }) | null;
+    if (!row) return null;
+
+    if (decoded.mediaType === 'audiobook') {
+      const binary =
+        disposition === 'download'
+          ? await this.catalog.downloadAudiobook(user, row.remoteId, range)
+          : await this.catalog.streamAudiobook(user, row.remoteId, range);
+      return { binary, kind: 'audio' as const, fileName: `${row.title ?? 'audiobook'}.${row.format ?? 'm4b'}` };
+    }
+    if (decoded.mediaType === 'comic') {
+      return { binary: await this.catalog.downloadComic(user, row.remoteId), kind: 'comic' as const, fileName: `${row.title ?? 'comic'}.cbz` };
+    }
+    return { binary: await this.catalog.downloadEbook(user, row.remoteId), kind: 'ebook' as const, fileName: `${row.title ?? 'book'}.epub` };
+  }
+
+  /** Cover bytes for a warehouse item, served through the catalogue's existing cover cache. */
+  async coverFor(user: RequestUser, bookId: number) {
+    const decoded = decodeWarehouseBookId(bookId);
+    if (!this.catalog || !decoded) return null;
+
+    const row = (await this.catalog.findAccessibleCatalogItemById(user, decoded.mediaType, decoded.catalogItemId)) as { remoteId: string } | null;
+    if (!row) return null;
+
+    if (decoded.mediaType === 'audiobook') {
+      return { binary: await this.catalog.getAudiobookCover(user, row.remoteId), kind: 'audiobook-cover' as const };
+    }
+    if (decoded.mediaType === 'comic') {
+      return { binary: await this.catalog.getComicCover(user, row.remoteId, 'medium'), kind: 'comic-cover' as const };
+    }
+    return { binary: await this.catalog.getEbookCover(user, row.remoteId, 'medium'), kind: 'ebook-cover' as const };
+  }
+
   async findItemsByIds(user: RequestUser, bookIds: number[]): Promise<AbsItemRow[]> {
     const rows = await Promise.all(bookIds.map((id) => this.findItem(user, id)));
     return rows.filter((row): row is AbsItemRow => row !== null);
